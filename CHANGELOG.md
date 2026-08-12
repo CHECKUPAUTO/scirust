@@ -1,4930 +1,5047 @@
 # Changelog
 
-Le format suit [Keep a Changelog](https://keepachangelog.com/) ;
-versions sémantiques à partir de la prochaine release taguée.
+The format follows [Keep a Changelog](https://keepachangelog.com/);
+semantic versioning starts from the next tagged release.
 
-## [Non publié]
+## [Unreleased]
 
-### Ajouté — Extension des domaines adjacents d'ECC dans SciRust
-- **Bilinear Pairings (Couplages Bilinéaires)** : implémentation de l'évaluation de ligne, de l'algorithme de Miller, et des couplages de Weil et Tate réduits sans allocation dynamique (hot-paths zero-allocation).
-- **Identity-Based Encryption & Commitments** : primitives IBE Boneh-Franklin et accumulateurs/engagements bilinéaires.
-- **Post-Quantum Isogenies (Isogénies)** : implémentation des formules de Vélu pour les courbes et points de sous-groupes d'ordre impair, et exploration de graphes d'isogénies par BFS.
-- **Cayley-Dickson Hypercomplex Curve Algebras** : types d'Octonions (`Oct8Fp`) et de Sédénions (`Sedenion16Fp`) sur $F_p$ avec multiplication non commutative/non associative et cryptage géométrique.
-- **Simulateur Hybride & Traçabilité CCOS** : modélisation de la résonance du filtre de Shor sur `DenseStateVector` et journalisation immuable dans `CcosAuditChain` par empreintes SHA-256.
+### Added — Extension of adjacent ECC domains in SciRust
+- **Bilinear Pairings**: implementation of line evaluation, the Miller algorithm, and reduced Weil and Tate pairings with zero dynamic allocation (zero-allocation hot paths).
+- **Identity-Based Encryption & Commitments**: Boneh-Franklin IBE primitives and bilinear accumulators/commitments.
+- **Post-Quantum Isogenies**: implementation of Vélu's formulas for curves and points of odd-order subgroups, and isogeny-graph exploration by BFS.
+- **Cayley-Dickson Hypercomplex Curve Algebras**: Octonion (`Oct8Fp`) and Sedenion (`Sedenion16Fp`) types over $F_p$ with non-commutative/non-associative multiplication and geometric encryption.
+- **Hybrid Simulator & CCOS Traceability**: modeling of the Shor filter resonance on `DenseStateVector` and immutable logging in `CcosAuditChain` via SHA-256 fingerprints.
 
-### Clôturé — chantier paper Correctness '26 : archivage (non soumis en 2026)
-- **Décision utilisateur (2026-07-11)** : pas de soumission cette année. Le
-  draft `paper/correctness26/` est archivé en l'état (bandeau de statut +
-  note de gel des chiffres aux commits `0c2f1bf`/`014795f` du 2026-07-10),
-  `paper/PAPER_PLAN.md` gagne un §7 « Statut final — ARCHIVÉ » listant ce
-  qui reste valable (draft, related work, toutes les claims `[CI]`
-  re-testées à chaque commit) et ce qui est à rafraîchir avant une
-  soumission future (re-mesure O1, bibliographie, TODO de soumission,
-  section sur la voie f32 portable ajoutée depuis).
-- **Évidence brute archivée dans `docs/evidence/`** : les 22 rapports de
-  minage « dead guards » par dépôt (scellés `Report-SHA256`, jusqu'ici
-  uniquement dans le `/tmp` éphémère de la session) + `SHAS.txt` des
-  commits clonés ; et les sorties du banc O1 — deux exécutions x86-64 et
-  les deux protocoles Jetson AGX Thor complets (retranscrits des sorties
-  de terminal de l'opérateur, bundles originaux conservés sur le Jetson),
-  chaque fichier avec sa note de provenance. Les 4 empreintes
-  cross-platform (`0x60daf62c…`, `0x9bf7c3f3…`, `0xd5b8e15f…`,
-  `0x7e99a9d0…`) y sont re-vérifiables.
+### Closed — Correctness '26 paper effort: archiving (not submitted in 2026)
+- **User decision (2026-07-11)**: no submission this year. The
+  `paper/correctness26/` draft is archived as-is (status banner +
+  note freezing the figures at commits `0c2f1bf`/`014795f` dated 2026-07-10),
+  `paper/PAPER_PLAN.md` gains a §7 "Final status — ARCHIVED" listing what
+  remains valid (draft, related work, all `[CI]` claims re-tested at every
+  commit) and what needs refreshing before a future submission (re-measure
+  O1, bibliography, submission TODOs, section on the portable f32 path
+  added since).
+- **Raw evidence archived in `docs/evidence/`**: the 22 "dead guards"
+  mining reports per repository (sealed `Report-SHA256`, previously only in
+  the session's ephemeral `/tmp`) + `SHAS.txt` of the cloned commits; and
+  the O1 bench outputs — two x86-64 runs and the two complete Jetson AGX
+  Thor protocols (transcribed from the operator's terminal outputs, original
+  bundles kept on the Jetson), each file with its provenance note. The 4
+  cross-platform fingerprints (`0x60daf62c…`, `0x9bf7c3f3…`, `0xd5b8e15f…`,
+  `0x7e99a9d0…`) are re-verifiable there.
 
-### Ajouté — validation sur données réelles n°3 : parole bruitée (VoiceBank+DEMAND)
-Troisième domaine réel (§9.4 du rapport TSHF) — **cartographie honnête d'une limite**
-du toolkit généraliste plutôt qu'un succès.
-- **Fixture réelle attribuée** `scirust-signal/tests/data/voicebank_demand.csv`
-  (CC-BY-4.0) : un énoncé VoiceBank (`p232_022`, 16 kHz) + sa version bruitée par du
-  bruit **DEMAND réel enregistré** (SNR global ~7 dB), décodé hors-ligne du parquet
-  Hugging Face. Provenance + licence en tête de fichier.
-- **Test** `tests/real_data_audio.rs` + exemple `denoise_real_speech` : sur la
-  métrique SNR de forme d'onde, le toolkit généraliste **n'améliore pas** la parole —
-  `denoise_auto` la classe `Colored` et sur-traite (ondelette par niveau agressive →
-  **−8,9 dB**, la parole non stationnaire est lissée). Constat exploitable épinglé :
-  **pour la parole, appeler `stft_wiener_auto` directement** (suivi de plancher de
-  bruit ; bien moins destructeur, −0,04 dB) plutôt que le routage auto. Note : le SNR
-  de forme d'onde est une métrique sévère pour la parole (les métriques du domaine
-  sont SNR segmental / PESQ / STOI) — « ≈ neutre » est un plancher, pas le tableau
-  complet.
+### Added — real-data validation #3: noisy speech (VoiceBank+DEMAND)
+Third real domain (§9.4 of the TSHF report) — **an honest mapping of a limit**
+of the generalist toolkit rather than a success.
+- **Attributed real fixture** `scirust-signal/tests/data/voicebank_demand.csv`
+  (CC-BY-4.0): a VoiceBank utterance (`p232_022`, 16 kHz) + its version
+  corrupted by **real recorded DEMAND noise** (global SNR ~7 dB), decoded
+  offline from the Hugging Face parquet. Provenance + license at the top of
+  the file.
+- **Test** `tests/real_data_audio.rs` + example `denoise_real_speech`: on the
+  waveform-SNR metric, the generalist toolkit **does not improve** speech —
+  `denoise_auto` classifies it `Colored` and over-processes (aggressive
+  per-level wavelet → **−8.9 dB**, non-stationary speech is smoothed).
+  Actionable finding pinned: **for speech, call `stft_wiener_auto` directly**
+  (noise-floor tracking; far less destructive, −0.04 dB) rather than the
+  auto routing. Note: waveform SNR is a harsh metric for speech (the domain
+  metrics are segmental SNR / PESQ / STOI) — "≈ neutral" is a floor, not the
+  full picture.
 
-### Ajouté — validation sur données réelles n°2 : vibrations de roulement (CWRU)
-Étend la validation sur données réelles à un **domaine différent** (§9.4 du rapport
-TSHF) et éprouve la robustesse du classifieur aux features périodiques légitimes
-(#586) hors ECG.
-- **Fixture réelle attribuée** `scirust-signal/tests/data/cwru_bearing.csv` : signaux
-  accéléromètre drive-end 12 kHz du Case Western Reserve University Bearing Data
-  Center — roulement sain (record 97) et défaut de bague externe 0,007" (record 130),
-  décodés hors-ligne du format MATLAB. Provenance en tête de fichier.
-- **Test d'intégration** `tests/real_data_vibration.rs` + exemple
-  `classify_real_bearing` : le défaut de bague externe produit des impacts qui
-  **atteignent le gate impulsif** (kurtosis 5,02 > 4 ET crest 5,15 > 5) — un
-  classifieur naïf les prendrait pour du bruit impulsif et un suppresseur de pics
-  **détruirait la signature de défaut**. Le veto de périodicité de l'enveloppe
-  d'énergie (`periodic_impulse_train`) reconnaît le train d'impacts BPFO comme
-  feature répétée légitime : verdict **non-`Impulsive`**, signature préservée. Même
-  robustesse que le cas QRS ECG, sur un domaine physique totalement différent.
+### Added — real-data validation #2: bearing vibration (CWRU)
+Extends real-data validation to a **different domain** (§9.4 of the TSHF
+report) and stresses the classifier's robustness to legitimate periodic
+features (#586) outside the ECG.
+- **Attributed real fixture** `scirust-signal/tests/data/cwru_bearing.csv`:
+  12 kHz drive-end accelerometer signals from the Case Western Reserve
+  University Bearing Data Center — healthy bearing (record 97) and 0.007"
+  outer-race fault (record 130), decoded offline from the MATLAB format.
+  Provenance at the top of the file.
+- **Integration test** `tests/real_data_vibration.rs` + example
+  `classify_real_bearing`: the outer-race fault produces impacts that
+  **reach the impulsive gate** (kurtosis 5.02 > 4 AND crest 5.15 > 5) — a
+  naive classifier would take them for impulsive noise and a spike
+  suppressor **would destroy the fault signature**. The energy-envelope
+  periodicity veto (`periodic_impulse_train`) recognizes the BPFO impact
+  train as a legitimate repeated feature: verdict **non-`Impulsive`**,
+  signature preserved. Same robustness as the QRS ECG case, on a totally
+  different physical domain.
 
-### Ajouté — `denoise::remove_baseline` : détrend zéro-phase préservant le signal
-Motivé par la validation ECG réelle (#579) : la dérive de ligne de base recouvre le
-contenu basse-fréquence propre de l'ECG, et le détrend Tikhonov rigide de la voie
-`Baseline` l'érode avec la dérive.
-- **`remove_baseline(signal, sample_rate, cutoff_hz)`** : passe-haut Butterworth
-  d'ordre 2 appliqué **aller-retour** (`filtfilt_sos`, zéro-phase → 4e ordre effectif)
-  à une coupure explicite en Hz. Contrairement au détrend Tikhonov (coupure douce et
-  implicite qui remonte dans le signal), la coupure est nette et placée sciemment :
-  pour un ECG, `cutoff_hz = 0.5` retire la dérive en préservant le segment ST (valeur
-  ANSI/AAMI EC11 / AHA). Ordre 2 volontairement doux (aux coupures normalisées très
-  basses ~0,003 qu'exige la suppression de dérive, un ordre supérieur placerait les
-  pôles pathologiquement près de `z = 1`). Dégradation gracieuse.
-- **Constat de méthodologie (données réelles)** : la métrique SNR incluant le DC est
-  *inadaptée* à l'évaluation d'une suppression de dérive — confondue par le
-  DC/baseline légitimement retiré, elle plafonne toute méthode à ~+1 dB. Mesuré
-  correctement (récupération de la morphologie sans dérive), le passe-haut
-  physiologique récupère l'ECG **> +10 dB mieux que le brut et bat le détrend
-  Tikhonov** (`tests/real_data_ecg.rs`, exemple `denoise_real_ecg`).
+### Added — `denoise::remove_baseline`: signal-preserving zero-phase detrend
+Motivated by the real ECG validation (#579): baseline drift masks the ECG's
+own low-frequency content, and the rigid Tikhonov detrend of the `Baseline`
+path erodes it along with the drift.
+- **`remove_baseline(signal, sample_rate, cutoff_hz)`**: 2nd-order
+  Butterworth high-pass applied **forward-backward** (`filtfilt_sos`,
+  zero-phase → effective 4th order) at an explicit cutoff in Hz. Unlike the
+  Tikhonov detrend (soft, implicit cutoff that creeps into the signal), the
+  cutoff is sharp and deliberately placed: for an ECG, `cutoff_hz = 0.5`
+  removes the drift while preserving the ST segment (ANSI/AAMI EC11 / AHA
+  value). Deliberately gentle order 2 (at the very low normalized cutoffs
+  ~0.003 that drift removal requires, a higher order would place the poles
+  pathologically close to `z = 1`). Graceful degradation.
+- **Methodology finding (real data)**: the DC-inclusive SNR metric is
+  *unsuitable* for evaluating drift removal — confounded by the legitimately
+  removed DC/baseline, it caps every method at ~+1 dB. Measured correctly
+  (morphology recovery without drift), the physiological high-pass recovers
+  the ECG **> +10 dB better than raw and beats the Tikhonov detrend**
+  (`tests/real_data_ecg.rs`, example `denoise_real_ecg`).
 
-### Modifié — classifieur robuste aux features périodiques légitimes (`detect::classify`)
-Motivé par la validation ECG réelle (#579) : les complexes QRS étaient lus comme du
-« bruit impulsif ». Le gate impulsif exige désormais l'**apériodicité** des pics.
-- **`periodic_impulse_train`** : autocorrélation (via FFT, O(n log n)) de l'enveloppe
-  d'énergie `core² − moyenne` du résidu passe-haut ; un pic normalisé > 0,30 sur les
-  lags de répétition `[8, n/3]` (≥ 3 périodes) signale un **train périodique
-  légitime** (QRS, cognement moteur, transitoire répété) → veto du verdict
-  `Impulsive`. Seuil calibré par mesure : QRS réels (record 100) ≈ 0,3–0,4 au lag du
-  rythme (~73 bpm, robuste à la variabilité cardiaque) ; impulsions apériodiques
-  (salt-and-pepper, pops d'électrode) ≈ 0,2 → toujours `Impulsive`.
-- Effet sur données réelles : un ECG dominé par ses QRS n'est plus étiqueté
-  `Impulsive` (plus de routage vers un suppresseur de pics) ; quand du vrai bruit
-  large bande/impulsif est mélangé, la périodicité est masquée et le verdict reste
-  `Impulsive` — discrimination correcte, pas binaire.
-- Fixtures de test d'impulsions rendues **apériodiques** (placement de Bernoulli) —
-  le bruit impulsif réel est apériodique, c'est un gain de réalisme ; nouveau test
-  `periodic_spike_train_is_a_legitimate_feature` + assertion sur ECG réel
-  (`qrs_complexes_are_not_mislabeled_as_impulsive_noise`). Zéro régression (467 tests).
+### Changed — classifier robust to legitimate periodic features (`detect::classify`)
+Motivated by the real ECG validation (#579): QRS complexes were read as
+"impulsive noise". The impulsive gate now requires **aperiodicity** of the
+peaks.
+- **`periodic_impulse_train`**: autocorrelation (via FFT, O(n log n)) of the
+  energy envelope `core² − mean` of the high-pass residual; a normalized peak
+  > 0.30 on the repetition lags `[8, n/3]` (≥ 3 periods) signals a
+  **legitimate periodic train** (QRS, engine knock, repeated transient) →
+  veto of the `Impulsive` verdict. Threshold calibrated by measurement: real
+  QRS (record 100) ≈ 0.3–0.4 at the rhythm lag (~73 bpm, robust to heart-rate
+  variability); aperiodic impulses (salt-and-pepper, electrode pops) ≈ 0.2 →
+  still `Impulsive`.
+- Effect on real data: an ECG dominated by its QRS is no longer labeled
+  `Impulsive` (no more routing to a spike suppressor); when real
+  wideband/impulsive noise is mixed in, the periodicity is masked and the
+  verdict stays `Impulsive` — correct discrimination, not binary.
+- Test impulse fixtures made **aperiodic** (Bernoulli placement) — real
+  impulsive noise is aperiodic, a realism gain; new test
+  `periodic_spike_train_is_a_legitimate_feature` + assertion on real ECG
+  (`qrs_complexes_are_not_mislabeled_as_impulsive_noise`). Zero regression
+  (467 tests).
 
-### Ajouté — validation du débruitage sur **données réelles** (ECG MIT-BIH + bruit réel)
-Réponse au §9.4 du rapport TSHF (validation sur données réelles), avec vérité-terrain.
-- **Fixture réelle attribuée** `scirust-signal/tests/data/ecg_mitbih.csv` (ODC-BY) :
-  ECG MIT-BIH record 100 (lead II) + bruit **réel enregistré** de la Noise Stress
-  Test Database (`ma` artefact musculaire large bande, `bw` dérive de ligne de
-  base), 4096 échantillons à 360 Hz, décodés du format WFDB 212. Provenance et
-  licence en tête de fichier.
-- **Test d'intégration déterministe** `tests/real_data_ecg.rs` (bruit réel ajouté à
-  SNR contrôlé, aucun RNG) : le détecteur VST retourne **`Identity`** sur ECG réel à
-  tous les SNR et pour les deux bruits (pas de faux positif — validation de la
-  conservativité sur données réelles) ; l'ondelette retire l'artefact musculaire
-  (+0,5 à +1,1 dB) ; `denoise_auto` gagne > +2 dB à 0 dB ; garde-fou de forme de la
-  fixture (structure QRS présente).
-- **Exemple** `examples/denoise_real_ecg.rs` : tables complètes (verdict du
-  classifieur, méthode `denoise_auto`, SNR-improvement par méthode) sur les deux
-  bruits × trois SNR, avec une synthèse honnête des observations — dont les limites
-  révélées *par les données réelles* : à haut SNR les complexes QRS sont vus comme
-  impulsifs (routage prudent vers Hampel, quasi no-op) ; la dérive de ligne de base
-  recouvre le contenu basse-fréquence propre de l'ECG (détrend = gain modeste).
+### Added — denoising validation on **real data** (MIT-BIH ECG + real noise)
+Response to §9.4 of the TSHF report (real-data validation), with ground truth.
+- **Attributed real fixture** `scirust-signal/tests/data/ecg_mitbih.csv`
+  (ODC-BY): MIT-BIH ECG record 100 (lead II) + **real recorded** noise from
+  the Noise Stress Test Database (`ma` wideband muscle artifact, `bw`
+  baseline drift), 4096 samples at 360 Hz, decoded from WFDB 212 format.
+  Provenance and license at the top of the file.
+- **Deterministic integration test** `tests/real_data_ecg.rs` (real noise
+  added at controlled SNR, no RNG): the VST detector returns **`Identity`**
+  on real ECG at every SNR and for both noises (no false positive —
+  conservativeness validated on real data); the wavelet removes the muscle
+  artifact (+0.5 to +1.1 dB); `denoise_auto` gains > +2 dB at 0 dB;
+  fixture-shape guardrail (QRS structure present).
+- **Example** `examples/denoise_real_ecg.rs`: full tables (classifier
+  verdict, `denoise_auto` method, SNR improvement per method) over both
+  noises × three SNRs, with an honest synthesis of the observations —
+  including the limits revealed *by the real data*: at high SNR the QRS
+  complexes are seen as impulsive (cautious routing to Hampel, near no-op);
+  baseline drift masks the ECG's own low-frequency content (detrend =
+  modest gain).
 
-### Ajouté — `denoise::streaming::StreamingNlm` : non-local means causal
-- **`StreamingNlm`** : pendant causal, sample-par-sample, du non-local means batch
-  (`nlm::nlm1d`), pour signaux auto-similaires (formes périodiques, transitoires
-  répétés, constant-par-morceaux) sur flux temps réel / embarqué. `delay()` =
-  `search_half + patch_half` ; état = un tampon circulaire de `2·delay+1`
-  échantillons.
-  - **Équivalence batch bit-exacte** : à σ donné (le paramètre de calibration que
-    le batch estime globalement), une fois le tampon plein, la sortie est
-    bit-pour-bit `nlm1d(signal, patch_half, search_half, h)[i − delay]` sur
-    l'intérieur du batch — le noyau `sum_sq_diff` batch est réutilisé (exposé
-    `pub(crate)`), et la règle de poids (compensation de bruit `2σ²`, terme de
-    référence à poids 1, quarantaine NaN→poids 0) est octet pour octet celle du
-    batch.
-  - σ = **paramètre de calibration** (mesuré hors-ligne sur une capture
-    représentative, comme `StreamingVst`) ; bande passante `h ≤ 0` → `0.8·σ` ;
-    bande effective non positive → pass-through (constantes préservées).
-    Dégradation gracieuse (warm-up fini, NaN quarantainé). Object-safe et
-    composable dans `StreamingVst<StreamingNlm>` (NLM causal dans le domaine
-    stabilisé).
+### Added — `denoise::streaming::StreamingNlm`: causal non-local means
+- **`StreamingNlm`**: causal, sample-by-sample counterpart of batch
+  non-local means (`nlm::nlm1d`), for self-similar signals (periodic
+  shapes, repeated transients, piecewise-constant) on real-time/embedded
+  streams. `delay()` = `search_half + patch_half`; state = a circular
+  buffer of `2·delay+1` samples.
+  - **Bit-exact batch equivalence**: at a given σ (the calibration parameter
+    the batch estimates globally), once the buffer is full, the output is
+    bit-for-bit `nlm1d(signal, patch_half, search_half, h)[i − delay]` on the
+    batch interior — the batch `sum_sq_diff` kernel is reused (exposed
+    `pub(crate)`), and the weight rule (noise compensation `2σ²`, reference
+    term at weight 1, NaN quarantine → weight 0) is byte-for-byte the
+    batch's.
+  - σ = **calibration parameter** (measured offline on a representative
+    capture, like `StreamingVst`); bandwidth `h ≤ 0` → `0.8·σ`; non-positive
+    effective bandwidth → pass-through (constants preserved). Graceful
+    degradation (finite warm-up, NaN quarantined). Object-safe and
+    composable in `StreamingVst<StreamingNlm>` (causal NLM in the
+    stabilized domain).
 
-### Ajouté — `denoise::streaming` : VST causale pour l'embarqué (`StreamingVst<D>`)
-- **`StreamingVst<D: StreamingDenoiser>`** : pendant causal, sample-par-sample, du
-  pipeline VST (`vst::vst_denoise`), pour le bruit dépendant du signal sur un flux
-  temps réel / embarqué. Enrobe n'importe quel débruiteur streaming `D` d'une
-  transformée directe ponctuelle et d'un inverse corrigé du biais ; `delay()` =
-  celui de `D` (les étages VST n'en ajoutent aucun), mémoire `O(D + W)`,
-  arithmétique déterministe.
-  - **Noyaux à inverse ponctuel** (Identité / Anscombe / GAT) : sortie
-    **bit-identique** au batch `vst_denoise` autour du pendant batch de `D`,
-    décalée de `delay()`, sur l'intérieur (épinglé par test et par l'exemple).
-  - **Noyaux à smearing** (log signé / racine signée / Box-Cox) : inverse de Duan
-    sur une **fenêtre glissante** de résidus récents (`DEFAULT_RESIDUAL_WINDOW`,
-    configurable) — causal et localement adaptatif, `O(W)` par échantillon ;
-    résidus non finis écartés, repli sur l'inverse naïf tant qu'aucun résidu.
-  - Type de transformée = **paramètre de calibration** (identifié hors-ligne par
-    `detect_noise_model` sur un enregistrement représentatif) ; `Identity` rend
-    l'enrobage transparent. Dégradation gracieuse (paramètres dégénérés → `D` sur
-    le flux brut ; warm-up fini ; `residual_window = 0` borné à 1).
-  - Refactor `vst.rs` : helpers scalaires `forward_scalar` /
-    `inverse_corrected_pointwise_scalar` / `inverse_naive_scalar` extraits comme
-    source unique de vérité partagée batch/streaming (sorties batch inchangées).
-  - Exemple `examples/vst_streaming_embedded.rs` : flux Poisson type comptage
-    photonique, débruité en continu (8,96 → 19,16 dB), équivalence batch bit-exacte
-    vérifiée, empreinte mémoire bornée affichée.
+### Added — `denoise::streaming`: causal VST for embedded (`StreamingVst<D>`)
+- **`StreamingVst<D: StreamingDenoiser>`**: causal, sample-by-sample
+  counterpart of the VST pipeline (`vst::vst_denoise`), for
+  signal-dependent noise on a real-time/embedded stream. Wraps any
+  streaming denoiser `D` with a pointwise forward transform and a
+  bias-corrected inverse; `delay()` = `D`'s (VST stages add none), memory
+  `O(D + W)`, deterministic arithmetic.
+  - **Pointwise-inverse kernels** (Identity / Anscombe / GAT): output
+    **bit-identical** to batch `vst_denoise` around `D`'s batch counterpart,
+    shifted by `delay()`, on the interior (pinned by test and example).
+  - **Smearing kernels** (signed log / signed root / Box-Cox): Duan inverse
+    over a **sliding window** of recent residuals
+    (`DEFAULT_RESIDUAL_WINDOW`, configurable) — causal and locally
+    adaptive, `O(W)` per sample; non-finite residuals discarded, fallback to
+    the naive inverse while no residual exists.
+  - Transform type = **calibration parameter** (identified offline by
+    `detect_noise_model` on a representative recording); `Identity` makes
+    the wrapper transparent. Graceful degradation (degenerate parameters →
+    `D` on the raw stream; finite warm-up; `residual_window = 0` clamped to
+    1).
+  - Refactor `vst.rs`: scalar helpers `forward_scalar` /
+    `inverse_corrected_pointwise_scalar` / `inverse_naive_scalar` extracted
+    as the single shared source of truth for batch/streaming (batch outputs
+    unchanged).
+  - Example `examples/vst_streaming_embedded.rs`: Poisson photon-counting
+    stream, denoised continuously (8.96 → 19.16 dB), bit-exact batch
+    equivalence verified, bounded memory footprint displayed.
 
-### Ajouté — `denoise` round 5 : GAT, protocole §9 rejouable, VST 2-D, docs multilingues
-Prolonge l'exécution du programme TSHF (round 4) ; chaque choix est calibré par
-mesure (addendum 2 du rapport).
+### Added — `denoise` round 5: GAT, replayable §9 protocol, 2-D VST, multilingual docs
+Extends the execution of the TSHF program (round 4); every choice is
+calibrated by measurement (addendum 2 of the report).
 
-- **`VstKind::Gat { gain, sigma }`** : Anscombe généralisée pour le modèle capteur
-  mixte Poisson-gaussien `x = gain·p + n` (Murtagh-Starck-Bijaoui 1995), inverse
-  exact non biaisé en forme close (Mäkitalo-Foi 2013) ; gain=1, σ=0 ≡ Anscombe
-  (testé). Mesuré : +1,54 à +2,87 dB selon la calibration.
-- **`examples/vst_protocol.rs`** : le protocole §9 du rapport, rejouable et
-  déterministe (P1-P5). Réponses mesurées aux questions ouvertes : croisement de
-  matérialité ≤ 2 % de bruit à ×10 de dynamique (P4a) ; **≈ ×3 de dynamique de
-  niveaux** à 30 % de bruit — à ×2 la VST perd −0,77 dB (P4b) ; effondrement
-  porteuse +5,17 dB (3 cycles) → −0,93 dB (40 cycles) (P5).
-- **Sélecteur resserré par la mesure** : porte de dynamique de
-  `detect_noise_model` portée de ×2 à **×3** (`DETECT_MIN_RANGE`), alignée sur le
-  croisement P4b — « ne jamais dégrader ».
-- **Limitation « porteuses rapides » documentée et épinglée** : une φ ponctuelle
-  ne commute pas avec le spectre (harmoniques rognées par le débruiteur interne) ;
-  doc de module + test sentinelle.
-- **`scirust_vision::denoise::{vst_denoise2d, vst_denoise2d_auto}`** : VST 2-D
-  image ; partenaire interne mesuré = **NLM 2-D** (+5,4 dB Poisson, +3,0 dB GAT) ;
-  VisuShrink 2-D perd sous stabilisation (résultat négatif 1-D transposé) ; la
-  médiane 2-D est invariante bit à bit (Prop. 2 du rapport confirmée) ; auto
-  conservateur (verdict Identity → copie).
-- **Docs multilingues** : le bloc TSHF (vst/multichannel/compand + GAT/2-D/
-  protocole) traduit dans les six langues AR/DE/ES/JA/KO/ZH.
+- **`VstKind::Gat { gain, sigma }`**: generalized Anscombe for the mixed
+  Poisson-Gaussian sensor model `x = gain·p + n` (Murtagh-Starck-Bijaoui
+  1995), exact closed-form unbiased inverse (Mäkitalo-Foi 2013); gain=1,
+  σ=0 ≡ Anscombe (tested). Measured: +1.54 to +2.87 dB depending on
+  calibration.
+- **`examples/vst_protocol.rs`**: the report's §9 protocol, replayable and
+  deterministic (P1-P5). Measured answers to the open questions: materiality
+  crossing ≤ 2 % noise at ×10 dynamic range (P4a); **≈ ×3 dynamic range of
+  levels** at 30 % noise — at ×2 the VST loses −0.77 dB (P4b); carrier
+  collapse +5.17 dB (3 cycles) → −0.93 dB (40 cycles) (P5).
+- **Selector tightened by measurement**: `detect_noise_model`'s dynamic
+  range gate widened from ×2 to **×3** (`DETECT_MIN_RANGE`), aligned with
+  the P4b crossing — "never degrade".
+- **"Fast carriers" limitation documented and pinned**: a pointwise φ does
+  not commute with the spectrum (harmonics clipped by the internal
+  denoiser); module doc + sentinel test.
+- **`scirust_vision::denoise::{vst_denoise2d, vst_denoise2d_auto}`**: 2-D
+  image VST; measured internal partner = **2-D NLM** (+5.4 dB Poisson, +3.0
+  dB GAT); 2-D VisuShrink loses under stabilization (1-D negative result
+  transposed); 2-D median is bitwise invariant (Prop. 2 of the report
+  confirmed); auto conservative (Identity verdict → copy).
+- **Multilingual docs**: the TSHF block (vst/multichannel/compand +
+  GAT/2-D/protocol) translated into the six languages AR/DE/ES/JA/KO/ZH.
 
-### Ajouté — `denoise` round 4 : exécution des recommandations du rapport TSHF
-Toutes les recommandations codables du rapport `docs/project-notes/TSHF_RESEARCH_2026-07-16.md` (§12
-et feuille de route) sont exécutées ; chaque porte d'acceptation chiffrée du
-rapport a été mesurée avant intégration.
+### Added — `denoise` round 4: execution of the TSHF report recommendations
+All codable recommendations of the report
+`docs/project-notes/TSHF_RESEARCH_2026-07-16.md` (§12 and roadmap) are
+executed; every quantified acceptance gate of the report was measured before
+integration.
 
-- **`denoise::vst` (Phase 1)** : transformées stabilisatrices de variance à inverse
-  corrigé du biais — Anscombe + inverse exact non biaisé (Mäkitalo-Foi 2011, forme
-  close), log signé + smearing de Duan (1983), racine signée, Box-Cox(λ) ;
-  sélecteur conservateur `detect_noise_model` (Theil-Sen sur log σ vs log niveau,
-  défaut = identité) ; `vst_denoise` générique et `vst_denoise_auto`. Branché en
-  pré/post-étape conditionnelle de `denoise_auto`. **Portes franchies** : Poisson
-  faible comptage +5,02 dB (critère ≥ +1 dB) et l'inverse corrigé bat le naïf de
-  +3,90 dB ; multiplicatif fort +4,88 dB ; régime doux +0,04 dB (gain nul prédit,
-  jamais de perte) ; biais de retransformation 0,015 contre 0,268 (naïf) sur
-  λ = 4. Choix mesuré : débruiteur interne `stft_wiener_auto` (l'ondelette
-  VisuShrink violait « ne jamais dégrader » de −1,0 dB sur signaux corrélés au
-  niveau).
-- **`denoise::multichannel` (Phase 2)** : `wiener_spatial` — Wiener spatial joint
-  (équivalent vectoriel-réel du filtrage quaternionique widely-linear,
-  Took-Mandic) — **passe la porte** : +2,48 dB et +3,67 dB contre sa restriction
-  diagonale sur les deux fixtures corrélées ; `vector_median` (Astola 1990) —
-  **échoue la porte** (0/2) : −1,81 dB sur impulsions synchronisées (E5b du
-  rapport reproduit) et −2,02 dB même sur impulsions désynchronisées — la
-  conjecture §12.4 du rapport est falsifiée et documentée ; l'opérateur est
-  conservé comme référence avec son verdict. Rapport reproductible :
+- **`denoise::vst` (Phase 1)**: variance-stabilizing transforms with
+  bias-corrected inverse — Anscombe + exact unbiased inverse
+  (Mäkitalo-Foi 2011, closed form), signed log + Duan smearing (1983),
+  signed root, Box-Cox(λ); conservative selector `detect_noise_model`
+  (Theil-Sen on log σ vs log level, default = identity); generic
+  `vst_denoise` and `vst_denoise_auto`. Wired as a conditional pre/post
+  stage of `denoise_auto`. **Gates passed**: low-count Poisson +5.02 dB
+  (criterion ≥ +1 dB) and the corrected inverse beats the naive by +3.90
+  dB; strong multiplicative +4.88 dB; gentle regime +0.04 dB (null gain
+  predicted, never a loss); retransformation bias 0.015 vs 0.268 (naive)
+  at λ = 4. Measured choice: internal denoiser `stft_wiener_auto` (the
+  VisuShrink wavelet violated "never degrade" by −1.0 dB on level-correlated
+  signals).
+- **`denoise::multichannel` (Phase 2)**: `wiener_spatial` — joint spatial
+  Wiener (real-vector equivalent of widely-linear quaternionic filtering,
+  Took-Mandic) — **passes the gate**: +2.48 dB and +3.67 dB vs its diagonal
+  restriction on the two correlated fixtures; `vector_median` (Astola 1990)
+  — **fails the gate** (0/2): −1.81 dB on synchronized impulses (E5b of the
+  report reproduced) and −2.02 dB even on desynchronized impulses — the
+  report's §12.4 conjecture is falsified and documented; the operator is
+  kept as a reference with its verdict. Reproducible report:
   `phase2_gate_report()`.
-- **`denoise::compand` (reco 3)** : `soft_clip` / `soft_clip_robust`
-  (tanh/atan/softsign) — écrêtage doux borné pour affichage et features robustes,
-  sans inverse par conception (E2/E4 : amplification ×10-×100, biais de Jensen).
-- **Phases 3-5 non déclenchées** (conditions du rapport non remplies) : octonion —
-  aucun besoin démontré à 8 canaux couplés (la Phase 2 a même falsifié le médian
-  vectoriel) ; SIMD des φ/φ⁻¹ — coût O(n) négligeable devant les débruiteurs
-  internes ; GPU — volumes inchangés. Addendum ajouté au rapport.
+- **`denoise::compand` (reco 3)**: `soft_clip` / `soft_clip_robust`
+  (tanh/atan/softsign) — bounded soft clipping for display and robust
+  features, without inverse by design (E2/E4: ×10-×100 amplification,
+  Jensen bias).
+- **Phases 3-5 not triggered** (report conditions not met): octonion — no
+  demonstrated need at 8 coupled channels (Phase 2 even falsified the
+  vector median); SIMD of φ/φ⁻¹ — O(n) cost negligible before the internal
+  denoisers; GPU — unchanged volumes. Addendum added to the report.
 
-### Ajouté — `denoise` round 3 : docs multilingues, SIMD, BM3D-1D, et programme de recherche TSHF
-- **Documentation multilingue** : la section débruitage (8.1.1) ajoutée aux six
-  traductions `Documentation_{AR,DE,ES,JA,KO,ZH}.md` (identifiants de code
-  conservés verbatim, limitation connue incluse).
-- **SIMD-isation des noyaux NLM** (1-D et 2-D) : restructuration auto-vectorisable
-  (tampon miroir précalculé → distances de patchs sur tranches contiguës,
-  accumulateurs indépendants) ; chemin scalaire de référence conservé et épinglé à
-  1e-12 relatif ; harnais de mesure `examples/denoise_kernel_timing.rs`.
-- **`denoise::collab`** : filtrage collaboratif par patchs façon BM3D 1-D
-  (Dabov et al. 2007 — groupement par similarité, Haar 2-D patch×groupe,
-  seuillage dur 2,7σ, agrégation pondérée) — `collab1d`, `collab1d_auto`.
-- **Programme de recherche TSHF** (`docs/project-notes/TSHF_RESEARCH_2026-07-16.md`) : investigation
-  sceptique des « Transformed-Scalar Hypercomplex Filters » — analyse mathématique
-  (séparabilité φ/plongement, invariance de la médiane, moyennes quasi-arithmétiques),
-  six blocs d'expériences de falsification reproductibles
-  (`examples/tshf_experiments.rs` : 1/Γ non injective ; identité gagnante sur bruit
-  additif ; biais de retransformation quantifié ; médian vectoriel battu par le
-  par-canal sur impulsions corrélées) et revue de littérature extensive
-  (Anscombe 1948 → Mäkitalo-Foi 2013, homomorphe 1968, Kolmogorov-Nagumo 1930,
-  Alfsmann-Göckler 2007). **Verdict : famille TSHF rejetée** ; sous-ensemble viable
-  identifié (module VST à inverse corrigé) avec feuille de route et critères
-  d'acceptation chiffrés.
+### Added — `denoise` round 3: multilingual docs, SIMD, BM3D-1D, and the TSHF research program
+- **Multilingual documentation**: the denoising section (8.1.1) added to
+  the six translations `Documentation_{AR,DE,ES,JA,KO,ZH}.md` (code
+  identifiers kept verbatim, known limitation included).
+- **SIMD-ization of the NLM kernels** (1-D and 2-D): auto-vectorizable
+  restructuring (precomputed mirror buffer → patch distances on contiguous
+  slices, independent accumulators); reference scalar path kept and pinned
+  at 1e-12 relative; measurement harness
+  `examples/denoise_kernel_timing.rs`.
+- **`denoise::collab`**: BM3D-style 1-D collaborative patch filtering
+  (Dabov et al. 2007 — similarity grouping, 2-D Haar patch×group, 2.7σ
+  hard thresholding, weighted aggregation) — `collab1d`, `collab1d_auto`.
+- **TSHF research program**
+  (`docs/project-notes/TSHF_RESEARCH_2026-07-16.md`): skeptical
+  investigation of "Transformed-Scalar Hypercomplex Filters" — mathematical
+  analysis (φ/embedding separability, median invariance, quasi-arithmetic
+  means), six blocks of reproducible falsification experiments
+  (`examples/tshf_experiments.rs`: 1/Γ not injective; identity wins on
+  additive noise; quantified retransformation bias; vector median beaten by
+  the per-channel one on correlated impulses) and extensive literature
+  review (Anscombe 1948 → Mäkitalo-Foi 2013, homomorphic 1968,
+  Kolmogorov-Nagumo 1930, Alfsmann-Göckler 2007). **Verdict: TSHF family
+  rejected**; viable subset identified (VST module with corrected inverse)
+  with a roadmap and quantified acceptance criteria.
 
-### Ajouté/Modifié — `denoise` : raffinements du classificateur, nouvelles méthodes, débruitage 2-D
-Second lot du filtre anti-bruit : corrections mesurées du classificateur, nouvelles
-familles, et extension 2-D — implémentation parallèle (3 agents : STFT, NLM/blocs,
-vision 2-D) + intégration centrale, chaque seuil calibré par sondes chiffrées.
+### Added/Changed — `denoise`: classifier refinements, new methods, 2-D denoising
+Second batch of the anti-noise filter: measured classifier corrections, new
+families, and 2-D extension — parallel implementation (3 agents: STFT,
+NLM/blocks, 2-D vision) + central integration, every threshold calibrated by
+quantified probes.
 
-**Classificateur (`detect::classify`) — les 3 erreurs observées au banc corrigées :**
-- Porte Baseline **0,6 → 0,45** : une dérive à puissance égale au signal (0 dB,
-  ts ≈ 0,49) est maintenant détectée et détendue (+15,5 dB au banc, contre 0 avant) ;
-  l'AR(0,9) reste loin sous la porte (ts ≈ 0,05).
-- **Score d'arête robuste** (max de la dérivée médian-préfiltrée sur sa MAD) : les
-  enregistrements à marches ne sont plus « détendus » comme des dérives — leur
-  destruction au banc (jusqu'à −19 dB à 20 dB d'entrée) est éliminée ; un test de
-  kurtosis serait aveugle sous ~30 dB (dilution 1/n d'un unique pic).
-- Porte LowNoise **1 % → 5 %** du RMS : les enregistrements quasi sans plancher
-  large-bande (pente spectrale mesurée sur des jupes de fuite, pas du bruit) prennent
-  la retouche Savitzky-Golay au lieu de la machinerie ondelettes (−15,8 dB → ±0).
-- Limitation documentée : un ton sous ~5 % de fs est indiscernable d'une composante
-  légitime (toute statistique du partage lisse/résidu est une fonction pure de f/fs) —
-  appeler `remove_mains_hum_iir` explicitement.
+**Classifier (`detect::classify`) — the 3 errors observed at the bench fixed:**
+- Baseline gate **0.6 → 0.45**: a drift at power equal to the signal (0 dB,
+  ts ≈ 0.49) is now detected and relaxed (+15.5 dB at the bench, vs 0
+  before); AR(0.9) stays far below the gate (ts ≈ 0.05).
+- **Robust edge score** (max of the median-prefiltered derivative over its
+  MAD): step recordings are no longer "relaxed" as drifts — their bench
+  destruction (up to −19 dB at 20 dB input) is eliminated; a kurtosis test
+  would be blind below ~30 dB (1/n dilution of a single peak).
+- LowNoise gate **1 % → 5 %** of RMS: recordings with almost no wideband
+  floor (spectral slope measured on leak skirts, not noise) get the
+  Savitzky-Golay touch-up instead of the wavelet machinery (−15.8 dB → ±0).
+- Documented limitation: a tone below ~5 % of fs is indistinguishable from a
+  legitimate component (any smooth/residual split statistic is a pure
+  function of f/fs) — call `remove_mains_hum_iir` explicitly.
 
-**Garde tonale de `wavelet_denoise_leveldep`** : chaque bande est criblée
-(kurtosis < −0,75 **et** σ_j > 2,5×médiane ⇒ bande remplie par un ton) ; les bandes
-flaguées empruntent le σ d'une bande fine saine et passent au seuil BayesShrink —
-un ton soutenu survit (7,3 dB → ~11 dB au lieu de 7,3 → 0,0 avant).
+**Tonal guard of `wavelet_denoise_leveldep`**: each band is screened
+(kurtosis < −0.75 **and** σ_j > 2.5×median ⇒ band filled by a tone); flagged
+bands borrow the σ of a healthy fine band and go through BayesShrink — a
+sustained tone survives (7.3 dB → ~11 dB instead of 7.3 → 0.0 before).
 
-**Nouvelles méthodes :** `nlm1d`/`nlm1d_auto` (non-local means 1-D, Buades 2005),
-`wavelet_denoise_neighblock` (seuillage par blocs, Cai-Silverman 2001),
-`stft_mmse_lsa` (Ephraim-Malah 1985, E1 par série + fraction continue),
-`stft_wiener_tracked_ms` (minimum statistics à lissage adaptatif, Martin 2001),
-`StreamingStftWiener` (Wiener court-terme **temps réel**, latence d'une trame).
+**New methods:** `nlm1d`/`nlm1d_auto` (1-D non-local means, Buades 2005),
+`wavelet_denoise_neighblock` (block thresholding, Cai-Silverman 2001),
+`stft_mmse_lsa` (Ephraim-Malah 1985, E1 by series + continued fraction),
+`stft_wiener_tracked_ms` (minimum statistics with adaptive smoothing, Martin
+2001), `StreamingStftWiener` (**real-time** short-term Wiener, one-frame
+latency).
 
-**Débruitage 2-D (`scirust-vision::denoise`)** : `median2d`, `wavelet_denoise2d`
-(pyramide de Mallat séparable sur les bancs de filtres 1-D désormais publics,
-round-trip exact à 1e-9), `nlm2d` — +6,2 dB PSNR ondelettes, +32 dB médiane sur
-salt-and-pepper.
+**2-D denoising (`scirust-vision::denoise`)**: `median2d`,
+`wavelet_denoise2d` (separable Mallat pyramid on the now-public 1-D filter
+banks, exact round-trip at 1e-9), `nlm2d` — +6.2 dB PSNR wavelets, +32 dB
+median on salt-and-pepper.
 
-**Consolidation :** filtres de rang batch réécrits **sur le moteur streaming**
-(fenêtre triée incrémentale : O(w) par échantillon, équivalence batch↔streaming
-par construction, épinglée bit-à-bit contre la définition naïve) ; pas **impair**
-du cycle-spinning (le cas dégénéré n_shifts | n disparaît : +3 dB sur bord impair
-avec 8 décalages) ; `Serialize/Deserialize` sur `AutoResult`/`BestResult` ;
-sections débruitage dans `docs/translations/Documentation.md`/`docs/translations/Documentation_EN.md`/`docs/REFERENCE.md`.
+**Consolidation:** batch rank filters rewritten **on the streaming engine**
+(incremental sorted window: O(w) per sample, batch↔streaming equivalence by
+construction, pinned bit-for-bit against the naive definition); **odd**
+cycle-spinning step (the degenerate n_shifts | n case disappears: +3 dB on
+odd edge with 8 shifts); `Serialize/Deserialize` on
+`AutoResult`/`BestResult`; denoising sections in
+`docs/translations/Documentation_EN.md`/`docs/REFERENCE.md`.
 
-Au banc : les pipelines automatiques gagnent 5 des 7 types de bruit (cascade :
-blanc +13,0 et non-stationnaire +11,7) et ne détruisent plus jamais les références
-propres ou à marches. Vérif : suite `scirust-signal` complète + `scirust-vision`
-au vert ; `fmt` / `clippy -D warnings` propres.
+At the bench: automatic pipelines win 5 of 7 noise types (cascade: white
++13.0 and non-stationary +11.7) and never destroy clean or step references
+again. Check: full `scirust-signal` suite + `scirust-vision` green;
+`fmt` / `clippy -D warnings` clean.
 
-### Ajouté — `scirust-signal` : refonte du filtre anti-bruit (`denoise`)
-Extension large de la boîte à outils de débruitage, produite par implémentation
-parallèle (4 agents) puis intégration et **revue adversariale** (5 axes, vérification
-à 3 réfutateurs par constat) ; les constats confirmés ont tous été corrigés avant
-fusion. **382 tests unitaires + 7 tests d'intégration + 2 doctests** au vert ;
-`fmt` / `clippy -D warnings` propres.
+### Added — `scirust-signal`: anti-noise filter overhaul (`denoise`)
+Large extension of the denoising toolbox, produced by parallel
+implementation (4 agents) then integration and **adversarial review** (5
+axes, 3 refuters per finding); all confirmed findings were fixed before
+merge. **382 unit tests + 7 integration tests + 2 doctests** green;
+`fmt` / `clippy -D warnings` clean.
 
-**Nouveaux débruiteurs (`transform`, `iir`, `stft`, `streaming`) :**
-- **Ondelettes invariantes par translation** (`cycle_spin`, `wavelet_denoise_ti`,
-  Coifman-Donoho 1995) : moyennage sur décalages circulaires — supprime les artefacts
-  pseudo-Gibbs autour des transitoires.
-- **Seuils dépendants de l'échelle** (`wavelet_denoise_leveldep`, Johnstone-Silverman
-  1997) : `σ_j` estimé par bande — le bon outil pour le bruit coloré.
+**New denoisers (`transform`, `iir`, `stft`, `streaming`):**
+- **Translation-invariant wavelets** (`cycle_spin`, `wavelet_denoise_ti`,
+  Coifman-Donoho 1995): averaging over circular shifts — removes
+  pseudo-Gibbs artifacts around transients.
+- **Scale-dependent thresholds** (`wavelet_denoise_leveldep`,
+  Johnstone-Silverman 1997): σ_j estimated per band — the right tool for
+  colored noise.
 - **BayesShrink** (`wavelet_denoise_bayes`, Chang-Yu-Vetterli 2000).
-- **Notch IIR à phase nulle** (`rbj_notch`, `filtfilt_sos`, `notch_iir`,
-  `remove_mains_hum_iir`, `BiquadState`) : sans ringing ni fuite spectrale, précis
-  même quand l'interféreur tombe entre deux bins FFT.
-- **Wiener à court terme (STFT)** (`stft_wiener`, `stft_wiener_dd` à SNR a priori
-  décision-dirigée Ephraim-Malah, `stft_wiener_auto`, `stft_wiener_tracked` à
-  poursuite de plancher min-statistics) : gains ré-estimés par trame pour le bruit
-  **non stationnaire**.
-- **Débruiteurs en flux** (`StreamingDenoiser` + `StreamingMovingAverage`,
-  `StreamingMedian`, `StreamingHampel`, `StreamingEma`, `StreamingKalman`) : versions
-  causales échantillon par échantillon pour l'edge/embarqué.
+- **Zero-phase IIR notch** (`rbj_notch`, `filtfilt_sos`, `notch_iir`,
+  `remove_mains_hum_iir`, `BiquadState`): no ringing or spectral leakage,
+  accurate even when the interferer falls between two FFT bins.
+- **Short-term (STFT) Wiener** (`stft_wiener`, `stft_wiener_dd` with
+  decision-directed a-priori SNR Ephraim-Malah, `stft_wiener_auto`,
+  `stft_wiener_tracked` with min-statistics floor tracking): gains
+  re-estimated per frame for **non-stationary** noise.
+- **Streaming denoisers** (`StreamingDenoiser` + `StreamingMovingAverage`,
+  `StreamingMedian`, `StreamingHampel`, `StreamingEma`, `StreamingKalman`):
+  causal sample-by-sample versions for edge/embedded.
 
-**Sélection & pipeline (`mod`, `detect`, `cascade`) :**
-- **Cascade multi-étapes** (`denoise_cascade`, `denoise_cascade_auto`) : détecter →
-  traiter → re-détecter pour le bruit mixte (impulsions + secteur + plancher), avec
-  protection anti-boucle et **garde accepter/annuler** — une étape large bande n'est
-  validée que si ce qu'elle a retiré est de type bruit (spectre plat), sinon elle est
-  annulée (elle mangeait un ton du signal).
-- **Sélection par tournoi** (`denoise_best`) : score sans référence (blancheur du
-  résidu moins pénalité de sur/sous-débruitage) sur une présélection par famille.
-- **Détection multi-raies harmonique** (`detect_lines`, `harmonic_stack`,
-  `SpectralLine`) et `denoise_auto` v2 : épluchage de raies + notch IIR harmonique.
-- Banc de mesure `examples/denoise_benchmark.rs` (méthodes × types de bruit × SNR) et
-  garde de non-régression `tests/denoise_integration.rs`.
+**Selection & pipeline (`mod`, `detect`, `cascade`):**
+- **Multi-stage cascade** (`denoise_cascade`, `denoise_cascade_auto`):
+  detect → process → re-detect for mixed noise (impulses + sector + floor),
+  with anti-loop protection and an **accept/abort guard** — a wideband stage
+  is validated only if what it removed is noise-typed (flat spectrum),
+  otherwise it is aborted (it was eating a signal tone).
+- **Tournament selection** (`denoise_best`): reference-free score (residual
+  whiteness minus over/under-denoising penalty) over a per-family
+  preselection.
+- **Harmonic multi-line detection** (`detect_lines`, `harmonic_stack`,
+  `SpectralLine`) and `denoise_auto` v2: line peeling + harmonic IIR notch.
+- Measurement bench `examples/denoise_benchmark.rs` (methods × noise types ×
+  SNR) and non-regression guard `tests/denoise_integration.rs`.
 
-**Corrections issues de la revue :**
-- `harmonic_stack` : indice harmonique borné (`k ≤ 12`), tolérance sur indices
-  *distincts* et fondamentale basse requise — élimine les fausses familles (un reste
-  de signal à 7 Hz et un interféreur à 137 Hz ne sont plus « harmoniques » via
-  `f0 = 3.5`).
-- Router périodique (`notch_detected_lines`) : protège le ton propre du signal
-  (`signal_dominant_freq`) plutôt que de le notcher, couvre toute la famille détectée
-  (`harmonic_span`, non le simple compte), et traite honnêtement les raies proches de
-  Nyquist (repli brick-wall).
-- Cascade : critère de progression par blancheur cumulée (auto-contradictoire)
-  remplacé par la garde accepter/annuler ci-dessus.
-- `denoise_best` périodique : retrait du rehausseur de raie (renvoyait le ton, pas le
-  signal débruité, et trompait le score).
-- Débruiteurs de rang en flux : ordre total `f64::total_cmp` — un unique NaN ne
-  corrompt plus la fenêtre triée (qui dégénérait silencieusement en taille paire).
-- `n_shifts` du cycle-spinning porté de 8 (dégénéré sur longueurs puissance de deux) à
-  **15** (impair) partout ; ajout du wrapper/catalogue `WaveletSure`.
+**Fixes from the review:**
+- `harmonic_stack`: bounded harmonic index (`k ≤ 12`), tolerance on
+  *distinct* indices and required low fundamental — eliminates false
+  families (a 7 Hz signal residue and a 137 Hz interferer are no longer
+  "harmonics" via `f0 = 3.5`).
+- Periodic router (`notch_detected_lines`): protects the signal's own tone
+  (`signal_dominant_freq`) instead of notching it, covers the whole detected
+  family (`harmonic_span`, not the simple count), and handles lines near
+  Nyquist honestly (brick-wall wrap).
+- Cascade: cumulative-whiteness progression criterion
+  (self-contradictory) replaced by the accept/abort guard above.
+- Periodic `denoise_best`: removal of the line enhancer (it returned the
+  tone, not the denoised signal, and fooled the score).
+- Streaming rank denoisers: total order `f64::total_cmp` — a single NaN no
+  longer corrupts the sorted window (which silently degenerated to even
+  size).
+- Cycle-spinning `n_shifts` raised from 8 (degenerate on power-of-two
+  lengths) to **15** (odd) everywhere; added the `WaveletSure`
+  wrapper/catalog.
 
-### Ajouté — radar & optronique : lot massif de 10 modules autonomes (blocs 40-49)
-Dix capacités radar et EO/IR indépendantes, chacune testée par oracles, produites en
-parallèle (agents isolés en worktree) puis intégrées et vérifiées centralement.
-**`scirust-signal` (radar) :**
-- **`cfar_variants`** — CFAR greatest-of / smallest-of / trimmed-mean (`go_cfar`,
-  `so_cfar`, `tm_cfar`) : GO supprime les fausses alarmes sur un bord de fouillis, SO
-  résout deux cibles proches, la moyenne tronquée censure un interféreur.
-- **`binary_integration`** — intégration binaire M-parmi-N (`binomial_pmf`,
-  `binomial_sf_ge`, `integrated_pfa`, `integrated_pd`, `optimal_m`) : forte réduction
-  de la probabilité de fausse alarme via la loi binomiale.
-- **`crt_prf`** — levée d'ambiguïté distance multi-PRF par le théorème des restes
-  chinois (`egcd`, `mod_inverse`, `crt_pair`, `resolve_range`, `combined_ambiguity`).
-- **`costas`** — réseaux de saut de fréquence de Costas (`welch_costas`, `is_costas`,
-  `max_coincidence`, `primitive_root`) : ambiguïté « punaise » idéale.
-- **`propagation`** — facteur de propagation à deux rayons (multitrajet sol)
-  `F = 2|sin(2π·h_a·h_c/(λR))|`, lobes d'interférence, puissance en `F⁴`, premier nul.
+### Added — radar & optronics: massive batch of 10 self-contained modules (blocks 40-49)
+Ten independent radar and EO/IR capabilities, each oracle-tested, produced
+in parallel (isolated worktree agents) then integrated and verified
+centrally. **`scirust-signal` (radar):**
+- **`cfar_variants`** — CFAR greatest-of / smallest-of / trimmed-mean
+  (`go_cfar`, `so_cfar`, `tm_cfar`): GO removes false alarms on a clutter
+  edge, SO resolves two close targets, the trimmed mean censors an
+  interferer.
+- **`binary_integration`** — M-of-N binary integration (`binomial_pmf`,
+  `binomial_sf_ge`, `integrated_pfa`, `integrated_pd`, `optimal_m`): strong
+  false-alarm probability reduction via the binomial law.
+- **`crt_prf`** — multi-PRF range de-ambiguation by the Chinese remainder
+  theorem (`egcd`, `mod_inverse`, `crt_pair`, `resolve_range`,
+  `combined_ambiguity`).
+- **`costas`** — Costas frequency-hopping arrays (`welch_costas`,
+  `is_costas`, `max_coincidence`, `primitive_root`): ideal "thumbtack"
+  ambiguity.
+- **`propagation`** — two-ray propagation factor (ground multipath)
+  `F = 2|sin(2π·h_a·h_c/(λR))|`, interference lobes, power in `F⁴`, first
+  null.
 - **`dbs`** — Doppler beam sharpening (`azimuth_doppler`, `doppler_gradient`,
-  `dbs_azimuth_resolution`, `sharpening_ratio`) : résolution transverse par gradient
-  Doppler dans le faisceau réel.
-**`scirust-vision` (optronique) :**
-- **`nuc`** — correction de non-uniformité deux points d'un plan focal IR
+  `dbs_azimuth_resolution`, `sharpening_ratio`): transverse resolution by
+  Doppler gradient in the real beam.
+**`scirust-vision` (optronics):**
+- **`nuc`** — two-point non-uniformity correction of an IR focal plane
   (`two_point_coeffs`, `apply_nuc`, `fixed_pattern_noise`).
-- **`lidar`** — télémétrie laser temps-de-vol et phase CW (`range_from_time_of_flight`,
-  `time_of_flight`, `range_resolution`, `range_from_phase`, portées non ambiguës).
-- **`centroid`** — centroïdage sous-pixel (centre de gravité pondéré, seuillé, fenêtré)
-  pour le pointage EO/IR.
-- **`zernike`** — aberrations de front d'onde de Zernike (défocalisation, astigmatisme,
-  coma, sphérique), erreur RMS, et Strehl de Maréchal `exp(−(2π·σ)²)`.
-Vérif : `scirust-signal` **317 tests**, `scirust-vision` **95 tests** (+72 oracles) ;
-`fmt` / `clippy -D warnings` propres sur les deux crates.
+- **`lidar`** — time-of-flight and CW-phase laser ranging
+  (`range_from_time_of_flight`, `time_of_flight`, `range_resolution`,
+  `range_from_phase`, unambiguous ranges).
+- **`centroid`** — subpixel centroiding (weighted, thresholded, windowed
+  center of gravity) for EO/IR pointing.
+- **`zernike`** — Zernike wavefront aberrations (defocus, astigmatism, coma,
+  spherical), RMS error, and Maréchal Strehl `exp(−(2π·σ)²)`.
+Check: `scirust-signal` **317 tests**, `scirust-vision` **95 tests** (+72
+oracles); `fmt` / `clippy -D warnings` clean on both crates.
 
-### Ajouté — `scirust-signal` : radar — précision de mesure, bornes de Cramér–Rao (`radar::accuracy`) — bloc 39
-Le plancher théorique de précision des estimateurs radar (retard/télémétrie,
-Doppler/vitesse, angle monopulse) : les **bornes de Cramér–Rao**, toutes en
+### Added — `scirust-signal`: radar — measurement accuracy, Cramér–Rao bounds (`radar::accuracy`) — block 39
+The theoretical precision floor of radar estimators (delay/ranging,
+Doppler/velocity, monopulse angle): the **Cramér–Rao bounds**, all in
 `1/√SNR`.
-- **`rms_bandwidth_lfm(B)`** = `B/√12` (bande RMS d'un spectre plat) ;
-  **`rms_duration_rect(T)`** = `T/√12` ; **`delay_crlb(SNR, β_rms)`** =
-  `1/(2π·β_rms·√(2·SNR))` ; **`range_crlb`** = `(c/2)·σ_τ`.
-- **`doppler_crlb(SNR, T_rms)`** = `1/(2π·T_rms·√(2·SNR))` ; **`velocity_crlb`** =
-  `(λ/2)·σ_fd` ; **`angle_crlb(SNR, θ₃dB, k_m)`** = `θ₃dB/(k_m·√(2·SNR))` (monopulse).
-- Oracles : formes fermées exactes ; **∝ 1/√SNR** (×4 SNR ⇒ ÷2) ; télémétrie
-  `= (c/2)·retard` et vitesse `= (λ/2)·Doppler` ; une bande plus large **affine la
-  distance**, un temps d'intégration plus long **affine la vitesse**, une pente
-  monopulse plus raide affine l'angle ; gardes (SNR/bande/durée ≤ 0 ⇒ `+∞`, pas de
-  NaN). 7 tests (273 au total pour le crate) ; `fmt`/`clippy -D warnings` propres.
+- **`rms_bandwidth_lfm(B)`** = `B/√12` (RMS bandwidth of a flat spectrum);
+  **`rms_duration_rect(T)`** = `T/√12`; **`delay_crlb(SNR, β_rms)`** =
+  `1/(2π·β_rms·√(2·SNR))`; **`range_crlb`** = `(c/2)·σ_τ`.
+- **`doppler_crlb(SNR, T_rms)`** = `1/(2π·T_rms·√(2·SNR))`;
+  **`velocity_crlb`** = `(λ/2)·σ_fd`; **`angle_crlb(SNR, θ₃dB, k_m)`** =
+  `θ₃dB/(k_m·√(2·SNR))` (monopulse).
+- Oracles: exact closed forms; **∝ 1/√SNR** (×4 SNR ⇒ ÷2); ranging
+  `= (c/2)·delay` and velocity `= (λ/2)·Doppler`; a wider band **sharpens
+  range**, a longer integration time **sharpens velocity**, a steeper
+  monopulse slope sharpens angle; guards (SNR/band/duration ≤ 0 ⇒ `+∞`, no
+  NaN). 7 tests (273 total for the crate); `fmt`/`clippy -D warnings`
+  clean.
 
-### Ajouté — `scirust-vision` : optronique — turbulence atmosphérique et optique adaptative (`turbulence`) — bloc 38
-Le module [`atmosphere`] modélise l'**atténuation** du contraste par le trajet ; ce
-module modélise le **flou** qu'y ajoute la turbulence d'indice (force donnée par la
-constante de structure `Cn²`), qui limite l'imagerie EO/IR à longue distance et fait
-scintiller un faisceau laser.
-- **`fried_parameter(Cn², λ, L)`** = `(0.423·k²·Cn²·L)^(−3/5)` — le paramètre de
-  Fried `r₀` (longueur de cohérence, `k=2π/λ`) ; **`seeing_angle(λ, r₀)`** ≈
-  `0.98·λ/r₀`, le flou de seeing qui remplace la limite de diffraction `λ/D` dès que
-  `D > r₀`.
-- **`strehl_ratio(D, r₀)`** = `[1 + (D/r₀)^(5/3)]^(−6/5)` — la fraction d'intensité
-  crête conservée sans correction ; **`greenwood_frequency(v, r₀)`** = `0.426·v/r₀`,
-  la bande passante d'une boucle d'optique adaptative ; **`degrees_of_freedom(D,
-  r₀)`** = `(D/r₀)²` ; **`rytov_variance(Cn², λ, L)`** = `1.23·Cn²·k^(7/6)·L^(11/6)`,
-  la scintillation (twinkling d'intensité) en turbulence faible.
-- Oracles : `r₀` conforme à la forme fermée et **∝ λ^(6/5)** (décroît avec Cn² et L) ;
-  seeing = `0.98·λ/r₀` et **dépasse la diffraction** `λ/D` quand `D ≫ r₀` (→ 0 sans
-  turbulence) ; Strehl → 1 pour `D ≪ r₀`, `= 2^(−6/5)` à `D = r₀`, monotone décroissant,
-  borné (0, 1] ; Greenwood ∝ v et ∝ 1/r₀ ; Rytov ∝ Cn², ∝ L^(11/6), ∝ k^(7/6) ; gardes
-  (entrées dégénérées sûres, pas de NaN). 7 tests (67 au total pour le crate) ;
-  `fmt`/`clippy -D warnings` propres.
+### Added — `scirust-vision`: optronics — atmospheric turbulence and adaptive optics (`turbulence`) — block 38
+The [`atmosphere`] module models the **attenuation** of contrast along the
+path; this module models the **blur** that index turbulence adds (strength
+given by the structure constant `Cn²`), which limits long-range EO/IR
+imaging and makes a laser beam scintillate.
+- **`fried_parameter(Cn², λ, L)`** = `(0.423·k²·Cn²·L)^(−3/5)` — the Fried
+  parameter `r₀` (coherence length, `k=2π/λ`); **`seeing_angle(λ, r₀)`** ≈
+  `0.98·λ/r₀`, the seeing blur that replaces the diffraction limit `λ/D` as
+  soon as `D > r₀`.
+- **`strehl_ratio(D, r₀)`** = `[1 + (D/r₀)^(5/3)]^(−6/5)` — the fraction of
+  peak intensity preserved without correction; **`greenwood_frequency(v,
+  r₀)`** = `0.426·v/r₀`, the bandwidth of an adaptive-optics loop;
+  **`degrees_of_freedom(D, r₀)`** = `(D/r₀)²`; **`rytov_variance(Cn², λ,
+  L)`** = `1.23·Cn²·k^(7/6)·L^(11/6)`, the scintillation (intensity
+  twinkling) in weak turbulence.
+- Oracles: `r₀` matches the closed form and **∝ λ^(6/5)** (decreases with
+  Cn² and L); seeing = `0.98·λ/r₀` and **exceeds diffraction** `λ/D` when
+  `D ≫ r₀` (→ 0 without turbulence); Strehl → 1 for `D ≪ r₀`,
+  `= 2^(−6/5)` at `D = r₀`, monotonically decreasing, bounded (0, 1];
+  Greenwood ∝ v and ∝ 1/r₀; Rytov ∝ Cn², ∝ L^(11/6), ∝ k^(7/6); guards
+  (degenerate inputs safe, no NaN). 7 tests (67 total for the crate);
+  `fmt`/`clippy -D warnings` clean.
 
-### Ajouté — `scirust-signal` : radar — codes polyphasés / CAZAC (`radar::polyphase`) — bloc 37
-Les formes d'onde de compression au-delà de Barker. Les codes de Barker sont
-optimaux mais s'arrêtent à la longueur 13 ; les **codes polyphasés** utilisent
-plusieurs valeurs de phase, existent à toute longueur, et — pour Frank et
-Zadoff-Chu — possèdent une **autocorrélation périodique parfaite** (une impulsion,
-zéro lobe secondaire), la propriété recherchée quand un code est répété à chaque
-PRI. Les codes P3/P4 (LFM échantillonné) échangent un peu de cette perfection
-contre une tolérance Doppler et une phase « bruitée » qui en font les formes d'onde
-**LPI** (faible probabilité d'interception) canoniques.
-- **`frank_code(n)`** — code de Frank, longueur `N²`, phase `2π·i·k/n` ;
-  **`p3_code(L)`** = `exp(j·π·n²/L)` ; **`p4_code(L)`** = `exp(j·(π·n²/L − π·n))` ;
-  **`zadoff_chu(L, u)`** — séquence CAZAC parfaite pour tout `u` premier avec `L`.
-- **`periodic_autocorrelation(code)`** — `R[τ] = Σ code[n]·conj(code[(n+τ) mod L])`.
-- Oracles : structure de Frank (longueur `N²`, module unité, phase exacte) ;
-  **Frank a une autocorrélation périodique parfaite** (0 hors zéro, `N²` au zéro) ;
-  **Zadoff-Chu est CAZAC** (parfait pour longueur paire/première, racine non
-  première rejetée) ; P3/P4 = **phases LFM échantillonnées** (module unité, formule
-  exacte) ; le **pic d'autocorrélation apériodique = longueur** (réutilise
-  `cross_correlate`) ; l'autocorrélation **périodique** de Frank **bat Barker-13**
-  (lobes nuls vs. un lobe réel) ; gardes. 7 tests (266 au total pour le crate) ;
-  `fmt`/`clippy -D warnings` propres.
+### Added — `scirust-signal`: radar — polyphase / CAZAC codes (`radar::polyphase`) — block 37
+The compression waveforms beyond Barker. Barker codes are optimal but stop
+at length 13; **polyphase codes** use several phase values, exist at every
+length, and — for Frank and Zadoff-Chu — have a **perfect periodic
+autocorrelation** (one impulse, zero sidelobe), the sought property when a
+code is repeated every PRI. P3/P4 codes (sampled LFM) trade a little of
+that perfection for Doppler tolerance and a "noisy" phase that makes them
+the canonical **LPI** (low probability of intercept) waveforms.
+- **`frank_code(n)`** — Frank code, length `N²`, phase `2π·i·k/n`;
+  **`p3_code(L)`** = `exp(j·π·n²/L)`; **`p4_code(L)`** =
+  `exp(j·(π·n²/L − π·n))`; **`zadoff_chu(L, u)`** — perfect CAZAC sequence
+  for any `u` coprime with `L`.
+- **`periodic_autocorrelation(code)`** — `R[τ] = Σ code[n]·conj(code[(n+τ)
+  mod L])`.
+- Oracles: Frank structure (length `N²`, unit modulus, exact phase);
+  **Frank has a perfect periodic autocorrelation** (0 off-zero, `N²` at
+  zero); **Zadoff-Chu is CAZAC** (perfect for even/prime length,
+  non-coprime root rejected); P3/P4 = **sampled LFM phases** (unit modulus,
+  exact formula); the **aperiodic autocorrelation peak = length** (reuses
+  `cross_correlate`); Frank's **periodic** autocorrelation **beats
+  Barker-13** (zero sidelobes vs a real one); guards. 7 tests (266 total
+  for the crate); `fmt`/`clippy -D warnings` clean.
 
-### Ajouté — `scirust-signal` : radar — imagerie SAR, compression azimutale (`radar::sar`) — bloc 36
-Le mode **imagerie** du radar. Une antenne réelle de longueur `D` a une résolution
-transverse `λR/D`, grossière à longue distance ; le **SAR** la raffine en
-synthétisant une longue ouverture à partir du mouvement du porteur : en passant
-devant une cible ponctuelle à la distance minimale `R₀`, l'histoire de distance
-trace une parabole `R(x) ≈ R₀ + (x−x₀)²/(2R₀)`, imprimant une phase quadratique
-(un **chirp azimutal**) sur le signal lent. Le filtrage adapté de ce chirp — la
-compression d'impulsion de `radar::matched_filter`, mais en azimut — focalise la
-cible en un pic net.
-- **`synthetic_aperture_length(λ, R, D)`** = `λR/D` (ouverture synthétisée) ;
-  **`azimuth_resolution(D)`** = `D/2`, la résolution transverse **indépendante de
-  la distance** ; **`azimuth_doppler_bandwidth(v, D)`** = `2v/D` ;
+### Added — `scirust-signal`: radar — SAR imaging, azimuth compression (`radar::sar`) — block 36
+The **imaging** mode of radar. A real antenna of length `D` has a transverse
+resolution `λR/D`, coarse at long range; **SAR** refines it by synthesizing
+a long aperture from the platform's motion: passing a point target at the
+minimum distance `R₀`, the range history traces a parabola `R(x) ≈ R₀ +
+(x−x₀)²/(2R₀)`, imprinting a quadratic phase (an **azimuth chirp**) on the
+slow-time signal. Matched filtering of this chirp — the pulse compression of
+`radar::matched_filter`, but in azimuth — focuses the target into a sharp
+peak.
+- **`synthetic_aperture_length(λ, R, D)`** = `λR/D` (synthesized aperture);
+  **`azimuth_resolution(D)`** = `D/2`, the transverse resolution
+  **independent of range**; **`azimuth_doppler_bandwidth(v, D)`** = `2v/D`;
   **`azimuth_chirp_rate(v, λ, R)`** = `2v²/(λR)`.
-- **`azimuth_history(R, x₀, λ, positions)`** — l'histoire de phase lente
-  `exp(−j·2π·(x−x₀)²/(λR))` ; **`azimuth_reference(R, λ, positions)`** — le chirp
-  de référence ; **`focus_azimuth(signal, reference)`** — compression azimutale
-  par corrélation (réutilise `cross_correlate`).
-- Oracles : formules fermées (résolution `D/2` indépendante de R, ouverture ∝ R,
-  bande `2v/D`) ; taux de chirp ∝ `v²` et ∝ `1/R` ; l'histoire azimutale **est un
-  chirp FM linéaire** (différence seconde de phase constante) et correspond à la
-  parabole ; le **filtre adapté focalise une cible ponctuelle** exactement à sa
-  position azimutale (pic de corrélation) ; **deux cibles séparées résolues** en
-  deux pics ; gardes. 7 tests (259 au total pour le crate) ; `fmt`/`clippy -D
-  warnings` propres.
+- **`azimuth_history(R, x₀, λ, positions)`** — the slow-time phase history
+  `exp(−j·2π·(x−x₀)²/(λR))`; **`azimuth_reference(R, λ, positions)`** — the
+  reference chirp; **`focus_azimuth(signal, reference)`** — azimuth
+  compression by correlation (reuses `cross_correlate`).
+- Oracles: closed forms (resolution `D/2` independent of R, aperture ∝ R,
+  bandwidth `2v/D`); chirp rate ∝ `v²` and ∝ `1/R`; the azimuth history
+  **is a linear FM chirp** (constant second phase difference) and matches
+  the parabola; the **matched filter focuses a point target** exactly at
+  its azimuth position (correlation peak); **two separated targets
+  resolved** into two peaks; guards. 7 tests (259 total for the crate);
+  `fmt`/`clippy -D warnings` clean.
 
-### Ajouté — `scirust-signal` : radar — traitement adaptatif spatio-temporel (STAP) (`radar::stap`) — bloc 35
-Le filtre anti-fouillis des radars aéroportés. Sous une plateforme en mouvement, le
-fouillis de sol se replie sur une **crête** angle-Doppler `f_d = β·f_s` (avec
-`f_s = (d/λ)·sin θ`) : une cible lente noyée dans le fouillis en distance et en
-Doppler en est pourtant **séparée dans le plan 2-D** — elle est hors crête. Un
-filtre qui s'adapte conjointement sur les `N` éléments d'antenne **et** les `M`
-impulsions du CPI place un zéro le long de la crête tout en gardant un gain unité
-sur la cible : ce qu'aucun filtre 1-D (angle seul ou Doppler seul) ne peut faire.
-- **`space_time_steering(f_s, f_d, N, M)`** — vecteur directeur spatio-temporel
-  `s = b(f_d) ⊗ a(f_s)` (produit de Kronecker, longueur `NM`) ;
-  **`spatial_frequency(θ, d)`** = `(d/λ)·sin θ` ; **`clutter_ridge_doppler(f_s, β)`**
-  = `β·f_s`, la crête du fouillis.
-- **`clutter_covariance(N, M, patches, β, σ_n²)`** — covariance interférence+bruit
-  `R = σ_n²·I + Σ P_c·s_c s_cᴴ` (parcelles de fouillis sur la crête).
-- **`adaptive_weights(R, s)`** = `R⁻¹s/(sᴴR⁻¹s)` (poids MVDR/SMI) ;
-  **`optimal_sinr(R, s, P)`** = `P·sᴴR⁻¹s`, le SINR de sortie — profond sur la
-  crête, proche du gain cohérent plein `NM` hors crête. Réutilise l'inverse
-  matriciel complexe de `radar::doa`.
-- Oracles : vecteur directeur = **produit de Kronecker** (`|s|²=NM`, factorisation) ;
-  bruit blanc ⇒ poids = **filtre adapté** `s/NM`, gain unité, SINR `P·NM/σ²` ;
-  **encoche de fouillis** (cible endo-fouillis fortement atténuée, cible hors crête
-  conservée) ; le poids **annule** la parcelle de fouillis co-Doppler tout en
-  gardant la cible ; le **minimum de SINR tombe exactement sur la crête** ; relations
-  crête/fréquence spatiale ; gardes. 7 tests (252 au total pour le crate) ;
-  `fmt`/`clippy -D warnings` propres.
+### Added — `scirust-signal`: radar — space-time adaptive processing (STAP) (`radar::stap`) — block 35
+The clutter filter of airborne radars. Under a moving platform, ground
+clutter folds onto an angle-Doppler **ridge** `f_d = β·f_s` (with
+`f_s = (d/λ)·sin θ`): a slow target buried in clutter in range and Doppler
+is nevertheless **separated in the 2-D plane** — it is off-ridge. A filter
+that adapts jointly over the `N` antenna elements **and** the `M` CPI
+pulses places a null along the ridge while keeping unit gain on the target:
+something no 1-D filter (angle-only or Doppler-only) can do.
+- **`space_time_steering(f_s, f_d, N, M)`** — space-time steering vector
+  `s = b(f_d) ⊗ a(f_s)` (Kronecker product, length `NM`);
+  **`spatial_frequency(θ, d)`** = `(d/λ)·sin θ`; **`clutter_ridge_doppler(f_s,
+  β)`** = `β·f_s`, the clutter ridge.
+- **`clutter_covariance(N, M, patches, β, σ_n²)`** — interference+noise
+  covariance `R = σ_n²·I + Σ P_c·s_c s_cᴴ` (clutter patches on the ridge).
+- **`adaptive_weights(R, s)`** = `R⁻¹s/(sᴴR⁻¹s)` (MVDR/SMI weights);
+  **`optimal_sinr(R, s, P)`** = `P·sᴴR⁻¹s`, the output SINR — deep on the
+  ridge, close to the full coherent gain `NM` off-ridge. Reuses the complex
+  matrix inverse from `radar::doa`.
+- Oracles: steering vector = **Kronecker product** (`|s|²=NM`,
+  factorization); white noise ⇒ weights = **matched filter** `s/NM`, unit
+  gain, SINR `P·NM/σ²`; **clutter notch** (endoclutter target strongly
+  attenuated, off-ridge target preserved); the weight **nulls** the
+  co-Doppler clutter patch while keeping the target; the **SINR minimum
+  falls exactly on the ridge**; ridge/spatial-frequency relations; guards.
+  7 tests (252 total for the crate); `fmt`/`clippy -D warnings` clean.
 
-### Ajouté — `scirust-signal` : radar — goniométrie interférométrique (phase-comparison) (`radar::interferometer`) — bloc 34
-Là où le monopulse d'amplitude ([`radar::monopulse`]) lit l'angle dans le *rapport*
-de deux faisceaux dépointés, un **interféromètre de phase** le lit dans la
-*différence de phase* entre deux éléments séparés d'une base `d` : une onde plane
-d'angle `θ` arrive à l'élément lointain avec un retard de trajet `d·sin θ`, soit une
-avance de phase `Δφ = 2π·d·sin θ/λ` ; mesurer `Δφ` et inverser donne
+### Added — `scirust-signal`: radar — interferometric goniometry (phase-comparison) (`radar::interferometer`) — block 34
+Where amplitude monopulse ([`radar::monopulse`]) reads the angle from the *ratio*
+of two squinted beams, a **phase interferometer** reads it from the *phase
+difference* between two elements separated by a baseline `d`: a plane wave at
+angle `θ` reaches the far element with a path delay `d·sin θ`, i.e. a phase
+advance `Δφ = 2π·d·sin θ/λ`; measuring `Δφ` and inverting gives
 `θ = arcsin(Δφ·λ/(2π·d))`.
-- **`phase_difference(θ, d, λ)`** = `2π·d·sin θ/λ` ; **`angle_from_phase(Δφ, d, λ)`**
-  = `arcsin(Δφ·λ/(2π·d))` (argument borné à [−1, 1]) ; **`phase_from_signals(near,
-  far)`** = `arg(far·conj(near))`, la phase réellement observée par le récepteur.
-- **`unambiguous_angle(d, λ)`** = `arcsin(λ/2d)` — le champ non ambigu : une base
-  large affine la mesure mais replie la phase plus tôt (compromis
-  résolution/ambiguïté) ; **`wrap_phase`** ramène une phase dans `(−π, π]`.
-- Oracles : phase **nulle au dépointage** et **impaire** ; l'estimation **inverse
-  exactement** la phase dans le champ non ambigu ; récupération de la phase depuis
-  les tensions d'éléments ; une **base large rétrécit le champ non ambigu** ; **repli
-  (aliasing)** hors champ (phase > ±π mal interprétée) ; gardes (base/λ dégénérées).
-  7 tests (245 au total pour le crate) ; `fmt`/`clippy -D warnings` propres.
+- **`phase_difference(θ, d, λ)`** = `2π·d·sin θ/λ`; **`angle_from_phase(Δφ, d, λ)`**
+  = `arcsin(Δφ·λ/(2π·d))` (argument bounded to [−1, 1]); **`phase_from_signals(near,
+  far)`** = `arg(far·conj(near))`, the phase actually observed by the receiver.
+- **`unambiguous_angle(d, λ)`** = `arcsin(λ/2d)` — the unambiguous field: a wide
+  baseline sharpens the measurement but wraps the phase sooner (resolution/
+  ambiguity trade-off); **`wrap_phase`** brings a phase back into `(−π, π]`.
+- Oracles: phase **zero at boresight** and **odd**; the estimate **exactly inverts
+  the phase** in the unambiguous field; phase recovery from element voltages; a
+  **wide baseline shrinks the unambiguous field**; **fold-over (aliasing)** outside
+  the field (phase > ±π misread); guards (degenerate baseline/λ).
+  7 tests (245 total for the crate); `fmt`/`clippy -D warnings` clean.
 
-### Ajouté — `scirust-signal` : radar — télémétrie large bande à fréquence échelonnée (`radar::stepped_frequency`) — bloc 33
-Une résolution en distance fine sans matériel large bande : une rafale de `N`
-impulsions bande étroite aux fréquences `fₙ = n·Δf` échantillonne la réflectivité
-en fréquence, et une **DFT inverse** en synthétise un profil de distance haute
-résolution.
-- **`synthetic_bandwidth(N, Δf)`** = `N·Δf` ; **`range_resolution(N, Δf)`** =
-  `c/(2·N·Δf)` (fixée par la bande synthétisée) ; **`max_unambiguous_range(Δf)`**
-  = `c/(2·Δf)` (fenêtre non ambiguë).
-- **`range_profile(measurements)`** — magnitude de la FFT inverse des échantillons
-  complexes par pas (longueur puissance de deux) ; **`range_bins(N, Δf)`** — la
-  distance de chaque case.
-- Oracles : formules bande/résolution (résolution qui **s'améliore avec la bande
-  synthétisée**, fenêtre qui s'élargit quand Δf diminue) ; un **diffuseur
-  ponctuel se localise exactement sur sa case** (profil piquant à la bonne
-  distance) ; **deux diffuseurs séparés** résolus en deux pics ; gardes
-  (longueur non puissance-de-deux → vide). 5 tests (238 au total pour le crate) ;
-  `fmt`/`clippy -D warnings` propres.
+### Added — `scirust-signal`: radar — wideband stepped-frequency ranging (`radar::stepped_frequency`) — block 33
+Fine range resolution without wideband hardware: a burst of `N` narrowband
+pulses at frequencies `fₙ = n·Δf` samples the reflectivity
+in frequency, and an **inverse DFT** synthesizes from it a high-
+resolution range profile.
+- **`synthetic_bandwidth(N, Δf)`** = `N·Δf`; **`range_resolution(N, Δf)`** =
+  `c/(2·N·Δf)` (set by the synthesized bandwidth); **`max_unambiguous_range(Δf)`**
+  = `c/(2·Δf)` (unambiguous window).
+- **`range_profile(measurements)`** — magnitude of the inverse FFT of the per-step
+  complex samples (power-of-two length); **`range_bins(N, Δf)`** — the
+  distance of each bin.
+- Oracles: bandwidth/resolution formulas (resolution that **improves with the
+  synthesized bandwidth**, window that widens as Δf decreases); a **point
+  scatterer localizes exactly on its bin** (sharp profile at the right
+  distance); **two separated scatterers** resolved into two peaks; guards
+  (non-power-of-two length → empty). 5 tests (238 total for the crate);
+  `fmt`/`clippy -D warnings` clean.
 
-### Ajouté — `scirust-signal` : radar — goniométrie monopulse (`radar::monopulse`) — bloc 32
-La mesure d'angle de précision des radars de poursuite : à partir d'une **seule**
-impulsion, deux faisceaux dépointés de part et d'autre du dépointage forment une
-voie **somme** `Σ = A + B` et une voie **différence** `Δ = A − B`, dont le rapport
-`Δ/Σ` donne l'angle hors dépointage — précision bien plus fine que la largeur de
-faisceau.
-- **`beam_voltage(θ, θ₀, σ)`** — gain (tension) d'un faisceau gaussien.
-- **`monopulse_ratio(θ, squint, σ)`** = `Δ/Σ` (faisceaux à ±squint) = exactement
-  `tanh(θ·squint/σ²)` ; **`monopulse_slope(squint, σ)`** = `squint/σ²`, la pente
-  du discriminateur au dépointage ; **`estimate_angle(ratio, squint, σ)`** =
-  `atanh(ratio)·σ²/squint`, l'inversion.
-- Oracles : rapport **nul au dépointage** et **impair** (le signe donne le côté) ;
-  monotone et borné à (−1, 1) ; **égal à la forme fermée tanh** ; l'estimation
-  **inverse exactement** le rapport (angle retrouvé) ; **linéarisation** près du
-  dépointage (`ratio ≈ k_m·θ`) ; gardes. 6 tests (233 au total pour le crate) ;
-  `fmt`/`clippy -D warnings` propres.
+### Added — `scirust-signal`: radar — monopulse direction finding (`radar::monopulse`) — block 32
+Precision angle measurement of tracking radars: from a **single** pulse, two
+beams squinted on either side of boresight form a **sum** channel `Σ = A + B`
+and a **difference** channel `Δ = A − B`, whose ratio `Δ/Σ` gives the
+off-boresight angle — accuracy far finer than the beamwidth.
+- **`beam_voltage(θ, θ₀, σ)`** — gain (voltage) of a Gaussian beam.
+- **`monopulse_ratio(θ, squint, σ)`** = `Δ/Σ` (beams at ±squint) = exactly
+  `tanh(θ·squint/σ²)`; **`monopulse_slope(squint, σ)`** = `squint/σ²`, the slope
+  of the discriminator at boresight; **`estimate_angle(ratio, squint, σ)`** =
+  `atanh(ratio)·σ²/squint`, the inversion.
+- Oracles: ratio **zero at boresight** and **odd** (the sign gives the side);
+  monotonic and bounded to (−1, 1); **equal to the closed-form tanh**; the
+  estimate **exactly inverts** the ratio (angle recovered); **linearization** near
+  boresight (`ratio ≈ k_m·θ`); guards. 6 tests (233 total for the crate);
+  `fmt`/`clippy -D warnings` clean.
 
-### Ajouté — `scirust-signal` : radar — ambiguïtés de PRF et vitesses aveugles (`radar::prf`) — bloc 31
-Les deux limites dures qu'impose l'échantillonnage à la fréquence de répétition
-des impulsions (PRF) d'un radar pulsé-Doppler.
-- **`unambiguous_range(prf)`** = `c/(2·PRF)` — portée non ambiguë ;
-  **`unambiguous_velocity(λ, prf)`** = `λ·PRF/4` — vitesse non ambiguë ;
+### Added — `scirust-signal`: radar — PRF ambiguities and blind speeds (`radar::prf`) — block 31
+The two hard limits that sampling at the pulse repetition frequency (PRF)
+imposes on a pulsed-Doppler radar.
+- **`unambiguous_range(prf)`** = `c/(2·PRF)` — unambiguous range;
+  **`unambiguous_velocity(λ, prf)`** = `λ·PRF/4` — unambiguous velocity;
   **`max_doppler(prf)`** = `PRF/2` (Nyquist).
-- **`blind_speed(n, λ, prf)`** = `n·λ·PRF/2` — vitesses aveugles (Doppler = n·PRF,
-  annulées par le canceller MTI avec le fouillis) ;
+- **`blind_speed(n, λ, prf)`** = `n·λ·PRF/2` — blind speeds (Doppler = n·PRF,
+  cancelled by the MTI canceller along with the clutter);
   **`velocity_from_doppler(f_d, λ)`** = `λ·f_d/2`.
-- **`fold_range(range, prf)`** et **`fold_velocity(v, λ, prf)`** — repli d'une
-  portée / vitesse vraie vers sa valeur mesurée (aliasée).
-- Oracles : portée non ambiguë ∝ 1/PRF ; **produit d'ambiguïté portée·vitesse =
-  cλ/8 invariant** de la PRF (le dilemme pulsé-Doppler) ; les vitesses aveugles
-  sont des multiples uniformément espacés (`v_blind(1) = 2·v_ua`) ; à la Doppler
-  de Nyquist la vitesse vaut `v_ua` ; le repli de portée enroule au-delà de
-  `R_ua` ; le repli de vitesse aliase au-delà de `±v_ua` et reste dans
-  l'intervalle. 6 tests (227 au total pour le crate) ; `fmt`/`clippy -D warnings`
-  propres.
+- **`fold_range(range, prf)`** and **`fold_velocity(v, λ, prf)`** — folding a true
+  range / velocity back to its measured (aliased) value.
+- Oracles: unambiguous range ∝ 1/PRF; **range·velocity ambiguity product =
+  cλ/8 invariant** of the PRF (the pulsed-Doppler dilemma); the blind speeds
+  are uniformly spaced multiples (`v_blind(1) = 2·v_ua`); at the Nyquist
+  Doppler the velocity equals `v_ua`; range folding wraps beyond `R_ua`;
+  velocity folding aliases beyond `±v_ua` and stays within the interval.
+  6 tests (227 total for the crate); `fmt`/`clippy -D warnings` clean.
 
-### Ajouté — `scirust-signal` : radar — statistiques d'amplitude du fouillis (`radar::clutter`) — bloc 30
-Les lois d'amplitude que les seuils CFAR visent : sur mer calme le fouillis est
-**Rayleigh**, mais sur mer forte ou terrain il devient **piqué** (queue lourde
-qu'un seuil Rayleigh sous-estime, gonflant le taux de fausse alarme).
-- **Rayleigh** — `rayleigh_pdf/cdf/quantile` (fouillis homogène, type bruit).
-- **Weibull** — `weibull_pdf/cdf/quantile` : le modèle de fouillis piqué de
-  référence, la forme `c` réglant la queue (`c=2` = Rayleigh, `c=1` =
-  exponentielle, `c<2` plus piqué).
-- **Log-normale** — `lognormal_pdf/cdf` (fouillis très piqué), via une **fonction
-  d'erreur** `erf` autonome (approximation A&S 7.1.26).
-- Oracles : `erf` sur valeurs connues (0, 1, symétrie impaire) ; CDF Rayleigh
-  monotone 0→1, quantile inverse, PDF d'intégrale 1 ; **Weibull(c=2, b=σ√2) =
-  Rayleigh(σ)** exactement ; le quantile Weibull s'inverse et une **forme plus
-  faible est plus piquée** ; CDF log-normale valide (médiane e^μ → 0,5),
-  d'intégrale 1 ; gardes de support négatif. 6 tests (221 au total pour le
-  crate) ; `fmt`/`clippy -D warnings` propres.
+### Added — `scirust-signal`: radar — clutter amplitude statistics (`radar::clutter`) — block 30
+The amplitude laws that CFAR thresholds target: over calm sea the clutter is
+**Rayleigh**, but over rough sea or terrain it becomes **spiky** (heavy tail
+that a Rayleigh threshold underestimates, inflating the false-alarm rate).
+- **Rayleigh** — `rayleigh_pdf/cdf/quantile` (homogeneous clutter, noise-like).
+- **Weibull** — `weibull_pdf/cdf/quantile`: the reference spiky-clutter model,
+  with the shape `c` tuning the tail (`c=2` = Rayleigh, `c=1` = exponential,
+  `c<2` spikier).
+- **Log-normal** — `lognormal_pdf/cdf` (very spiky clutter), via a standalone
+  **error function** `erf` (A&S 7.1.26 approximation).
+- Oracles: `erf` on known values (0, 1, odd symmetry); Rayleigh CDF
+  monotone 0→1, inverse quantile, unit-integral PDF; **Weibull(c=2, b=σ√2) =
+  Rayleigh(σ)** exactly; the Weibull quantile inverts and a **weaker shape is
+  spikier**; valid log-normal CDF (median e^μ → 0.5), unit integral; negative-
+  support guards. 6 tests (221 total for the crate); `fmt`/`clippy -D warnings`
+  clean.
 
-### Ajouté — `scirust-signal` : radar — équation du radar / bilan de portée (`radar::range_equation`) — bloc 29
-L'autre moitié du bilan de liaison (le SNR *requis* venant de `radar::swerling`) :
-le SNR qu'un radar *délivre* sur une cible de SER donnée à une portée donnée, et
-la **portée de détection maximale**. Pendant radar du bilan de portée EO/IR
-(bloc 25).
-- **`RadarLink`** — regroupe les paramètres radar/système (puissance crête,
-  gain, longueur d'onde, bande, facteur de bruit, température, pertes ; unités
-  SI/linéaires).
-- **`noise_power`** = `k_B·T·B·F` ; **`received_power(rcs, range)`** — équation
-  monostatique `P_r = P_t·G²·λ²·σ / ((4π)³·R⁴·L)` ; **`snr_at_range(rcs, range)`** ;
+### Added — `scirust-signal`: radar — radar equation / range budget (`radar::range_equation`) — block 29
+The other half of the link budget (the *required* SNR coming from
+`radar::swerling`): the SNR a radar *delivers* on a target of given RCS at a
+given range, and the **maximum detection range**. Radar counterpart of the
+EO/IR range budget (block 25).
+- **`RadarLink`** — groups the radar/system parameters (peak power, gain,
+  wavelength, bandwidth, noise figure, temperature, losses; SI/linear units).
+- **`noise_power`** = `k_B·T·B·F`; **`received_power(rcs, range)`** — monostatic
+  equation `P_r = P_t·G²·λ²·σ / ((4π)³·R⁴·L)`; **`snr_at_range(rcs, range)`**;
   **`max_range(rcs, snr_min)`** = `[P_t·G²·λ²·σ / ((4π)³·N·L·SNR_min)]^{1/4}`,
-  bouclant avec le SNR requis de `swerling`.
-- Oracles : puissance reçue en **1/R⁴** ; puissance de bruit = `k_B·T·B·F` ; SNR
-  ∝ σ et ∝ 1/R⁴ ; **cohérence portée max ↔ SNR** (le SNR délivré à `max_range`
-  égale `snr_min`) ; portée ∝ σ^{1/4} ; **intégration avec Swerling** (un `P_d`
-  plus élevé, via Albersheim, raccourcit la portée). 6 tests (215 au total pour
-  le crate) ; `fmt`/`clippy -D warnings` propres.
+  closing the loop with the required SNR from `swerling`.
+- Oracles: received power in **1/R⁴**; noise power = `k_B·T·B·F`; SNR ∝ σ and
+  ∝ 1/R⁴; **max-range ↔ SNR consistency** (the SNR delivered at `max_range`
+  equals `snr_min`); range ∝ σ^{1/4}; **integration with Swerling** (a higher
+  `P_d`, via Albersheim, shortens the range). 6 tests (215 total for the
+  crate); `fmt`/`clippy -D warnings` clean.
 
-### Ajouté — `scirust-signal` : radar — statistiques de détection Swerling (`radar::swerling`) — bloc 28
-Complément du CFAR (qui fixe le seuil pour un taux de fausse alarme donné) : la
-**probabilité de détection** `P_d` en fonction du rapport signal/bruit, selon la
-fluctuation de la SER de la cible (cas de **Swerling**).
-- **`single_pulse_threshold(pfa)`** — seuil quadratique mono-impulsion
+### Added — `scirust-signal`: radar — Swerling detection statistics (`radar::swerling`) — block 28
+Complement of the CFAR (which sets the threshold for a given false-alarm rate):
+the **probability of detection** `P_d` as a function of signal-to-noise ratio,
+according to the fluctuation of the target's RCS (**Swerling** cases).
+- **`single_pulse_threshold(pfa)`** — single-pulse quadratic threshold
   `V_T = −ln(P_fa)`.
-- **`swerling1_pd(snr, pfa) = P_fa^{1/(1+SNR)}`** — `P_d` Swerling I
-  mono-impulsion (cible Rayleigh à fluctuation lente) ; **`swerling1_required_snr`**
-  l'inverse (SNR linéaire requis pour un `P_d`).
-- **`albersheim_snr(pd, pfa, n_pulses)`** — équation d'**Albersheim** (cible
-  stable non fluctuante) : SNR (dB) requis après intégration non cohérente de
-  `n` impulsions, `−5·log₁₀N + (6,2 + 4,54/√(N+0,44))·log₁₀(A + 0,12·A·B + 1,7·B)` ;
-  **`albersheim_pd`** l'inverse (`P_d` depuis un SNR dB).
-- Oracles : seuil = loi de fausse alarme ; Swerling I → `P_fa` sans signal, →1 à
-  fort SNR, monotone, inversion aller-retour ; Albersheim **aller-retour**
-  forward/inverse à 1e-6 sur quatre points, `P_d` croît avec le SNR et avec le
-  P_fa, l'intégration **abaisse le SNR requis** ; la **perte de fluctuation**
-  Swerling I dépasse la cible stable (> 3 dB à `P_d = 0,9`). 5 tests (209 au total
-  pour le crate) ; `fmt`/`clippy -D warnings` propres.
+- **`swerling1_pd(snr, pfa) = P_fa^{1/(1+SNR)}`** — single-pulse Swerling I
+  `P_d` (slowly fluctuating Rayleigh target); **`swerling1_required_snr`** its
+  inverse (linear SNR required for a `P_d`).
+- **`albersheim_snr(pd, pfa, n_pulses)`** — **Albersheim** equation (stable
+  non-fluctuating target): SNR (dB) required after non-coherent integration of
+  `n` pulses, `−5·log₁₀N + (6.2 + 4.54/√(N+0.44))·log₁₀(A + 0.12·A·B + 1.7·B)`;
+  **`albersheim_pd`** its inverse (`P_d` from an SNR in dB).
+- Oracles: threshold = false-alarm law; Swerling I → `P_fa` without signal, →1 at
+  high SNR, monotone, round-trip inversion; Albersheim **round-trip**
+  forward/inverse at 1e-6 over four points, `P_d` grows with SNR and with
+  P_fa, integration **lowers the required SNR**; the Swerling I **fluctuation
+  loss** exceeds the stable target (> 3 dB at `P_d = 0.9`). 5 tests (209 total
+  for the crate); `fmt`/`clippy -D warnings` clean.
 
-### Ajouté — `scirust-signal` : radar — analyse micro-Doppler (`radar::micro_doppler`) — bloc 27
-La signature **temps-fréquence** des micro-mouvements d'une cible (pales de rotor,
-hélice, démarche) — base de la reconnaissance de cible non coopérative (NCTR).
-- **`spectrogram(signal, win_len, hop)`** — TFCT à fenêtre de Hann sur la FFT
-  puissance-de-deux du crate (spectre de magnitude par trame) ;
-  **`bin_frequencies(win_len, fs)`** — fréquences Doppler signées des bins.
-- Descripteurs : **`ridge`** (fréquence dominante par trame = Doppler instantané),
-  **`mean_doppler`** (Doppler de corps, moyenne de la crête), **`doppler_bandwidth`**
-  (extension crête-à-crête) et **`cadence`** (fréquence de répétition du
-  micro-mouvement, par pic d'autocorrélation de la crête au-delà du lobe
-  principal). Sans dépendance.
-- Oracles (signal synthétique de diffuseur tournant, fréquence instantanée
-  `f_b + f_max·cos(2π f_rot t)`) : la moyenne de la crête **retrouve le Doppler de
-  corps** `f_b` ; la bande **reflète le micro-mouvement** (≈ 2·f_max) et est nulle
-  pour un ton pur ; la cadence **retrouve la fréquence de rotation** `f_rot` ; un
-  ton pur a une crête plate à sa fréquence ; gardes (fenêtre non-puissance-de-deux,
-  hop nul, signal trop court, crête vide). 6 tests (204 au total pour le crate) ;
-  `fmt`/`clippy -D warnings` propres.
+### Added — `scirust-signal`: radar — micro-Doppler analysis (`radar::micro_doppler`) — block 27
+The **time-frequency** signature of a target's micro-motions (rotor blades,
+propeller, gait) — the basis of non-cooperative target recognition (NCTR).
+- **`spectrogram(signal, win_len, hop)`** — Hann-windowed STFT on the crate's
+  power-of-two FFT (magnitude spectrum per frame); **`bin_frequencies(win_len,
+  fs)`** — signed Doppler frequencies of the bins.
+- Descriptors: **`ridge`** (dominant frequency per frame = instantaneous
+  Doppler), **`mean_doppler`** (body Doppler, mean of the ridge),
+  **`doppler_bandwidth`** (peak-to-peak spread) and **`cadence`** (repetition
+  frequency of the micro-motion, via the autocorrelation peak of the ridge
+  beyond the main lobe). No dependency.
+- Oracles (synthetic rotating-scatterer signal, instantaneous frequency
+  `f_b + f_max·cos(2π f_rot t)`): the ridge mean **recovers the body Doppler**
+  `f_b`; the bandwidth **reflects the micro-motion** (≈ 2·f_max) and is zero
+  for a pure tone; the cadence **recovers the rotation frequency** `f_rot`; a
+  pure tone has a flat ridge at its frequency; guards (non-power-of-two
+  window, zero hop, too-short signal, empty ridge). 6 tests (204 total for the
+  crate); `fmt`/`clippy -D warnings` clean.
 
-### Ajouté — `scirust-signal` : radar — filtre à association probabiliste PDAF (`radar::pda`) — bloc 26
-Montée en fidélité du pistage en **milieu encombré** : là où `radar::mtt`
-associe chaque piste à une seule mesure par un choix dur au plus proche voisin
-(qu'un faux écho plus proche peut détourner), le **PDAF** garde toutes les
-mesures de la porte, pondérées par leur probabilité d'association.
-- **`PdaFilter`** — PDAF monocible sur l'état cartésien à vitesse constante
-  `[x, vₓ, y, v_y]` avec mesures de position `(x, y)`. Chaque trame : prédiction,
-  puis mise à jour par innovation combinée `ν̄ = Σ βᵢ νᵢ` sur les mesures de la
-  porte, avec `β₀` la probabilité de non-détection (PDA paramétrique :
-  `b = λ·|2πS|^{1/2}·(1 − P_D·P_G)/P_D`). La covariance porte le terme de
-  **dispersion des innovations** `K(Σβᵢ νᵢνᵢᵀ − ν̄ν̄ᵀ)Kᵀ` qui la gonfle selon
-  l'ambiguïté d'association. Réutilise les utilitaires matriciels denses de
-  `radar::imm2d`. Sans dépendance.
-- Oracles : sans clutter (λ=0) et une mesure par trame, le PDAF se réduit à un
-  Kalman et **suit une cible à vitesse constante** ; **suit une cible à travers
-  un clutter dense** (mesure vraie bruitée + 5 faux échos par trame) ; une trame
-  sans détection **coaste et gonfle la covariance** (β₀=1) ; β₀ **chute quand une
-  mesure tombe sur la prédiction** et vaut 1 sur trame vide. 4 tests (198 au
-  total pour le crate) ; `fmt`/`clippy -D warnings` propres.
+### Added — `scirust-signal`: radar — probabilistic data association filter PDAF (`radar::pda`) — block 26
+Fidelity upgrade of tracking in **cluttered environments**: where `radar::mtt`
+associates each track to a single measurement by a hard nearest-neighbor choice
+(which a closer false echo can divert), the **PDAF** keeps all the
+measurements in the gate, weighted by their association probability.
+- **`PdaFilter`** — single-target PDAF on the constant-velocity Cartesian state
+  `[x, vₓ, y, v_y]` with position measurements `(x, y)`. Each frame: prediction,
+  then update by the combined innovation `ν̄ = Σ βᵢ νᵢ` over the in-gate
+  measurements, with `β₀` the probability of non-detection (parametric PDA:
+  `b = λ·|2πS|^{1/2}·(1 − P_D·P_G)/P_D`). The covariance carries the
+  **innovation spread** term `K(Σβᵢ νᵢνᵢᵀ − ν̄ν̄ᵀ)Kᵀ` which inflates it according to
+  the association ambiguity. Reuses the dense matrix utilities of `radar::imm2d`.
+  No dependency.
+- Oracles: without clutter (λ=0) and one measurement per frame, the PDAF reduces
+  to a Kalman filter and **tracks a constant-velocity target**; **tracks a
+  target through dense clutter** (noisy true measurement + 5 false echoes per
+  frame); a detection-free frame **coasts and inflates the covariance** (β₀=1);
+  β₀ **drops when a measurement falls on the prediction** and equals 1 on an
+  empty frame. 4 tests (198 total for the crate); `fmt`/`clippy -D warnings`
+  clean.
 
-### Ajouté — `scirust-vision` : optronique — transmission atmosphérique et bilan de portée (`atmosphere`) — bloc 25
-Le chaînon qui transforme la sensibilité intrinsèque du capteur (NETD) en **bilan
-de portée** : l'atmosphère entre la cible et le capteur atténue le contraste, donc
-ce qui est détectable dépend du trajet.
-- **`transmittance(α, R) = e^{−αR}`** — loi de **Beer–Lambert** ; **`optical_depth`**
-  `α·R` ; **`extinction(absorption, scattering)`** additive.
-- **`extinction_from_visibility(V) = 3.912/V`** — loi de **Koschmieder** (seuil de
-  contraste 2 %) ; **`extinction_from_transmittance(τ, R) = −ln(τ)/R`** (inverse).
-- **`apparent_contrast(C₀, α, R) = C₀·e^{−αR}`** — loi de transmission du contraste ;
-  **`required_delta_t(NETD, α, R) = NETD/τ`** — le ΔT cible nécessaire pour percer
-  le trajet à la portée `R`, qui croît avec la distance.
-- Oracles : transmittance unitaire à portée nulle et décroissance monotone
-  (forme fermée `e^{−αR}`) ; **Beer–Lambert multiplicatif** sur segments
-  `τ(R₁+R₂)=τ(R₁)τ(R₂)` ; profondeur optique ↔ transmittance inverses avec
-  aller-retour de l'extinction ; la visibilité de Koschmieder **atteint le seuil
-  2 %** ; extinction additive et contraste apparent en forme fermée ; le ΔT requis
-  **croît avec la portée** (= NETD à portée nulle). 6 tests (60 au total pour le
-  crate) ; `fmt`/`clippy -D warnings` propres.
+### Added — `scirust-vision`: optronics — atmospheric transmission and range budget (`atmosphere`) — block 25
+The link that turns the sensor's intrinsic sensitivity (NETD) into a **range
+budget**: the atmosphere between target and sensor attenuates the contrast, so
+what is detectable depends on the path.
+- **`transmittance(α, R) = e^{−αR}`** — **Beer–Lambert** law; **`optical_depth`**
+  `α·R`; **`extinction(absorption, scattering)`** additive.
+- **`extinction_from_visibility(V) = 3.912/V`** — **Koschmieder** law (2 %
+  contrast threshold); **`extinction_from_transmittance(τ, R) = −ln(τ)/R`**
+  (inverse).
+- **`apparent_contrast(C₀, α, R) = C₀·e^{−αR}`** — contrast transmission law;
+  **`required_delta_t(NETD, α, R) = NETD/τ`** — the target ΔT needed to pierce
+  the path at range `R`, which grows with distance.
+- Oracles: unit transmittance at zero range and monotone decay (closed form
+  `e^{−αR}`); **multiplicative Beer–Lambert** over segments
+  `τ(R₁+R₂)=τ(R₁)τ(R₂)`; optical depth ↔ transmittance inverses with
+  extinction round-trip; Koschmieder visibility **reaches the 2 % threshold**;
+  additive extinction and closed-form apparent contrast; the required ΔT
+  **grows with range** (= NETD at zero range). 6 tests (60 total for the
+  crate); `fmt`/`clippy -D warnings` clean.
 
-### Ajouté — `scirust-vision` : optronique — radiométrie IR et sensibilité NETD/MRTD (`radiometry`) — bloc 24
-Le pendant *radiométrique* du module `optics` (qui couvre la réponse spatiale
-PSF/MTF) : la physique qui fixe la plus petite différence de température qu'un
-capteur EO/IR peut voir.
-- **Radiométrie** — loi de Planck (`planck_radiance`, `planck_radiance_dt`),
-  exitance de Stefan–Boltzmann `M = σT⁴` (`radiant_exitance`) et sa dérivée
-  `4σT³`, loi du déplacement de Wien `λ_peak = b/T` (`peak_wavelength`), et
-  radiance / **contraste thermique** intégrés en bande par quadrature
+### Added — `scirust-vision`: optronics — IR radiometry and NETD/MRTD sensitivity (`radiometry`) — block 24
+The *radiometric* counterpart of the `optics` module (which covers the spatial
+PSF/MTF response): the physics that sets the smallest temperature difference an
+EO/IR sensor can see.
+- **Radiometry** — Planck's law (`planck_radiance`, `planck_radiance_dt`),
+  Stefan–Boltzmann exitance `M = σT⁴` (`radiant_exitance`) and its derivative
+  `4σT³`, Wien's displacement law `λ_peak = b/T` (`peak_wavelength`), and
+  in-band integrated radiance / **thermal contrast** by quadrature
   (`band_radiance`, `thermal_contrast`).
-- **Sensibilité** — **`netd`** (différence de température équivalente au bruit :
-  le ΔT donnant un signal égal au bruit détecteur)
-  `NETD = 4F²√Δf / (π√A_d·τ_o·D*·(∂L/∂T)_bande)`, et **`mrtd`** (différence de
-  température minimale résolvable) `MRTD = k·NETD/MTF`, compromis
-  sensibilité-thermique / résolution qui combine la NETD à la MTF de `optics`.
-- Oracles : l'intégrale de Planck sur tout le spectre × π **retrouve σT⁴** ;
-  exitance et dérivée aux formes fermées (et différence finie) ; le pic de Wien
-  **se décale en 1/T** et la courbe de Planck y culmine ; ∂L/∂T analytique =
-  différence finie ; le contraste thermique est positif et **croît avec la
-  température** ; la NETD **suit ses lois d'échelle** (∝ F², 1/D*, 1/contraste,
-  1/√A_d) ; la MRTD **diverge quand la MTF s'annule**. 7 tests (54 au total pour
-  le crate) ; `fmt`/`clippy -D warnings` propres.
+- **Sensitivity** — **`netd`** (noise-equivalent temperature difference: the
+  ΔT giving a signal equal to the detector noise)
+  `NETD = 4F²√Δf / (π√A_d·τ_o·D*·(∂L/∂T)_band)`, and **`mrtd`** (minimum
+  resolvable temperature difference) `MRTD = k·NETD/MTF`, a thermal-
+  sensitivity / resolution trade-off that combines the NETD with the MTF of
+  `optics`.
+- Oracles: the Planck integral over the whole spectrum × π **recovers σT⁴**;
+  exitance and derivative at the closed forms (and finite difference); the Wien
+  peak **shifts as 1/T** and the Planck curve peaks there; analytical ∂L/∂T =
+  finite difference; thermal contrast is positive and **grows with
+  temperature**; the NETD **follows its scaling laws** (∝ F², 1/D*, 1/contrast,
+  1/√A_d); the MRTD **diverges when the MTF vanishes**. 7 tests (54 total for
+  the crate); `fmt`/`clippy -D warnings` clean.
 
-### Ajouté — `scirust-vision` : optronique — détection CFAR de petites cibles (`detect`) — bloc 23
-Pont entre l'optronique et le pistage : le détecteur CFAR **côté image**, analogue
-EO/IR du CFAR radar, qui extrait de petites cibles chaudes d'un fond thermique
-variable et les réduit en centroïdes prêts à alimenter la chaîne de pistage.
-- **`cfar_mask(image, guard, train, k)`** — masque de détection : pour chaque
-  pixel, estime le fond local sur un **anneau de cellules d'apprentissage** autour
-  d'une **bande de garde** (pour qu'une cible ne corrompe pas sa propre estimation
-  de fond) et marque le pixel s'il dépasse la moyenne locale de `k` écarts-types
-  locaux. Le seuil suivant les statistiques *locales*, une cible est trouvée sur
-  ciel sombre comme sur piédestal brillant.
-- **`detect_targets(image, guard, train, k)`** / **`TargetDetection`** — regroupe
-  les pixels seuillés par composantes connexes (`connected_components`) et les
-  réduit en centroïdes **pondérés par l'intensité** (position sous-pixel, amplitude
-  crête, nombre de pixels).
-- Oracles : détecte une cible ponctuelle sur fond plat ; aucune détection sur fond
-  uniforme ; détecte une cible **sur piédestal brillant** (le CFAR suit le niveau
-  local) ; le centroïde pondéré est **sous-pixel** ; résout deux cibles séparées ;
-  un seuil `k` plus élevé **ne fait pas croître** les fausses alarmes (fond
-  bruité). 6 tests (47 au total pour le crate) ; `fmt`/`clippy -D warnings`
-  propres.
+### Added — `scirust-vision`: optronics — CFAR detection of small targets (`detect`) — block 23
+Bridge between optronics and tracking: the **image-side** CFAR detector, the
+EO/IR analogue of the radar CFAR, which extracts small hot targets from a
+variable thermal background and reduces them to centroids ready to feed the
+tracking chain.
+- **`cfar_mask(image, guard, train, k)`** — detection mask: for each pixel,
+  estimates the local background over a **ring of training cells** around a
+  **guard band** (so that a target cannot corrupt its own background estimate)
+  and marks the pixel if it exceeds the local mean by `k` local standard
+  deviations. Since the threshold follows the *local* statistics, a target is
+  found on a dark sky as on a bright pedestal.
+- **`detect_targets(image, guard, train, k)`** / **`TargetDetection`** — groups
+  the thresholded pixels by connected components (`connected_components`) and
+  reduces them to **intensity-weighted** centroids (sub-pixel position, peak
+  amplitude, pixel count).
+- Oracles: detects a point target on a flat background; no detection on a
+  uniform background; detects a target **on a bright pedestal** (the CFAR
+  follows the local level); the weighted centroid is **sub-pixel**; resolves
+  two separated targets; a higher `k` threshold **does not grow** the false
+  alarms (noisy background). 6 tests (47 total for the crate); `fmt`/`clippy
+  -D warnings` clean.
 
-### Ajouté — `scirust-signal` : radar — pistage multicible à porte NIS (`radar::mtt`) — bloc 22
-Bouclage de la chaîne de pistage : un tracker **multicible** de bout en bout sur
-mesures **polaires**, un `RadarEkf` par piste, avec association par **porte
-statistique**.
-- **`RadarMultiTracker`** / **`RadarTrack`** — chaque piste est un filtre de
-  Kalman étendu (bloc 21) alimenté en distance/azimut ; l'association gate chaque
-  couple (piste, mesure) par le **carré de l'innovation normalisée** (NIS,
-  distance de Mahalanobis) comparé à un quantile du χ² (2 d.d.l.), donc la porte
-  se resserre ou s'élargit selon l'incertitude propre de chaque piste au lieu
-  d'un rayon fixe. Chaque trame : prédiction de toutes les pistes, gating par
-  NIS, association gloutonne au plus proche, mise à jour des pistes appariées,
-  coasting des autres, naissance d'une piste par mesure non associée
-  (polaire→cartésien), mort au-delà de `max_misses`.
-- **`RadarEkf::nis(...)`** — nouvelle méthode exposant `yᵀ·S⁻¹·y`, la statistique
-  de gating, sans muter le filtre.
-- Oracles : suit une cible unique (position à la vérité, id stable) ; garde deux
-  cibles séparées distinctes ; la **porte NIS rejette du clutter** (la vraie
-  piste coaste sans être contaminée, le clutter fait naître sa propre piste) ;
-  naissance puis mort d'une piste perdue ; le NIS est **petit sur cible et grand
-  hors cible** ; trames vides inertes. 6 tests (194 au total pour le crate) ;
-  `fmt`/`clippy -D warnings` propres.
+### Added — `scirust-signal`: radar — multi-target tracking with NIS gate (`radar::mtt`) — block 22
+Closing the loop of the tracking chain: an end-to-end **multi-target** tracker on
+**polar** measurements, one `RadarEkf` per track, with **statistical gate**
+association.
+- **`RadarMultiTracker`** / **`RadarTrack`** — each track is an extended Kalman
+  filter (block 21) fed with range/azimuth; the association gates each
+  (track, measurement) pair by the **normalized innovation squared** (NIS,
+  Mahalanobis distance) compared to a χ² quantile (2 d.o.f.), so the gate
+  tightens or widens according to each track's own uncertainty instead of a
+  fixed radius. Each frame: prediction of all tracks, NIS gating, greedy
+  nearest-neighbor association, update of the matched tracks, coasting of the
+  others, birth of a track for each unassociated measurement
+  (polar→Cartesian), death beyond `max_misses`.
+- **`RadarEkf::nis(...)`** — new method exposing `yᵀ·S⁻¹·y`, the gating
+  statistic, without mutating the filter.
+- Oracles: tracks a single target (position at truth, stable id); keeps two
+  separated targets distinct; the **NIS gate rejects clutter** (the true
+  track coasts uncontaminated, the clutter spawns its own track);
+  birth then death of a lost track; the NIS is **small on target and large
+  off target**; empty frames inert. 6 tests (194 total for the crate);
+  `fmt`/`clippy -D warnings` clean.
 
-### Ajouté — `scirust-signal` : radar — filtre de Kalman étendu polaire (`radar::ekf`) — bloc 21
-Pistage à partir de mesures **radar réelles** : les trackers précédents
-supposent une position cartésienne déjà disponible, alors qu'un radar fournit
-distance et azimut (mesure polaire, fonction non linéaire de l'état).
-- **`RadarEkf`** — filtre de Kalman **étendu** sur l'état cartésien
-  `[x, vₓ, y, v_y]` : la prédiction reste linéaire (vitesse constante, donc
-  exacte), et la correction linéarise l'observation polaire
-  `h(x) = (√(x²+y²), atan2(y, x))` via sa jacobienne autour de l'estimé courant.
-  L'innovation d'azimut est **repliée** dans `(−π, π]` pour qu'une cible
-  franchissant la frontière ±π soit suivie sans discontinuité. Distance et azimut
-  ont chacun leur variance de mesure.
-- Réutilise les utilitaires matriciels denses de `radar::imm2d` (produit,
-  transposée, Cholesky) désormais `pub(super)`. Sans dépendance.
-- Oracles : `wrap_pi` mappe dans l'intervalle principal ; l'EKF **restitue une
-  trajectoire cartésienne à partir de mesures polaires** (position et vitesse à
-  la vérité) ; **suit une cible franchissant le repli d'azimut** (le long de
-  −x) sans décrochage ; la mise à jour réduit la variance de position ; la mesure
-  prédite correspond à l'état ; garde à l'origine (azimut indéfini → mise à jour
-  inerte). 6 tests (188 au total pour le crate) ; `fmt`/`clippy -D warnings`
-  propres.
+### Added — `scirust-signal`: radar — polar extended Kalman filter (`radar::ekf`) — block 21
+Tracking from **real radar measurements**: the previous trackers assume a
+Cartesian position already available, whereas a radar provides range and
+azimuth (polar measurement, a nonlinear function of the state).
+- **`RadarEkf`** — **extended** Kalman filter on the Cartesian state
+  `[x, vₓ, y, v_y]`: the prediction stays linear (constant velocity, hence
+  exact), and the correction linearizes the polar observation
+  `h(x) = (√(x²+y²), atan2(y, x))` via its Jacobian around the current estimate.
+  The azimuth innovation is **wrapped** into `(−π, π]` so that a target
+  crossing the ±π boundary is tracked without discontinuity. Range and azimuth
+  each have their own measurement variance.
+- Reuses the dense matrix utilities of `radar::imm2d` (product, transpose,
+  Cholesky), now `pub(super)`. No dependency.
+- Oracles: `wrap_pi` maps into the principal interval; the EKF **recovers a
+  Cartesian trajectory from polar measurements** (position and velocity at
+  truth); **tracks a target crossing the azimuth fold** (along −x) without
+  losing lock; the update reduces the position variance; the predicted
+  measurement matches the state; guard at the origin (undefined azimuth →
+  inert update). 6 tests (188 total for the crate); `fmt`/`clippy -D warnings`
+  clean.
 
-### Ajouté — `scirust-signal` : radar — IMM à virage coordonné 2-D (`radar::imm2d`) — bloc 20
-Pistage de cibles **manœuvrantes** dans le plan : là où l'IMM 1-D (bloc 19)
-approxime une manœuvre en gonflant le bruit de process d'un modèle à vitesse
-constante, ce bloc ajoute un vrai modèle de **virage coordonné** qui fait
-tourner le vecteur vitesse à une cadence angulaire ω constante.
-- **`KalmanLinear`** — filtre de Kalman linéaire général à `n` états / `m`
-  mesures (matrices denses, mise à jour par factorisation de Cholesky,
-  vraisemblance gaussienne de l'innovation). Réutilisable bien au-delà du
-  pistage.
-- **`cv_model_2d`** / **`ct_model_2d`** — les deux modèles de mouvement plan sur
-  l'état cartésien `[x, vₓ, y, v_y]` : quasi-vitesse-constante et virage
-  coordonné à cadence ω fixe (dégénère vers CV quand ω→0).
-- **`Imm2D`** — estimateur Interacting Multiple Model sur un banc de ces modèles
-  (typiquement CV + un ou deux CT à ±ω) : en ligne droite le modèle CV gagne,
-  dès le virage le modèle CT correspondant prend le relais et le pistage suit
-  l'arc au lieu de le survoler. Sans dépendance.
-- Oracles : CT dégénère vers CV quand ω→0 ; le Kalman linéaire restitue la
-  vitesse constante 2-D ; le filtre CT **suit une trajectoire circulaire bien
-  mieux qu'un filtre CV** (erreur < moitié) ; l'IMM **choisit le modèle de
-  virage et bat un filtre CV seul sur une manœuvre** (probabilité du mode CT qui
-  monte) ; probabilités de mode valides ; Cholesky résout un système connu et
-  rejette une matrice non définie positive ; garde du banc vide. 7 tests (182 au
-  total pour le crate) ; `fmt`/`clippy -D warnings` propres.
+### Added — `scirust-signal`: radar — 2-D coordinated-turn IMM (`radar::imm2d`) — block 20
+Tracking **maneuvering** targets in the plane: where the 1-D IMM (block 19)
+approximates a maneuver by inflating the process noise of a constant-velocity
+model, this block adds a true **coordinated-turn** model that rotates the
+velocity vector at a constant angular rate ω.
+- **`KalmanLinear`** — general linear Kalman filter with `n` states / `m`
+  measurements (dense matrices, Cholesky-factorization update, Gaussian
+  innovation likelihood). Reusable well beyond tracking.
+- **`cv_model_2d`** / **`ct_model_2d`** — the two planar motion models on the
+  Cartesian state `[x, vₓ, y, v_y]`: quasi-constant-velocity and coordinated
+  turn at fixed rate ω (degenerates toward CV when ω→0).
+- **`Imm2D`** — Interacting Multiple Model estimator over a bank of these
+  models (typically CV + one or two CT at ±ω): in a straight line the CV model
+  wins, as soon as the turn starts the matching CT model takes over and the
+  tracking follows the arc instead of cutting across it. No dependency.
+- Oracles: CT degenerates toward CV when ω→0; the linear Kalman recovers the
+  2-D constant velocity; the CT filter **tracks a circular trajectory much
+  better than a CV filter** (error < half); the IMM **selects the turning model
+  and beats a CV-only filter on a maneuver** (CT-mode probability rising);
+  valid mode probabilities; Cholesky solves a known system and rejects a
+  non-positive-definite matrix; empty-bank guard. 7 tests (182 total for the
+  crate); `fmt`/`clippy -D warnings` clean.
 
-### Ajouté — `scirust-signal` : radar — filtrage de Kalman / IMM (`radar::kalman`) — bloc 19
-Montée en gamme du pistage : le filtre α–β à gains fixes est complété par un
-filtre de Kalman adaptatif et un estimateur multi-modèles pour cibles
-manœuvrantes.
-- **`KalmanCV`** — filtre de Kalman à vitesse constante sur l'état `(p, v)` avec
-  covariance `2×2` explicite : modèle de bruit de process à accélération blanche
-  continue `Q = q·[[dt³/3, dt²/2],[dt²/2, dt]]`, gain adaptatif, variance d'état
-  et vraisemblance de l'innovation exposées.
-- **`Imm`** — estimateur **Interacting Multiple Model** : un banc de filtres de
-  Kalman (typiquement un modèle « calme » à faible bruit et un modèle « agile »
-  à fort bruit) mélangés à chaque trame par des probabilités de mode
-  markoviennes. En vol stationnaire le modèle calme domine (lisse, faible
-  variance) ; dès la manœuvre la vraisemblance du modèle agile l'emporte et
-  prend le relais, suivant la manœuvre avec bien moins de retard qu'un modèle
-  fixe. Sans dépendance (état 2-D, tout en forme fermée `2×2`).
-- Oracles : Kalman restitue la vitesse constante, la mise à jour réduit la
-  variance vers un régime permanent, la vraisemblance est maximale à la
-  prédiction ; les probabilités de mode IMM forment une distribution valide et
-  **favorisent le modèle calme sur cible stable** ; l'IMM **bat un filtre calme
-  seul à travers une manœuvre** (erreur moindre, montée de la probabilité du
-  modèle agile) ; garde du banc vide. 7 tests (175 au total pour le crate) ;
-  `fmt`/`clippy -D warnings` propres.
+### Added — `scirust-signal`: radar — Kalman filtering / IMM (`radar::kalman`) — block 19
+Scaling up tracking: the fixed-gain α–β filter is complemented by an adaptive
+Kalman filter and a multi-model estimator for maneuvering targets.
+- **`KalmanCV`** — constant-velocity Kalman filter on the state `(p, v)` with
+  explicit `2×2` covariance: continuous white-acceleration process-noise model
+  `Q = q·[[dt³/3, dt²/2],[dt²/2, dt]]`, adaptive gain, state variance and
+  innovation likelihood exposed.
+- **`Imm`** — **Interacting Multiple Model** estimator: a bank of Kalman
+  filters (typically a "calm" low-noise model and an "agile" high-noise model)
+  mixed at each frame by Markovian mode probabilities. In steady flight the
+  calm model dominates (smooth, low variance); as soon as the maneuver starts
+  the agile model's likelihood prevails and takes over, following the maneuver
+  with far less lag than a fixed model. No dependency (2-D state, all in
+  closed-form `2×2`).
+- Oracles: Kalman recovers constant velocity, the update reduces the variance
+  toward a steady state, the likelihood is maximal at the prediction; the IMM
+  mode probabilities form a valid distribution and **favor the calm model on a
+  stable target**; the IMM **beats a calm-only filter through a maneuver**
+  (smaller error, rising agile-model probability); empty-bank guard. 7 tests
+  (175 total for the crate); `fmt`/`clippy -D warnings` clean.
 
-### Ajouté — `scirust-signal` : radar — goniométrie ESPRIT (`radar::esprit`) — bloc 18
-Estimation d'angle d'arrivée **sans grille** : complément de MUSIC qui, au lieu
-de balayer un spectre, lit les angles directement sur les valeurs propres.
-- **`esprit_doa(snapshots, spacing, num_sources)`** — exploite l'invariance
-  rotationnelle d'un réseau linéaire uniforme : les deux sous-réseaux (premiers
-  et derniers `M−1` capteurs) voient les mêmes fronts d'onde à un déphasage
-  `e^{jμ}` près, `μ = 2π·spacing·sin θ` étant le pas de phase du vecteur
-  directionnel. La matrice `Ψ` reliant leurs sous-espaces signal (moindres
-  carrés `E₁Ψ = E₂`) est semblable à `diag(e^{jμ_k})` ; ses valeurs propres
-  donnent `sin θ_k = μ_k / (2π·spacing)`, angles renvoyés triés.
-- Réutilise l'eigensolveur hermitien de `radar::music` pour le sous-espace, plus
-  un **eigensolveur complexe** écrit de zéro (réduction de Hessenberg par
-  rotations de Givens puis **algorithme QR à décalage** de Wilkinson) pour la
-  matrice `Ψ` non hermitienne. Sans dépendance.
-- Oracles : les valeurs propres d'une matrice triangulaire sont sa diagonale et
-  celles d'une rotation restent sur le cercle unité ; ESPRIT restitue une source
-  unique et **résout deux sources hors grille** à mieux que 0,5° ; gardes
-  (réseau < 2 capteurs, système singulier → vide). 5 tests (168 au total pour le
-  crate) ; `fmt`/`clippy -D warnings` propres.
+### Added — `scirust-signal`: radar — ESPRIT direction finding (`radar::esprit`) — block 18
+**Gridless** angle-of-arrival estimation: complement of MUSIC which, instead of
+sweeping a spectrum, reads the angles directly from the eigenvalues.
+- **`esprit_doa(snapshots, spacing, num_sources)`** — exploits the rotational
+  invariance of a uniform linear array: the two subarrays (first and last `M−1`
+  sensors) see the same wavefronts up to a phase shift `e^{jμ}`, with `μ =
+  2π·spacing·sin θ` the phase step of the steering vector. The matrix `Ψ`
+  relating their signal subspaces (least squares `E₁Ψ = E₂`) is similar to
+  `diag(e^{jμ_k})`; its eigenvalues give `sin θ_k = μ_k / (2π·spacing)`,
+  returned angles sorted.
+- Reuses the Hermitian eigensolver of `radar::music` for the subspace, plus a
+  **complex eigensolver written from scratch** (Hessenberg reduction by Givens
+  rotations then Wilkinson's **shifted QR algorithm**) for the non-Hermitian
+  matrix `Ψ`. No dependency.
+- Oracles: the eigenvalues of a triangular matrix are its diagonal and those of
+  a rotation stay on the unit circle; ESPRIT recovers a single source and
+  **resolves two off-grid sources** to better than 0.5°; guards (array < 2
+  sensors, singular system → empty). 5 tests (168 total for the crate);
+  `fmt`/`clippy -D warnings` clean.
 
-### Ajouté — `scirust-vision` : optronique — déconvolution de Wiener (`optics`) — bloc 17
-Restauration d'image dans le **domaine fréquentiel**, complément de la
-déconvolution spatiale de Richardson–Lucy.
-- **`wiener_deconvolution(blurred, psf, nsr)`** — filtre de Wiener
-  `F̂ = 𝔉⁻¹[ conj(H)/(|H|² + nsr)·G ]` : `G`/`H` sont les TF de l'image floue et
-  de la PSF (préservant la moyenne, centrée à l'origine avec repli circulaire),
-  `nsr` le rapport bruit/signal qui régularise l'inverse. Bâti sur une **FFT 2-D
-  séparable** (FFT lignes puis colonnes via `scirust-signal`, dimensions
-  puissances de deux).
-- Oracles : une convolution circulaire connue est **inversée exactement** par
-  Wiener à régularisation évanescente (aller-retour scène→flou→restauration à
-  1e-5) ; une PSF de Dirac est l'identité ; gardes (dimensions non-puissance-de-
-  deux, PSF plus grande que l'image → image vide). 3 tests (41 au total pour le
-  crate) ; `fmt`/`clippy -D warnings` propres.
+### Added — `scirust-vision`: optronics — Wiener deconvolution (`optics`) — block 17
+Image restoration in the **frequency domain**, complement of the spatial
+Richardson–Lucy deconvolution.
+- **`wiener_deconvolution(blurred, psf, nsr)`** — Wiener filter
+  `F̂ = 𝔉⁻¹[ conj(H)/(|H|² + nsr)·G ]`: `G`/`H` are the transforms of the blurred
+  image and of the PSF (mean-preserving, centered at the origin with circular
+  wrap-around), `nsr` the noise-to-signal ratio that regularizes the inverse.
+  Built on a **separable 2-D FFT** (FFT rows then columns via `scirust-signal`,
+  power-of-two dimensions).
+- Oracles: a known circular convolution is **inverted exactly** by Wiener with
+  vanishing regularization (scene→blur→restoration round-trip at 1e-5); a Dirac
+  PSF is the identity; guards (non-power-of-two dimensions, PSF larger than the
+  image → empty image). 3 tests (41 total for the crate); `fmt`/`clippy -D
+  warnings` clean.
 
-### Ajouté — `scirust-sim` : optoélectronique — photodiode à avalanche APD (`apd`) — bloc 16
-Le récepteur optoélectronique haute sensibilité (lidar, télémétrie laser), qui
-complète la photodiode : un gain d'avalanche `M` amplifie le signal mais ajoute
-un **bruit d'excès** (facteur de McIntyre).
-- **`excess_noise_factor(M, k)`** — facteur de McIntyre `F(M) = k·M + (1−k)(2−1/M)`.
-- **`Apd`** / **`ApdParams`** — courant primaire / multiplié / de signal, bruit
-  d'excès, variances de bruit de grenaille (`2q·I·M²·F·B`) et thermique
-  (`4k_B·T·B/R_L`), et le rapport signal/bruit `SNR = I_s²/(σ²_grenaille +
-  σ²_thermique)`.
-- Oracles : `F(1) = 1` pour tout `k`, `F → 2−1/M` (k=0) et `F = M` (k=1),
-  monotone ; courants et variances aux formes fermées ; le **SNR passe par un
-  optimum** (gain 50 meilleur que 1 — limité par le thermique — et que 1000 —
-  limité par le bruit d'excès) ; rejet des paramètres invalides (gain < 1,
-  `k ∉ [0,1]`). 4 tests (118 au total pour le crate) ;
-  `fmt`/`clippy -D warnings`/`miri` propres.
+### Added — `scirust-sim`: optoelectronics — avalanche photodiode APD (`apd`) — block 16
+The high-sensitivity optoelectronic receiver (lidar, laser ranging), which
+completes the photodiode: an avalanche gain `M` amplifies the signal but adds
+**excess noise** (McIntyre factor).
+- **`excess_noise_factor(M, k)`** — McIntyre factor `F(M) = k·M + (1−k)(2−1/M)`.
+- **`Apd`** / **`ApdParams`** — primary / multiplied / signal current, excess
+  noise, shot-noise variances (`2q·I·M²·F·B`) and thermal
+  (`4k_B·T·B/R_L`), and the signal-to-noise ratio `SNR = I_s²/(σ²_shot +
+  σ²_thermal)`.
+- Oracles: `F(1) = 1` for any `k`, `F → 2−1/M` (k=0) and `F = M` (k=1),
+  monotone; currents and variances at the closed forms; the **SNR goes through
+  an optimum** (gain 50 better than 1 — thermal-limited — and than 1000 —
+  excess-noise-limited); rejection of invalid parameters (gain < 1, `k ∉
+  [0,1]`). 4 tests (118 total for the crate); `fmt`/`clippy -D
+  warnings`/`miri` clean.
 
-### Ajouté — `scirust-sim` : optoélectronique — photodiode / photodétecteur (`photodiode`) — bloc 15
-Le récepteur optoélectronique, complément du laser (émetteur) : puissance optique
-→ photocourant → tension limitée par un `RC`, comme `System` de `scirust-sim`.
-- **`Photodiode`** / **`PhotodiodeParams`** — état `[v]` :
-  `v' = (I_ph − v/R_L)/C_j` avec `I_ph = ℛ·P_opt + I_dark`.
-- **`responsivity(η, λ)`** — sensibilité spectrale `ℛ = η·q·λ/(h·c)` (A/W),
-  linéaire en longueur d'onde.
-- Grandeurs fermées : `photocurrent`, `steady_state_voltage` (`I_ph·R_L`),
+### Added — `scirust-sim`: optoelectronics — photodiode / photodetector (`photodiode`) — block 15
+The optoelectronic receiver, complement of the laser (transmitter): optical
+power → photocurrent → voltage limited by an `RC`, like `System` of
+`scirust-sim`.
+- **`Photodiode`** / **`PhotodiodeParams`** — state `[v]`:
+  `v' = (I_ph − v/R_L)/C_j` with `I_ph = ℛ·P_opt + I_dark`.
+- **`responsivity(η, λ)`** — spectral sensitivity `ℛ = η·q·λ/(h·c)` (A/W),
+  linear in wavelength.
+- Closed-form quantities: `photocurrent`, `steady_state_voltage` (`I_ph·R_L`),
   `time_constant` (`R_L·C_j`), `bandwidth` (`1/(2π·R_L·C_j)`).
-- Oracles : la sensibilité suit la forme fermée et croît linéairement avec λ ;
-  photocourant / tension stationnaire / bande passante fermées ; le courant
-  d'obscurité fixe le plancher sans lumière ; la réponse à un échelon charge avec
-  la constante de temps `RC` (`v(τ) = v_ss(1−1/e)`, puis `v_ss` à 10τ) ; rejet
-  des paramètres invalides. 5 tests (114 au total pour le crate) ;
-  `fmt`/`clippy -D warnings`/`miri` propres.
+- Oracles: the sensitivity follows the closed form and grows linearly with λ;
+  closed-form photocurrent / steady-state voltage / bandwidth; the dark
+  current sets the floor without light; the step response charges with the
+  `RC` time constant (`v(τ) = v_ss(1−1/e)`, then `v_ss` at 10τ); rejection of
+  invalid parameters. 5 tests (114 total for the crate); `fmt`/`clippy -D
+  warnings`/`miri` clean.
 
-### Ajouté — `scirust-vision` : optronique — PSF d'Airy / limite de diffraction (`optics`) — bloc 14
-Prolongement du volet traitement d'image de précision : la **PSF d'Airy**, réponse
-d'un système limité par la diffraction (ouverture circulaire), qui complète la PSF
-gaussienne.
-- **`airy_psf(size, first_null)`** — PSF d'Airy normalisée (`Σ = 1`), intensité
-  `[2·J₁(v)/v]²` avec le premier anneau sombre à `first_null` pixels (réutilise
+### Added — `scirust-vision`: optronics — Airy PSF / diffraction limit (`optics`) — block 14
+Continuation of the precision image-processing strand: the **Airy PSF**, the
+response of a diffraction-limited system (circular aperture), which completes
+the Gaussian PSF.
+- **`airy_psf(size, first_null)`** — normalized Airy PSF (`Σ = 1`), intensity
+  `[2·J₁(v)/v]²` with the first dark ring at `first_null` pixels (reuses
   `scirust_special::bessel_j`).
-- **`rayleigh_resolution(λ, D)`** — résolution angulaire de Rayleigh `θ = 1,22·λ/D`.
-- **`airy_first_null(λ, D, f, pitch)`** — rayon du premier anneau en pixels sur un
-  plan focal `1,22·λ·f/(D·pitch)`, l'argument de `airy_psf`.
-- Oracles : PSF normalisée, symétrique, à pic central ; le premier anneau sombre
-  tombe exactement au rayon `first_null` (zéro de J₁) ; les formes fermées de
-  Rayleigh et du rayon d'anneau. 3 tests (38 au total pour le crate) ;
-  `fmt`/`clippy -D warnings` propres.
+- **`rayleigh_resolution(λ, D)`** — Rayleigh angular resolution `θ = 1.22·λ/D`.
+- **`airy_first_null(λ, D, f, pitch)`** — radius of the first ring in pixels on
+  a focal plane `1.22·λ·f/(D·pitch)`, the argument of `airy_psf`.
+- Oracles: normalized, symmetric PSF with a central peak; the first dark ring
+  falls exactly at radius `first_null` (zero of J₁); the closed forms of
+  Rayleigh and of the ring radius. 3 tests (38 total for the crate);
+  `fmt`/`clippy -D warnings` clean.
 
-### Ajouté — `scirust-sim` : optoélectronique — équations de bilan du laser à semi-conducteur (`laser`) — bloc 13
-Troisième pilier optronique — l'**optoélectronique** (dynamique de dispositif) —
-via les **équations de bilan** monomode du laser à semi-conducteur couplant la
-densité de porteurs `n` et de photons `s`, comme `System` de `scirust-sim`.
-- **`SemiconductorLaser`** / **`LaserParams`** — état `[n, s]` :
+### Added — `scirust-sim`: optoelectronics — semiconductor laser rate equations (`laser`) — block 13
+Third optronics pillar — **optoelectronics** (device dynamics) — via the
+single-mode rate equations of the semiconductor laser coupling the carrier
+density `n` and the photon density `s`, as `System` of `scirust-sim`.
+- **`SemiconductorLaser`** / **`LaserParams`** — state `[n, s]`:
   `n' = J − n/τ_n − g₀(n−n_t)s`, `s' = Γg₀(n−n_t)s − s/τ_p + Γβ·n/τ_n`.
-- Grandeurs à forme fermée (limite `β→0`) : `threshold_density`
+- Closed-form quantities (limit `β→0`): `threshold_density`
   (`n_th = n_t + 1/(Γg₀τ_p)`), `threshold_pump` (`J_th = n_th/τ_n`),
-  `steady_state_photon_density` (loi lumière-courant linéaire
-  `s_ss = Γτ_p(J−J_th)`), `steady_state_carrier_density` (écrêtage du gain à
+  `steady_state_photon_density` (linear light-current law
+  `s_ss = Γτ_p(J−J_th)`), `steady_state_carrier_density` (gain clamping at
   `n_th`), `relaxation_frequency` (`f_r = √(g₀s_ss/τ_p)/2π`).
-- Oracles : seuil et courbe L-I linéaire (formes fermées) ; l'allumage converge
-  vers l'état stationnaire fermé ; sous le seuil le laser reste éteint ; une
-  petite perturbation sonne à la fréquence d'oscillation de relaxation (période
-  mesurée sur la trajectoire) ; l'émission spontanée `β>0` amorce l'allumage
-  sans graine de photons ; rejet des paramètres invalides. 7 tests (109 au total
-  pour le crate) ; `fmt`/`clippy -D warnings`/`miri` propres.
+- Oracles: threshold and linear L-I curve (closed forms); turn-on converges
+  to the closed stationary state; below threshold the laser stays off; a
+  small perturbation rings at the relaxation oscillation frequency (period
+  measured on the trajectory); spontaneous emission `β>0` ignites the turn-on
+  without a photon seed; rejection of invalid parameters. 7 tests (109 total
+  for the crate); `fmt`/`clippy -D warnings`/`miri` clean.
 
-### Ajouté — `scirust-vision` : optique de rayons — matrices ABCD + faisceaux gaussiens (`beams`) — bloc 12
-Deuxième bloc optronique : la conception du **train optique** (lentilles,
-miroirs, espace libre) par **matrices de transfert ABCD**, et la propagation
-d'un **faisceau gaussien** via le paramètre complexe `q`.
-- **`RayMatrix`** — matrice 2×2 `[[a,b],[c,d]]` agissant sur un rayon `(y, θ)` :
-  constructeurs `identity` / `free_space` / `thin_lens` / `curved_mirror` /
-  `flat_interface`, composition `then` (produit `next·self`), `determinant`
+### Added — `scirust-vision`: ray optics — ABCD matrices + Gaussian beams (`beams`) — block 12
+Second optronics block: the design of the **optical train** (lenses, mirrors,
+free space) by **ABCD transfer matrices**, and the propagation of a **Gaussian
+beam** via the complex parameter `q`.
+- **`RayMatrix`** — 2×2 matrix `[[a,b],[c,d]]` acting on a ray `(y, θ)`:
+  constructors `identity` / `free_space` / `thin_lens` / `curved_mirror` /
+  `flat_interface`, composition `then` (product `next·self`), `determinant`
   (`= n_in/n_out`), `apply`.
-- **Faisceaux gaussiens** — `rayleigh_range` (`z_R = πw0²/λ`), `beam_radius`
+- **Gaussian beams** — `rayleigh_range` (`z_R = πw0²/λ`), `beam_radius`
   (`w(z) = w0√(1+(z/z_R)²)`), `radius_of_curvature`, `divergence` (`λ/(πw0)`),
-  `gouy_phase`, plus le paramètre `q` : `q_at_waist`, `propagate_q`
+  `gouy_phase`, plus the `q` parameter: `q_at_waist`, `propagate_q`
   (`q' = (Aq+B)/(Cq+D)`), `beam_radius_from_q`, `radius_from_q`.
-- Oracles : déterminant unité des éléments sans perte (et `n1/n2` pour un
-  dioptre plan) ; un rayon collimaté focalise à `f` ; la condition d'imagerie
-  annule `B` et donne le grandissement `−si/so` ; géométrie du faisceau
-  (waist `w0`, √2 à `z_R`, divergence, phase de Gouy) ; le `q` en espace libre
-  reproduit `w(z)` et `R(z)` ; une lentille reforme un waist au plan gaussien
-  prédit `s' = f·z_R²/(f²+z_R²)`. 8 tests (37 au total pour le crate) ;
-  `fmt`/`clippy -D warnings` propres.
+- Oracles: unit determinant for lossless elements (and `n1/n2` for a plane
+  diopter); a collimated ray focuses at `f`; the imaging condition zeroes `B`
+  and gives the magnification `−si/so`; beam geometry (waist `w0`, √2 at
+  `z_R`, divergence, Gouy phase); the free-space `q` reproduces `w(z)` and
+  `R(z)`; a lens reforms a waist at the predicted Gaussian plane
+  `s' = f·z_R²/(f²+z_R²)`. 8 tests (37 total for the crate);
+  `fmt`/`clippy -D warnings` clean.
 
-### Ajouté — `scirust-vision` : optronique — PSF, MTF et déconvolution (`optics`) — bloc 11
-Premier bloc du volet **optronique / optique de précision / traitement de
-l'image** : la qualité d'image et la restauration d'un imageur EO/IR, dans le
-crate vision existant.
-- **`gaussian_psf`** — fonction d'étalement du point (PSF) gaussienne normalisée
-  (`Σ = 1`), taille impaire.
-- **`apply_psf`** — flou optique direct (convolution image ⊛ PSF), réutilise
+### Added — `scirust-vision`: optronics — PSF, MTF and deconvolution (`optics`) — block 11
+First block of the **optronics / precision optics / image processing** strand:
+image quality and restoration of an EO/IR imager, in the existing vision
+crate.
+- **`gaussian_psf`** — normalized Gaussian point spread function (PSF)
+  (`Σ = 1`), odd size.
+- **`apply_psf`** — direct optical blur (image ⊛ PSF convolution), reuses
   `convolve2d`.
-- **`line_spread`** / **`mtf`** — fonction d'étalement de ligne (LSF) puis
-  **fonction de transfert de modulation** (MTF) : module normalisé de la DFT de
-  la LSF (`MTF[0] = 1`), fréquences en cycles/pixel, DFT directe sans contrainte
-  de puissance de deux.
-- **`mtf50`** — métrique de résolution : fréquence où la MTF chute à 0,5
-  (interpolée), le chiffre-clé d'une optique de précision.
-- **`richardson_lucy`** — déconvolution de Richardson–Lucy (restauration
-  itérative spatiale, uniquement des convolutions ; conserve le flux, reste
-  positive).
-- Oracles : la PSF est normalisée / symétrique / à pic central ; la MTF d'une
-  gaussienne suit la forme fermée `exp(−2π²σ²f²)` et décroît de façon monotone ;
-  le `MTF50` suit `√(ln2/2)/(πσ)` ; Richardson–Lucy est l'identité pour une PSF
-  de Dirac et re-concentre un point flouté (pic remonté, flux conservé). 7 tests
-  (29 au total pour le crate) ; `fmt`/`clippy -D warnings` propres.
+- **`line_spread`** / **`mtf`** — line spread function (LSF) then **modulation
+  transfer function** (MTF): normalized modulus of the LSF's DFT
+  (`MTF[0] = 1`), frequencies in cycles/pixel, direct DFT without power-of-two
+  constraint.
+- **`mtf50`** — resolution metric: frequency where the MTF drops to 0.5
+  (interpolated), the key figure of a precision optic.
+- **`richardson_lucy`** — Richardson–Lucy deconvolution (iterative spatial
+  restoration, convolutions only; conserves flux, stays positive).
+- Oracles: the PSF is normalized / symmetric / peaked at center; the MTF of a
+  Gaussian follows the closed form `exp(−2π²σ²f²)` and decays monotonically;
+  the `MTF50` follows `√(ln2/2)/(πσ)`; Richardson–Lucy is the identity for a
+  Dirac PSF and re-concentrates a blurred point (peak restored, flux
+  conserved). 7 tests (29 total for the crate); `fmt`/`clippy -D warnings`
+  clean.
 
-### Ajouté — `scirust-signal` : pistage — filtre α–β + traqueur multi-cibles (`radar::track`) — bloc 10
-Dixième bloc du domaine radar : la **couche temporelle** qui associe les
-détections d'une trame aux pistes existantes et lisse chaque état. Clôt la
-chaîne détection → piste.
-- **`AlphaBeta`** — filtre α–β scalaire pour un état à vitesse constante
-  `(x, v)` : `predict` (`x + v·dt`), `update` (prédit puis corrige de
-  `α·résidu` / `(β/dt)·résidu`), `coast` (avance sans mesure). Non biaisé à erreur
-  d'état permanent nulle sur une rampe.
-- **`critically_damped_gains(θ)`** — gains critiques `α = 1 − θ²`, `β = (1 − θ)²`.
-- **`Track`** — piste 2-D (un `AlphaBeta` par coordonnée distance/Doppler)
-  consommant une `Detection`, avec cycle de vie hits/misses et amplitude.
-- **`MultiTracker`** — traqueur multi-cibles au plus proche voisin : à chaque
-  `step`, prédiction de toutes les pistes, association gloutonne des détections à
-  la piste prédite la plus proche dans une porte, mise à jour des pistes
-  associées, extrapolation des autres, naissance des pistes pour les détections
-  orphelines, mort après `max_misses` trames extrapolées.
-- Oracles : les gains critiques suivent la forme fermée ; le filtre α–β suit une
-  rampe à vitesse constante sans retard (position et vitesse exactes) ;
-  l'extrapolation avance d'un pas de vitesse ; le traqueur suit une cible unique
-  (vitesse estimée exacte), garde deux cibles éloignées séparées (ids stables),
-  crée puis supprime une piste perdue. 6 tests (163 au total) ;
-  `fmt`/`clippy -D warnings` propres.
+### Added — `scirust-signal`: tracking — α–β filter + multi-target tracker (`radar::track`) — block 10
+Tenth block of the radar domain: the **temporal layer** that associates the
+detections of a frame with the existing tracks and smooths each state. Closes
+the detection → track chain.
+- **`AlphaBeta`** — scalar α–β filter for a constant-velocity state `(x, v)`:
+  `predict` (`x + v·dt`), `update` (predicts then corrects by `α·residual` /
+  `(β/dt)·residual`), `coast` (advances without a measurement). Unbiased with
+  zero steady-state position error on a ramp.
+- **`critically_damped_gains(θ)`** — critical gains `α = 1 − θ²`, `β = (1 − θ)²`.
+- **`Track`** — 2-D track (one `AlphaBeta` per range/Doppler coordinate)
+  consuming a `Detection`, with hits/misses lifecycle and amplitude.
+- **`MultiTracker`** — nearest-neighbor multi-target tracker: at each `step`,
+  prediction of all tracks, greedy association of the detections to the
+  nearest predicted track within a gate, update of the associated tracks,
+  extrapolation of the others, birth of tracks for orphan detections, death
+  after `max_misses` extrapolated frames.
+- Oracles: the critical gains follow the closed form; the α–β filter tracks a
+  constant-velocity ramp without lag (exact position and velocity); the
+  extrapolation advances by one velocity step; the tracker tracks a single
+  target (exact estimated velocity), keeps two distant targets separate
+  (stable ids), creates then removes a lost track. 6 tests (163 total);
+  `fmt`/`clippy -D warnings` clean.
 
-### Ajouté — `scirust-signal` : détection 2-D — CFAR 2-D + clustering (`radar::detect`) — bloc 9
-Neuvième bloc du domaine radar : l'**étage de détection** qui transforme la carte
-distance-Doppler en une courte liste de cibles — exactement l'enchaînement des
-projets de référence (OpenRadar) : CFAR 2-D → clustering.
-- **`ca_cfar_2d`** — CFAR à moyenne de cellules sur une carte de **puissance**
-  `power[distance][doppler]` : pour chaque cellule testée, le seuil est
-  `α · moyenne(cellules d'entraînement)` sur la fenêtre carrée de demi-largeur
-  `train + guard` privée de la région de garde `(2·guard+1)²`, avec `α` du même
-  `ca_cfar_alpha` que le détecteur 1-D (`N = (2(train+guard)+1)² − (2·guard+1)²`).
-  Masque de détection booléen ; bords jamais marqués.
-- **`Detection`** / **`cluster_detections`** — regroupement des détections en
-  cibles par étiquetage de composantes connexes (8-connexité), centroïde pondéré
-  par l'amplitude (coordonnées de bin fractionnaires), amplitude crête et nombre
-  de cellules ; trié par crête décroissante.
-- Oracles : le CFAR 2-D détecte une cible ponctuelle sur un plancher plat (une
-  seule détection) et tient le **taux de fausse alarme** de conception sur bruit
-  exponentiel 2-D ; le clustering sépare deux blobs distants (centroïdes pondérés
-  exacts, plus fort en tête), fusionne les cellules en contact diagonal ; la
-  chaîne CFAR-2-D → clustering localise deux cibles ; gardes (masque vide /
-  formes incohérentes / carte trop petite). 6 tests (157 au total) ;
-  `fmt`/`clippy -D warnings` propres.
+### Added — `scirust-signal`: 2-D detection — 2-D CFAR + clustering (`radar::detect`) — block 9
+Ninth block of the radar domain: the **detection stage** that turns the
+range-Doppler map into a short list of targets — exactly the chain of the
+reference projects (OpenRadar): 2-D CFAR → clustering.
+- **`ca_cfar_2d`** — cell-averaging CFAR on a **power** map
+  `power[distance][doppler]`: for each tested cell, the threshold is
+  `α · mean(training cells)` over the square window of half-width
+  `train + guard` minus the guard region `(2·guard+1)²`, with `α` from the same
+  `ca_cfar_alpha` as the 1-D detector (`N = (2(train+guard)+1)² − (2·guard+1)²`).
+  Boolean detection mask; edges never marked.
+- **`Detection`** / **`cluster_detections`** — grouping of the detections into
+  targets by connected-component labeling (8-connectivity), amplitude-weighted
+  centroid (fractional bin coordinates), peak amplitude and cell count; sorted
+  by descending peak.
+- Oracles: the 2-D CFAR detects a point target on a flat floor (a single
+  detection) and holds the design **false-alarm rate** on 2-D exponential
+  noise; the clustering separates two distant blobs (exact weighted centroids,
+  strongest first), merges diagonally touching cells; the CFAR-2-D →
+  clustering chain localizes two targets; guards (empty mask / inconsistent
+  shapes / too-small map). 6 tests (157 total); `fmt`/`clippy -D warnings`
+  clean.
 
-### Ajouté — `scirust-signal` : goniométrie sous-espace MUSIC (`radar::music`) — bloc 8
-Huitième bloc du domaine radar : la méthode **sous-espace MUSIC** (MUltiple
-SIgnal Classification), qui clôt la voie *angle*. Là où le MVDR affine encore le
-formateur, MUSIC décompose la covariance en sous-espaces signal / bruit et
-exploite l'orthogonalité de chaque vecteur directionnel de source au sous-espace
-bruit — résolution limitée par le nombre de snapshots et le SNR, non par
-l'ouverture du réseau.
-- **`music_spectrum`** — spectre `P(θ) = 1/‖Eₙᴴ·a(θ)‖²` : `Eₙ` est le
-  sous-espace bruit (vecteurs propres des `M − num_sources` plus petites valeurs
-  propres de la covariance). Pique aux directions des sources. `num_sources`
-  borné à `1..=M-1`.
-- Repose sur un **solveur propre hermitien complexe** écrit sur place (rotations
-  de Jacobi cycliques complexes : annulation de phase puis rotation de Jacobi
-  réelle sur le bloc 2×2), sans dépendance nouvelle — réutilisable pour ESPRIT.
-- Oracles : le solveur propre reconstruit `A = V·diag(λ)·Vᴴ`, `Vᴴ V = I`, valeurs
-  propres réelles de trace correcte ; MUSIC pique à la source unique ; **deux
-  sources à 6°** (sous le faisceau ~11°) sont **résolues** (creux au médian) ;
-  entrées dégénérées (réseau vide / à un élément) → spectre nul. 4 tests (151 au
-  total) ; `fmt`/`clippy -D warnings` propres.
+### Added — `scirust-signal`: subspace direction finding MUSIC (`radar::music`) — block 8
+Eighth block of the radar domain: the **MUSIC subspace method** (MUltiple SIgnal
+Classification), which closes the *angle* path. Where the MVDR still refines
+the beamformer, MUSIC decomposes the covariance into signal / noise subspaces
+and exploits the orthogonality of each source steering vector to the noise
+subspace — resolution limited by the number of snapshots and the SNR, not by
+the array aperture.
+- **`music_spectrum`** — spectrum `P(θ) = 1/‖Eₙᴴ·a(θ)‖²`: `Eₙ` is the noise
+  subspace (eigenvectors of the `M − num_sources` smallest eigenvalues of the
+  covariance). Peaks at the source directions. `num_sources` bounded to
+  `1..=M-1`.
+- Relies on an **in-place complex Hermitian eigensolver** (complex cyclic
+  Jacobi rotations: phase annihilation then real Jacobi rotation on the 2×2
+  block), without any new dependency — reusable for ESPRIT.
+- Oracles: the eigensolver reconstructs `A = V·diag(λ)·Vᴴ`, `Vᴴ V = I`, real
+  eigenvalues with correct trace; MUSIC peaks at the single source; **two
+  sources at 6°** (below the ~11° beam) are **resolved** (null at the median);
+  degenerate inputs (empty / single-element array) → null spectrum. 4 tests
+  (151 total); `fmt`/`clippy -D warnings` clean.
 
-### Ajouté — `scirust-signal` : radar FMCW / mmWave (`radar::fmcw`) — bloc 7
-Septième bloc du domaine radar : le modèle **FMCW** (onde continue modulée en
-fréquence) — celui des radars automobiles / mmWave (TI, OpenRadar). Au lieu de
-comprimer une impulsion codée par filtrage adapté, le FMCW *mélange* l'écho avec
-la rampe émise ; la distance et la vitesse tombent de deux FFT du signal de
-battement.
-- **`beat_frequency_to_range`** — distance depuis la fréquence de battement
-  `R = f_b·c / (2·pente)` (garde sur pente non finie / négative).
-- **`range_resolution`** — résolution distance `ΔR = c / (2·B)`.
-- **`range_profile`** — profil distance d'une rampe : FFT temps-rapide du
-  battement complexe (garde puissance de deux). Une cible à distance `R` pique au
-  bin de sa fréquence de battement.
-- **`range_doppler`** — **cube distance-Doppler** depuis les rampes de battement
-  brutes : FFT temps-rapide (distance) de chaque rampe puis FFT temps-lent
-  (Doppler) de chaque bin distance ; carte `N×M` `[distance][doppler]`, bin
-  Doppler 0 = cible fixe. Ne recouvre pas `doppler::range_doppler_map` (qui
-  suppose les impulsions déjà comprimées en distance) : ici on part du battement
-  brut et on fait les deux FFT.
-- Oracles : le profil distance d'un ton de battement pique au bon bin avec
-  intégration cohérente d'amplitude `N` ; l'aller-retour distance→battement→
-  distance boucle ; une cible mobile se localise en `(distance, doppler)` avec un
-  pic d'amplitude `N·M`, une cible fixe reste au Doppler 0 ; entrées non-
-  puissance-de-deux / irrégulières → vide. 6 tests (147 au total) ;
-  `fmt`/`clippy -D warnings` propres.
+### Added — `scirust-signal`: FMCW / mmWave radar (`radar::fmcw`) — block 7
+Seventh block of the radar domain: the **FMCW** model (frequency-modulated
+continuous wave) — that of automotive / mmWave radars (TI, OpenRadar). Instead
+of compressing a coded pulse by matched filtering, the FMCW *mixes* the echo
+with the transmitted ramp; range and velocity fall out of two FFTs of the
+beat signal.
+- **`beat_frequency_to_range`** — range from the beat frequency
+  `R = f_b·c / (2·slope)` (guard on non-finite / negative slope).
+- **`range_resolution`** — range resolution `ΔR = c / (2·B)`.
+- **`range_profile`** — range profile of a ramp: fast-time FFT of the complex
+  beat (power-of-two guard). A target at range `R` peaks at the bin of its
+  beat frequency.
+- **`range_doppler`** — **range-Doppler cube** from the raw beat ramps:
+  fast-time FFT (range) of each ramp then slow-time FFT (Doppler) of each
+  range bin; `N×M` map `[distance][doppler]`, Doppler bin 0 = stationary
+  target. Does not overlap `doppler::range_doppler_map` (which assumes the
+  pulses already range-compressed): here one starts from the raw beat and
+  performs both FFTs.
+- Oracles: the range profile of a beat tone peaks at the right bin with
+  coherent amplitude integration `N`; the range→beat→range round-trip loops; a
+  moving target localizes at `(distance, doppler)` with an amplitude peak
+  `N·M`, a stationary target stays at Doppler 0; non-power-of-two /
+  irregular inputs → empty. 6 tests (147 total); `fmt`/`clippy -D warnings`
+  clean.
 
-### Ajouté — `scirust-signal` : goniométrie haute résolution MVDR/Capon (`radar::doa`) — bloc 6
-Sixième bloc du domaine radar : la DOA **haute résolution**, qui sépare des
-sources plus proches que la largeur de faisceau du réseau.
-- **`covariance`** — matrice de covariance spatiale `R = (1/T)·Σ x·xᴴ` (M×M
-  hermitienne) des snapshots du réseau.
-- **`mvdr_spectrum`** — formateur **MVDR / Capon** :
-  `P(θ) = 1/(aᴴ(θ)·R⁻¹·a(θ))`, chargement diagonal pour la stabilité. Bien plus
-  résolvant que le formateur conventionnel (Bartlett). Repose sur un **inverse
-  matriciel complexe** (Gauss-Jordan avec pivotage partiel) écrit sur place,
-  sans dépendance nouvelle.
-- Oracles : le MVDR pique à la direction de la source ; **deux sources à 6°**
-  (dans le faisceau ~11° d'un réseau à 10 éléments) sont **résolues** par le
-  MVDR — le point médian est un creux entre deux pics — alors que le Bartlett les
-  fusionne ; la covariance est bien hermitienne. 3 tests (141 au total) ;
-  `fmt`/`clippy -D warnings` propres. MUSIC (sous-espace bruit par
-  eigendécomposition) viendra dans un bloc ultérieur.
+### Added — `scirust-signal`: high-resolution direction finding MVDR/Capon (`radar::doa`) — block 6
+Sixth block of the radar domain: **high-resolution** DOA, which separates
+sources closer than the beamwidth of the array.
+- **`covariance`** — spatial covariance matrix `R = (1/T)·Σ x·xᴴ` (M×M
+  Hermitian) of the array snapshots.
+- **`mvdr_spectrum`** — **MVDR / Capon** beamformer:
+  `P(θ) = 1/(aᴴ(θ)·R⁻¹·a(θ))`, diagonal loading for stability. Far more
+  resolving than the conventional (Bartlett) beamformer. Relies on an
+  **in-place complex matrix inverse** (Gauss-Jordan with partial pivoting),
+  without any new dependency.
+- Oracles: the MVDR peaks at the source direction; **two sources at 6°**
+  (within the ~11° beam of a 10-element array) are **resolved** by the MVDR —
+  the midpoint is a null between two peaks — whereas the Bartlett merges
+  them; the covariance is indeed Hermitian. 3 tests (141 total);
+  `fmt`/`clippy -D warnings` clean. MUSIC (noise subspace by
+  eigendecomposition) will come in a later block.
 
-### Ajouté — `scirust-signal` : traitement d'antenne / goniométrie radar (`radar::beamform`) — bloc 5
-Cinquième bloc du domaine radar : le passage **multi-voies** — estimation de la
-direction d'arrivée (DOA) sur réseau linéaire uniforme (ULA), la voie *angle*
-qui complète la chaîne distance-Doppler (goniométrie des deux projets de
-référence).
-- **`steering_vector`** — vecteur directionnel `a(θ)` d'un ULA (`exp(j·2π·d·m·
-  sin θ)`) : magnitude unité, tout-à-un au perpendiculaire (`θ = 0`).
-- **`beamform_spectrum`** — formateur de voie conventionnel (delay-and-sum /
-  Bartlett) : puissance moyenne `|aᴴ(θ)·x|²` sur les snapshots, spectre spatial
-  dont les pics donnent les directions des sources.
-- **`estimate_doa`** — angle du pic du spectre (estimation DOA mono-source).
-- Oracles : une onde plane depuis `θ0` → pic du formateur à `θ0` (à la
-  résolution de la grille) ; deux sources séparées ressortent chacune au-dessus
-  d'une direction vide. Sans dépendance nouvelle. 4 tests (138 au total) ;
-  `fmt`/`clippy -D warnings` propres. Les estimateurs haute résolution
-  (MVDR/Capon, MUSIC) réutiliseront ces vecteurs directionnels dans un bloc
-  ultérieur.
+### Added — `scirust-signal`: antenna array processing / radar direction finding (`radar::beamform`) — block 5
+Fifth block of the radar domain: the **multi-channel** step — estimation of the
+direction of arrival (DOA) on a uniform linear array (ULA), the *angle* path
+that completes the range-Doppler chain (direction finding of the two reference
+projects).
+- **`steering_vector`** — steering vector `a(θ)` of a ULA (`exp(j·2π·d·m·
+  sin θ)`): unit magnitude, all-ones at broadside (`θ = 0`).
+- **`beamform_spectrum`** — conventional (delay-and-sum / Bartlett) beamformer:
+  average power `|aᴴ(θ)·x|²` over the snapshots, a spatial spectrum whose
+  peaks give the source directions.
+- **`estimate_doa`** — angle of the spectrum peak (single-source DOA
+  estimate).
+- Oracles: a plane wave from `θ0` → beamformer peak at `θ0` (at grid
+  resolution); two separated sources each stand out above an empty direction.
+  No new dependency. 4 tests (138 total); `fmt`/`clippy -D warnings` clean.
+  The high-resolution estimators (MVDR/Capon, MUSIC) will reuse these steering
+  vectors in a later block.
 
-### Ajouté — `scirust-signal` : fonction d'ambiguïté + MTI radar — bloc 4
-Quatrième bloc du domaine radar : l'analyse de forme d'onde et le rejet de
-fouillis fixe.
-- **`radar::ambiguity::ambiguity`** — surface d'ambiguïté `|χ(τ, ν)|` (réponse
-  conjointe retard-Doppler) d'une forme d'onde, calculée par corrélation croisée
-  de la forme d'onde modulée en Doppler avec l'originale. Expose le **couplage
-  distance-Doppler** (crête diagonale du chirp LFM). Oracles : pic à l'origine =
-  énergie et maximum global ; la coupe Doppler-nul **égale l'autocorrélation**
-  (coupe filtre adapté) ; la crête LFM est **cisaillée** (le retard du pic varie
-  monotonement avec le Doppler).
-- **`radar::mti::mti_canceller`** — annuleur MTI à `order` impulsions
-  (différences premières en cascade, poids binomiaux `[1,−1]`, `[1,−2,1]`, …).
-  Réponse **exactement nulle au continu** → fouillis stationnaire supprimé, cible
-  mobile passée avec le gain `|1−e^{−j2πf}|^order`. Oracles : fouillis constant →
-  zéro exact ; tonalité mobile passée avec le gain binomial ; fouillis retiré /
-  cible conservée.
-- Réutilise `cross_correlate` du bloc 1, sans dépendance. 8 tests (134 au total)
-  ; `fmt`/`clippy -D warnings` propres.
+### Added — `scirust-signal`: ambiguity function + MTI radar — block 4
+Fourth block of the radar domain: waveform analysis and rejection of
+stationary clutter.
+- **`radar::ambiguity::ambiguity`** — ambiguity surface `|χ(τ, ν)|` (joint
+  delay-Doppler response) of a waveform, computed by cross-correlation of the
+  Doppler-modulated waveform with the original. Exposes the **range-Doppler
+  coupling** (diagonal ridge of the LFM chirp). Oracles: peak at the origin =
+  energy and global maximum; the zero-Doppler cut **equals the autocorrelation**
+  (matched-filter cut); the LFM ridge is **sheared** (the peak delay varies
+  monotonically with Doppler).
+- **`radar::mti::mti_canceller`** — MTI canceller with `order` pulses
+  (cascaded first differences, binomial weights `[1,−1]`, `[1,−2,1]`, …).
+  Response **exactly null at DC** → stationary clutter removed, moving target
+  passed with gain `|1−e^{−j2πf}|^order`. Oracles: constant clutter → exact
+  zero; moving tone passed with the binomial gain; clutter removed / target
+  kept.
+- Reuses `cross_correlate` from block 1, no dependency. 8 tests (134 total);
+  `fmt`/`clippy -D warnings` clean.
 
-### Ajouté — `scirust-signal` : traitement Doppler radar (`radar::doppler`) — bloc 3
-Troisième bloc du domaine radar : la **carte distance-Doppler**, surface sur
-laquelle le CFAR détecte (cœur commun des deux projets de référence).
-- **`doppler_spectrum`** — FFT temps-lent d'une case distance (un échantillon
-  complexe par impulsion) ; le bin 0 est le Doppler nul (cible fixe / fouillis).
-- **`range_doppler_map`** — à partir d'une pile de `M` impulsions comprimées en
-  distance, FFT temps-lent par case distance → carte magnitude `N×M`
-  `[distance][doppler]`. Sépare les cibles mobiles du fouillis stationnaire.
-- Oracles : une cible **fixe** tombe dans le bin Doppler 0 avec intégration
-  cohérente (magnitude = M) ; une cible **mobile** (rampe de phase de k₀ cycles
-  sur les M impulsions) tombe dans le bin k₀ (au signe FFT près) et **pas** au
-  Doppler nul ; rejet des entrées non-puissance-de-2 / irrégulières.
-- Construit sur la FFT existante du crate, sans dépendance. 3 tests (126 au
-  total) ; `fmt`/`clippy -D warnings` propres.
+### Added — `scirust-signal`: radar Doppler processing (`radar::doppler`) — block 3
+Third block of the radar domain: the **range-Doppler map**, the surface on
+which the CFAR detects (common core of the two reference projects).
+- **`doppler_spectrum`** — slow-time FFT of a range bin (one complex sample
+  per pulse); bin 0 is zero Doppler (stationary target / clutter).
+- **`range_doppler_map`** — from a stack of `M` range-compressed pulses,
+  slow-time FFT per range bin → `N×M` magnitude map
+  `[distance][doppler]`. Separates moving targets from stationary clutter.
+- Oracles: a **stationary** target falls in Doppler bin 0 with coherent
+  integration (magnitude = M); a **moving** target (phase ramp of k₀ cycles
+  over the M pulses) falls in bin k₀ (up to the FFT sign) and **not** at zero
+  Doppler; rejection of non-power-of-2 / irregular inputs.
+- Built on the crate's existing FFT, no dependency. 3 tests (126 total);
+  `fmt`/`clippy -D warnings` clean.
 
-### Ajouté — `scirust-signal` : détection CFAR radar (`radar::cfar`) — bloc 2
-Deuxième bloc du domaine radar : la **détection à taux de fausse alarme
-constant**, le maillon détection des chaînes de traitement des deux projets de
-référence (OpenRadar, AERIS/plfm_radar).
-- **`ca_cfar`** — CFAR à moyennage de cellules : seuil `α · moyenne(cellules de
-  référence)` avec le facteur en forme close `α = N·(P_fa^{−1/N} − 1)`, cellules
-  de garde autour de la cellule testée. Renvoie un masque de détection.
-- **`os_cfar`** — CFAR à statistique d'ordre (k-ième plus petite cellule de
-  référence), **robuste aux cibles interférentes** et aux bords de fouillis qui
-  masqueraient le CA-CFAR ; facteur `α` trouvé par bissection sur
+### Added — `scirust-signal`: radar CFAR detection (`radar::cfar`) — block 2
+Second block of the radar domain: **constant false-alarm rate detection**, the
+detection link of the processing chains of the two reference projects
+(OpenRadar, AERIS/plfm_radar).
+- **`ca_cfar`** — cell-averaging CFAR: threshold `α · mean(reference cells)`
+  with the closed-form factor `α = N·(P_fa^{−1/N} − 1)`, guard cells around
+  the tested cell. Returns a detection mask.
+- **`os_cfar`** — order-statistic CFAR (k-th smallest reference cell),
+  **robust to interfering targets** and to clutter edges that would mask the
+  CA-CFAR; factor `α` found by bisection on
   `P_fa(α) = ∏ (N−i)/(N−i+α)`.
-- Oracles : identité CFAR `(1 + α/N)^{−N} = P_fa` ; **taux de fausse alarme tenu
-  statistiquement** (bruit exponentiel, 20 000 cellules, empirique ≈ P_fa) ;
-  l'OS-CFAR détecte une cible que le CA-CFAR masque à cause d'un interféreur
-  dans la fenêtre ; `α_os` inverse bien la formule de P_fa.
-- Sans dépendance nouvelle. 6 tests (123 au total dans le crate) ; `fmt`/`clippy
-  -D warnings` propres.
+- Oracles: CFAR identity `(1 + α/N)^{−N} = P_fa`; **false-alarm rate held
+  statistically** (exponential noise, 20 000 cells, empirical ≈ P_fa); the
+  OS-CFAR detects a target that the CA-CFAR masks because of an interferer in
+  the window; `α_os` correctly inverts the P_fa formula.
+- No new dependency. 6 tests (123 total in the crate); `fmt`/`clippy -D
+  warnings` clean.
 
-### Ajouté — `scirust-signal` : traitement du signal radar (module `radar`) — bloc 1
-Premier bloc d'un domaine **radar/optronique** (utile aux systèmes de défense
-type Safran/Sagem), en extension des crates existants : la compression
-d'impulsion, cœur du traitement de distance d'un radar pulse-Doppler.
-- **`radar::waveform`** — génération de formes d'onde : chirp **LFM** (bande de
-  fréquence balayée linéairement, amplitude unité, produit temps-bande
-  paramétrable) et **codes de phase de Barker** (longueurs 2–13).
-- **`radar::matched_filter`** — **filtre adapté / compression d'impulsion** :
-  corrélation croisée complexe, estimation du retard d'écho au pic, rapport
-  pic/lobes secondaires.
-- Oracles exacts : le pic d'autocorrélation du chirp **égale l'énergie** de
-  l'impulsion et son lobe principal se comprime (largeur ≈ fs/B ≪ durée) ;
-  l'autocorrélation du **Barker-13** a un rapport pic/lobes = **13** (propriété
-  définitoire) ; le filtre adapté **localise un écho retardé** au bon retard ;
-  la fréquence instantanée du chirp balaie bien −B/2 → +B/2.
-- Construit sur le `Complex`/FFT existant, sans dépendance nouvelle. 8 tests
-  d'oracle (117 au total dans le crate) ; `fmt`/`clippy -D warnings` propres.
+### Added — `scirust-signal`: radar signal processing (`radar` module) — block 1
+First block of a **radar/optronics** domain (useful for defense systems of the
+Safran/Sagem type), extending the existing crates: pulse compression, the core
+of the range processing of a pulsed-Doppler radar.
+- **`radar::waveform`** — waveform generation: **LFM** chirp (linearly swept
+  frequency band, unit amplitude, tunable time-bandwidth product) and **Barker
+  phase codes** (lengths 2–13).
+- **`radar::matched_filter`** — **matched filter / pulse compression**:
+  complex cross-correlation, echo delay estimation at the peak, peak-to-
+  sidelobe ratio.
+- Exact oracles: the chirp's autocorrelation peak **equals the energy** of the
+  pulse and its main lobe compresses (width ≈ fs/B ≪ duration); the
+  **Barker-13** autocorrelation has a peak-to-sidelobe ratio = **13**
+  (defining property); the matched filter **localizes a delayed echo** at the
+  correct delay; the chirp's instantaneous frequency indeed sweeps −B/2 →
+  +B/2.
+- Built on the existing `Complex`/FFT, no new dependency. 8 oracle tests (117
+  total in the crate); `fmt`/`clippy -D warnings` clean.
+### Added — `scirust-sim`: Van der Pol oscillator (`electrical::VanDerPol`)
+The library's first **limit cycle**, natural complement of the chaotic
+double pendulum: the two flagship behaviors of nonlinear dynamics.
+- **`electrical::VanDerPol`** — self-sustained oscillator
+  `x'' - μ·(1 - x²)·x' + x = 0`, state `[x, v]`, implements `System`. The
+  nonlinear damping injects energy when `|x| < 1` and removes it when
+  `|x| > 1`, so every trajectory (except the unstable fixed point at the
+  origin) converges to **the same** stable periodic orbit — unlike a linear
+  oscillator whose amplitude depends on the initial conditions.
+- Oracles: two trajectories (starting *inside*, near the origin, and
+  *outside*) join the same cycle of **amplitude ≈ 2** (classical result);
+  `μ = 0` restores the harmonic oscillator (`x(t) = cos t`, energy
+  conserved); sign of `dE/dt = μ·(1 - x²)·v²` (pumping/dissipation per the
+  unit band). At large `μ` it becomes stiff (integrable via the `stiff`
+  feature).
+- 4 additional tests (102 total by default, +2 doctests). `fmt`/`clippy
+  -D warnings` clean; heavy runs skipped under Miri (crate convention).
 
-### Ajouté — `scirust-sim` : oscillateur de Van der Pol (`electrical::VanDerPol`)
-Le premier **cycle limite** de la bibliothèque, complément naturel du double
-pendule chaotique : les deux comportements-phares de la dynamique non linéaire.
-- **`electrical::VanDerPol`** — oscillateur auto-entretenu
-  `x'' - μ·(1 - x²)·x' + x = 0`, état `[x, v]`, implémente `System`. L'amortis-
-  sement non linéaire injecte de l'énergie quand `|x| < 1` et en retire quand
-  `|x| > 1`, si bien que toute trajectoire (sauf le point fixe instable à
-  l'origine) converge vers **le même** orbite périodique stable — contrairement
-  à un oscillateur linéaire dont l'amplitude dépend des conditions initiales.
-- Oracles : deux trajectoires (départ *à l'intérieur* près de l'origine et *à
-  l'extérieur*) rejoignent le même cycle d'**amplitude ≈ 2** (résultat
-  classique) ; `μ = 0` redonne l'oscillateur harmonique (`x(t) = cos t`, énergie
-  conservée) ; signe de `dE/dt = μ·(1 - x²)·v²` (pompage/dissipation selon la
-  bande unité). À grand `μ` il devient raide (intégrable via la feature `stiff`).
-- 4 tests supplémentaires (102 au total par défaut, +2 doctests). `fmt`/`clippy
-  -D warnings` propres ; runs lourds ignorés sous Miri (convention du crate).
+### Added — `scirust-biomed`: glycemic dynamics exposed as `System` (feature `sim`)
+First example of the **reverse** direction of the simulation layer: instead
+of `scirust-sim` redeclaring a vertical's physics, the vertical exposes its
+own model through the shared trait.
+- **`control::sim::GlucoseSystem`** (behind the optional `sim` feature) —
+  wraps the affine glycemic model `dG/dt = -a·(G − G_b) − k·u`
+  (`control::GlucoseModel`, the CBF filter's *plant*) with a constant
+  insulin rate, and implements `scirust_sim::System`. The `scirust-sim`
+  engine (RK4, Dormand–Prince) therefore integrates the vertical's
+  physiological model directly, without `scirust-sim` having to redeclare
+  it.
+- Closed-form oracle: `G(t) = G* + (G0 − G*)·e^{−a·t}` with the steady
+  state `G* = G_b − (k/a)·u`. The tests compare the numerical trajectory to
+  this exact solution, verify the relaxation to `G_b` at u=0 and the
+  vanishing of the derivative at equilibrium.
+- Feature **off by default** (default build unchanged; `scirust-sim` pulled
+  only under `sim`, no cycle because `scirust-sim` depends on no vertical).
+  Dedicated CI steps (`test`/`clippy -D warnings --features sim`), like the
+  `rl`/`stiff` features. 44 tests with the feature (+3, +1 doctest);
+  `fmt`/`clippy` clean.
 
-### Ajouté — `scirust-biomed` : dynamique glycémique exposée comme `System` (feature `sim`)
-Premier exemple du sens **inverse** de la couche de simulation : au lieu que
-`scirust-sim` redéclare la physique d'une verticale, la verticale expose son
-propre modèle via le trait partagé.
-- **`control::sim::GlucoseSystem`** (derrière la feature optionnelle `sim`) —
-  enveloppe le modèle glycémique affine `dG/dt = -a·(G − G_b) − k·u`
-  (`control::GlucoseModel`, le *plant* du filtre CBF) avec un débit d'insuline
-  constant, et implémente `scirust_sim::System`. Le moteur de `scirust-sim`
-  (RK4, Dormand–Prince) intègre donc directement le modèle physiologique de la
-  verticale, sans que `scirust-sim` ait à le redéclarer.
-- Oracle en forme close : `G(t) = G* + (G0 − G*)·e^{−a·t}` avec l'état
-  stationnaire `G* = G_b − (k/a)·u`. Les tests confrontent la trajectoire
-  numérique à cette solution exacte, vérifient la relaxation vers `G_b` à u=0
-  et l'annulation de la dérivée à l'équilibre.
-- Feature **off par défaut** (build par défaut inchangé ; `scirust-sim` tiré
-  seulement sous `sim`, aucun cycle car `scirust-sim` ne dépend d'aucune
-  verticale). Étapes CI dédiées (`test`/`clippy -D warnings --features sim`),
-  comme les features `rl`/`stiff`. 44 tests avec la feature (+3, +1 doctest) ;
-  `fmt`/`clippy` propres.
+### Added — `scirust-mcp`: MCP tool `sim_stiff_robertson` (implicit stiff integrator)
+Exposes Robertson's **stiff** kinetics via the implicit Rosenbrock-W(2,3)
+integrator of `scirust-sim` (`stiff_bridge` bridge to `scirust-stiff`):
+- **`sim_stiff_robertson`** — parameterizable rate constants (canonical
+  defaults `k₁=0.04`, `k₂=3·10⁷`, `k₃=10⁴`, nine orders of magnitude apart),
+  configurable initial state and horizon. Returns the final concentrations
+  `[a, b, c]`, the total mass `a+b+c` (preserved linear invariant) and the
+  fraction converted to C. An explicit method (RK4) would blow up on the
+  fast initial transient; the implicit one does not.
+- `scirust-mcp` now enables `scirust-sim`'s `stiff` feature (pulls
+  `scirust-stiff` into the server build only). 6 `sim_*` tools total; +2
+  tool tests (Hairer & Wanner oracle at t=0.4: a≈0.9851, c≈0.0149;
+  validation), registry assertion. `fmt`/`clippy -D warnings` clean.
 
-### Ajouté — `scirust-mcp` : outil MCP `sim_stiff_robertson` (intégrateur raide implicite)
-Expose la cinétique **raide** de Robertson via l'intégrateur implicite
-Rosenbrock-W(2,3) de `scirust-sim` (pont `stiff_bridge` vers `scirust-stiff`) :
-- **`sim_stiff_robertson`** — constantes de vitesse paramétrables (défauts
-  canoniques `k₁=0.04`, `k₂=3·10⁷`, `k₃=10⁴`, neuf ordres de grandeur d'écart),
-  état initial et horizon configurables. Renvoie les concentrations finales
-  `[a, b, c]`, la masse totale `a+b+c` (invariant linéaire conservé) et la
-  fraction convertie en C. Une méthode explicite (RK4) exploserait sur le
-  transitoire initial rapide ; l'implicite non.
-- `scirust-mcp` active désormais la feature `stiff` de `scirust-sim` (tire
-  `scirust-stiff` dans le build serveur uniquement). 6 outils `sim_*` au total ;
-  +2 tests d'outils (oracle Hairer & Wanner à t=0.4 : a≈0.9851, c≈0.0149 ;
-  validation), assertion de registre. `fmt`/`clippy -D warnings` propres.
+### Added — `scirust-sim`: chaotic double pendulum (`mechanics::DoublePendulum`)
+The first **chaotic** system of the simulation library, the canonical
+example of deterministic chaos:
+- **`mechanics::DoublePendulum`** — two masses `m1`/`m2` on two rigid rods
+  `l1`/`l2`, state `[θ1, ω1, θ2, ω2]`, accelerations in standard Lagrangian
+  form, implements `System` like the other mechanics models.
+- `energy` method (kinetic + potential): first integral of motion,
+  **conserved to 1e-6** along a chaotic orbit by the adaptive
+  Dormand–Prince integrator at tight tolerance — the test oracle.
+- **Sensitive dependence on initial conditions** test: two trajectories
+  differing by 1e-8 (integrated identically, so physical divergence, not
+  numerical) drift apart by O(1) — an amplification > 1e6× that only a
+  chaotic system produces.
+- 3 additional tests (98 total by default, +2 doctests). `fmt`/`clippy
+  -D warnings` clean; heavy runs skipped under Miri (crate convention).
 
-### Ajouté — `scirust-sim` : double pendule chaotique (`mechanics::DoublePendulum`)
-Le premier système **chaotique** de la bibliothèque de simulation, l'exemple
-canonique de chaos déterministe :
-- **`mechanics::DoublePendulum`** — deux masses `m1`/`m2` sur deux tiges rigides
-  `l1`/`l2`, état `[θ1, ω1, θ2, ω2]`, accélérations sous forme lagrangienne
-  standard, implémente `System` comme les autres modèles de mécanique.
-- Méthode `energy` (cinétique + potentielle) : premier intégrale du mouvement,
-  **conservée à 1e-6** le long d'une orbite chaotique par l'intégrateur adaptatif
-  Dormand–Prince à tolérance serrée — l'oracle du test.
-- Test de **dépendance sensible aux conditions initiales** : deux trajectoires
-  différant de 1e-8 (intégrées à l'identique, donc divergence physique et non
-  numérique) s'écartent de O(1) — amplification > 1e6× que seul un système
-  chaotique produit.
-- 3 tests supplémentaires (98 au total par défaut, +2 doctests). `fmt`/`clippy
-  -D warnings` propres ; runs lourds ignorés sous Miri (convention du crate).
+### Added — `scirust-mcp`: MCP tools `sim_hvac_zone` and `sim_pharmacokinetics_oral`
+Two new `scirust-sim` simulators exposed as MCP tools (typed JSON schema,
+SHA-256 audit log per call), with no extra feature or dependency:
+- **`sim_hvac_zone`** — **2R2C** building zone (`scirust-hvac`) driven by a
+  constant outdoor temperature and HVAC power: returns the exact linear
+  steady state (air `t_out + Q·(R_aw+R_wo)`, wall `t_out + Q·R_wo`), the
+  heat-loss conductance `1/(R_aw+R_wo)` (W/K), and the air/wall
+  temperatures reached after `duration_s`.
+- **`sim_pharmacokinetics_oral`** — first-order oral absorption,
+  **one-compartment** body (`scirust-sim`, Bateman curve): returns the peak
+  plasma concentration C_max and its time t_max, the elimination half-life
+  `ln(2)/k_e`, the **exact** total exposure AUC(0..∞)
+  `= F·dose/(V·k_e)`, and the concentration at the end of the horizon.
+- 5 `sim_*` tools total (3 → 5); +4 tool tests, updated registry
+  assertions. `fmt`/`clippy -D warnings` clean.
 
-### Ajouté — `scirust-mcp` : outils MCP `sim_hvac_zone` et `sim_pharmacokinetics_oral`
-Deux nouveaux simulateurs `scirust-sim` exposés comme outils MCP (schéma JSON
-typé, journal d'audit SHA-256 par appel), sans feature ni dépendance
-supplémentaire :
-- **`sim_hvac_zone`** — zone bâtiment **2R2C** (`scirust-hvac`) pilotée par une
-  température extérieure et une puissance HVAC constantes : renvoie l'état
-  stationnaire exact et linéaire (air `t_out + Q·(R_aw+R_wo)`, mur
-  `t_out + Q·R_wo`), la conductance de déperdition `1/(R_aw+R_wo)` (W/K), et les
-  températures air/mur atteintes après `duration_s`.
-- **`sim_pharmacokinetics_oral`** — absorption orale premier ordre, corps à
-  **un compartiment** (`scirust-sim`, courbe de Bateman) : renvoie la
-  concentration plasmatique maximale C_max et l'instant t_max, la demi-vie
-  d'élimination `ln(2)/k_e`, l'exposition totale **exacte** AUC(0..∞)
-  `= F·dose/(V·k_e)`, et la concentration en fin d'horizon.
-- 5 outils `sim_*` au total (3 → 5) ; +4 tests d'outils, assertions de registre
-  mises à jour. `fmt`/`clippy -D warnings` propres.
+### Changed — `scirust-rl-algo`: `AlgoEnv` unified on the shared `Env` trait
+The algorithm-discovery crate defined its own environment trait
+`AlgoEnv` (with `reset`/`step`/`available_actions`), duplicating
+the `scirust_learning::rl::Env` trait already present in a direct dependency.
+This duplication is removed:
+- **`AlgoEnv` becomes a sub-trait** of `scirust_learning::rl::Env`
+  (`AlgoEnv: Env<State = AlgoSearchState, Action = AlgoAction>`). The three
+  methods `reset`/`step`/`available_actions` now come from `Env`;
+  `AlgoEnv` keeps only its specifics: `observe`, `reward` (correctness/
+  efficiency/simplicity decomposition) and `is_terminal`.
+- `AlgoSearchEnv` now implements `Env` then `AlgoEnv`; the shared
+  tabular / policy-gradient agents of `scirust-learning` apply
+  directly to the algorithm-search environment, without a duplicated
+  environment abstraction.
+- Internal crate change: no public method signature modified,
+  47 green tests, `clippy -D warnings` and `fmt` clean.
 
-### Modifié — `scirust-rl-algo` : `AlgoEnv` unifié sur le trait `Env` partagé
-Le crate de découverte d'algorithmes définissait son propre trait
-d'environnement `AlgoEnv` (avec `reset`/`step`/`available_actions`), doublant
-le trait `scirust_learning::rl::Env` déjà présent dans une dépendance directe.
-Cette duplication est supprimée :
-- **`AlgoEnv` devient un sous-trait** de `scirust_learning::rl::Env`
-  (`AlgoEnv: Env<State = AlgoSearchState, Action = AlgoAction>`). Les trois
-  méthodes `reset`/`step`/`available_actions` proviennent maintenant de `Env` ;
-  `AlgoEnv` ne conserve que ses spécificités : `observe`, `reward` (décomposition
-  correction/efficacité/simplicité) et `is_terminal`.
-- `AlgoSearchEnv` implémente désormais `Env` puis `AlgoEnv` ; les agents
-  tabulaires / policy-gradient partagés de `scirust-learning` s'appliquent
-  directement à l'environnement de recherche d'algorithmes, sans abstraction
-  d'environnement dupliquée.
-- Changement interne au crate : aucune signature de méthode publique modifiée,
-  47 tests verts, `clippy -D warnings` et `fmt` propres.
+### Added — a priori proof extended to sin/cos/ln (installment 118)
+- **`scirust-core::formal_proof`** (extended): generic toolbox for
+  rounding-error propagation `(value, error)` (standard IEEE model,
+  always bounded by triangle inequality), replaying the actual
+  operation sequence of `sin_poly`/`cos_poly`/`ln_f64_core`. `sin`/`ln`
+  lower-bounded via an extracted factor (Jordan for sin, `atanh(s)≥s` for ln,
+  structural argument justifying that a single evaluation at the boundary suffices);
+  `cos` lower-bounded directly (`cos(0)=1`, same scheme as `exp`); `ln` handled
+  in 2 cases (Sterbenz for the x≈1 case — `m−1` without any rounding error).
+  Margins obtained: sin ×7.2·10⁷, cos ×4.8·10⁷, ln ×1.4·10⁵ below the
+  correctly-rounded threshold. `erf` remains out of the a priori scope (series
+  converging on `|y|<4`, non-monotone terms at the start of the series — documented).
+- 764 tests (+5), clippy and fmt clean. TCP test on physically
+  separate hardware (Jetson + x86-64): infrastructure already complete (installment 117-C),
+  remains out of reach of this session (no access to external hardware).
 
-### Ajouté — preuve a priori étendue à sin/cos/ln (volet 118)
-- **`scirust-core::formal_proof`** (étendu) : boîte à outils générique de
-  propagation d'erreur d'arrondi `(valeur, erreur)` (modèle IEEE standard,
-  toujours majoré par inégalité triangulaire), rejouant la séquence
-  d'opérations réelle de `sin_poly`/`cos_poly`/`ln_f64_core`. `sin`/`ln`
-  minorés via un facteur extrait (Jordan pour sin, `atanh(s)≥s` pour ln,
-  argument structurel justifiant qu'une seule évaluation au bord suffit) ;
-  `cos` minoré directement (`cos(0)=1`, même schéma que `exp`) ; `ln` traité
-  en 2 cas (Sterbenz pour le cas x≈1 — `m−1` sans aucune erreur d'arrondi).
-  Marges obtenues : sin ×7,2·10⁷, cos ×4,8·10⁷, ln ×1,4·10⁵ sous le seuil
-  d'arrondi correct. `erf` reste hors périmètre a priori (série convergeant
-  sur `|y|<4`, termes non monotones en début de série — documenté).
-- 764 tests (+5), clippy et fmt propres. Test TCP sur matériel physiquement
-  séparé (Jetson + x86-64) : infrastructure déjà complète (volet 117-C),
-  reste hors de portée de cette session (pas d'accès à du matériel externe).
+### Added — `scirust-mcp`: `scirust-sim` simulations exposed as MCP tools
+An agent can now launch a `scirust-sim` simulation with a simple
+MCP tool call (typed JSON schema, SHA-256 audit log per call like
+the other tools), without writing any integration code:
+- **`sim_epidemic`** — SIR epidemic: returns R0, the infected fraction at the peak
+  and the peak day, the final attack rate.
+- **`sim_battery_discharge`** — Thévenin 1-RC + thermal battery plant
+  (`scirust-bms`) at constant current: final SoC, terminal voltage and
+  temperature, steady-state temperature, polarization time constant.
+- **`sim_grid_stability`** — machine–grid swing equation
+  (`scirust-grid`): existence of a synchronism point, equilibrium angle
+  `asin(P_m/P_max)`, small-signal electromechanical frequency, and — if a
+  disturbance is provided — verdict on the transient's return to equilibrium.
+- `scirust-mcp` now depends on `scirust-sim`; 6 tool tests + the
+  registry assertions. `fmt`/`clippy -D warnings` clean.
 
-### Ajouté — `scirust-mcp` : les simulations `scirust-sim` exposées comme outils MCP
-Un agent peut désormais lancer une simulation `scirust-sim` par un simple
-appel d'outil MCP (schéma JSON typé, journal d'audit SHA-256 par appel comme
-les autres outils), sans écrire de code d'intégration :
-- **`sim_epidemic`** — épidémie SIR : renvoie R0, la fraction infectée au pic
-  et le jour du pic, le taux d'attaque final.
-- **`sim_battery_discharge`** — plante batterie Thévenin 1-RC + thermique
-  (`scirust-bms`) à courant constant : SoC, tension terminale et température
-  finales, température stationnaire, constante de temps de polarisation.
-- **`sim_grid_stability`** — équation d'oscillation machine-réseau
-  (`scirust-grid`) : existence d'un point de synchronisme, angle d'équilibre
-  `asin(P_m/P_max)`, fréquence électromécanique petit signal, et — si une
-  perturbation est fournie — verdict de retour à l'équilibre du transitoire.
-- `scirust-mcp` dépend maintenant de `scirust-sim` ; 6 tests d'outils + les
-  assertions du registre. `fmt`/`clippy -D warnings` propres.
+### Added — `scirust-sim`: industrial vertical plants (battery, HVAC, grid)
+The `scirust-bms`/`scirust-hvac`/`scirust-grid` verticals provided
+the physics and estimators but no step-by-step simulator; three new
+`scirust-sim` modules implement the corresponding `System` trait, tested
+against oracle and dependency-free:
+- **`scirust-sim::battery`** — Thévenin 1-RC model (SoC, polarization
+  overvoltage, self-heating thermal). **Exact** coulomb counting
+  (linear invariant, bit-exact RK4), closed-form RC relaxation toward
+  `I·R₁`, steady-state temperature `T_amb + P·R_th`, terminal voltage.
+- **`scirust-sim::hvac`** — **2R2C** building zone (air + wall mass);
+  exact, linear steady state `T_air = T_ext + Q·(R_aw+R_wo)`,
+  biexponential relaxation toward the outside when `Q = 0`.
+- **`scirust-sim::grid`** — machine–grid **swing equation** (single
+  machine–infinite bus), `SecondOrderSystem`. Equilibrium `δ* = asin(P_m/P_max)`,
+  small-signal electromechanical frequency `√((ω_s/2H)·P_max·cos δ*)`, transient
+  energy conserved without damping, decay toward `δ*` with
+  damping, loss-of-synchronism detection (`P_m > P_max`).
+- 11 additional tests (94 total, +2 doctests; 97 with the `rl` feature).
+  `fmt`/`clippy -D warnings` clean; `cargo miri test` green (heavy runs
+  skipped under Miri, `scirust-stiff` convention).
 
-### Ajouté — `scirust-sim` : plantes des verticales industrielles (batterie, HVAC, réseau)
-Les verticales `scirust-bms`/`scirust-hvac`/`scirust-grid` fournissaient la
-physique et des estimateurs mais aucun simulateur pas-à-pas ; trois nouveaux
-modules `scirust-sim` implémentent le trait `System` correspondant, testés
-contre oracle et sans dépendance :
-- **`scirust-sim::battery`** — modèle Thévenin 1-RC (SoC, surtension de
-  polarisation, thermique auto-échauffement). Comptage coulométrique **exact**
-  (invariant linéaire, RK4 au bit près), relaxation RC en forme close vers
-  `I·R₁`, température stationnaire `T_amb + P·R_th`, tension terminale.
-- **`scirust-sim::hvac`** — zone bâtiment **2R2C** (air + masse murale) ;
-  état stationnaire exact et linéaire `T_air = T_ext + Q·(R_aw+R_wo)`,
-  relaxation biexponentielle vers l'extérieur quand `Q = 0`.
-- **`scirust-sim::grid`** — **équation d'oscillation** machine-réseau (single
-  machine–infinite bus), `SecondOrderSystem`. Équilibre `δ* = asin(P_m/P_max)`,
-  fréquence électromécanique petit signal `√((ω_s/2H)·P_max·cos δ*)`, énergie
-  transitoire conservée sans amortissement, décroissance vers `δ*` avec
-  amortissement, détection de perte de synchronisme (`P_m > P_max`).
-- 11 tests supplémentaires (94 au total, +2 doctests ; 97 avec la feature `rl`).
-  `fmt`/`clippy -D warnings` propres ; `cargo miri test` vert (runs lourds
-  ignorés sous Miri, convention `scirust-stiff`).
+### Added — axis 3 (block-channel) of the QRD-RLS brief: `BlockQrdRls`, block absorption via Householder
+The third axis of the Gentleman/McWhirter brief, previously documented as
+deliberately deferred, is now delivered — with an honest scope and a
+measured benchmark result that does **not** go in the direction hoped for by the brief.
 
-### Ajouté — axe 3 (bloc-canal) du brief QRD-RLS : `BlockQrdRls`, absorption par blocs via Householder
-Le troisième axe du brief Gentleman/McWhirter, précédemment documenté comme
-délibérément différé, est maintenant livré — avec un périmètre honnête et un
-résultat de banc mesuré qui ne va **pas** dans le sens espéré par le brief.
-
-- **`BlockQrdRls`** (nouveau module `block_qrd_rls`) — absorbe un bloc de `B`
-  nouveaux échantillons en une seule réduction QR par réflecteurs de
-  Householder (Golub & Van Loan, Alg. 5.1.1) sur le système augmenté
-  `(n+B)×n`, au lieu de `B` rotations de Givens séquentielles. Chaque
-  réflecteur est appliqué aux colonnes restantes du facteur *et* aux `n_out`
-  colonnes du second membre. Zéro dépendance externe ajoutée (boucles denses
-  écrites à la main, pas de GEMM BLAS-3 — voir plus bas).
-- **Portée précisée dans la doc du module** : deux idées distinctes se
-  cachent derrière « FQRD-RLS bloc-canal multicanal » dans la littérature.
-  (1) le traitement par blocs de plusieurs échantillons temporels — c'est ce
-  qui est livré ici. (2) les algorithmes QRD-RLS « rapides » à récursion
-  d'ordre (Cioffi–Kailath, en `O(n)` au lieu de `O(n²)` par échantillon) —
-  une dérivation entièrement différente, **non livrée**, qui demanderait sa
-  propre validation croisée from scratch plutôt qu'une généralisation de
-  taille de bloc de Gentleman. Par ailleurs, même dans le périmètre (1), le
-  vrai gain BLAS-3 (représentation compacte WY, `Q = I − Y·T·Yᵀ`, deux
-  produits matrice-matrice) n'est **pas** implémenté — chaque réflecteur est
-  appliqué colonne par colonne (un produit scalaire + un `axpy` par colonne
-  restante, de forme BLAS-2), documenté explicitement comme tel plutôt que
-  survendu.
-- **Pondération de récence à l'intérieur d'un bloc** — dérivée puis vérifiée,
-  pas supposée : `B` appels séquentiels à `update()` mettent chacun à
-  l'échelle **tout** le facteur existant par `√λ` (voir la doc de
-  `squared_givens`), donc `B` échantillons groupés doivent reproduire un
-  facteur existant mis à l'échelle par `λ^(B/2)` au total, l'échantillon le
-  plus ancien du bloc par `λ^((B-1)/2)`, le plus récent par `λ⁰ = 1`.
-  Deux tests cross-oracle confirment que cette construction reproduit
-  exactement l'absorption séquentielle : `update_block(..., block_size=1)`
-  colle à `GivensQrdRls::update` à 1e-6 près sur 1000 pas, et grouper le même
-  flux en blocs de 5 colle au traitement un-par-un à 1e-6 près sur 400
-  échantillons. Cross-vérifié aussi en MIMO contre `SquaredGivensRls`
-  (`n_in=3, n_out=2`, blocs de 8, 250 blocs) et sur un système dérivant.
-  5 nouveaux tests (60 au total sur `scirust-estimation`).
-- **Mesuré, pas supposé** (conteneur x86_64, Intel Xeon @2.80GHz, 4 cœurs,
-  `cargo run --bin bench_rls --release`) — le résultat honnête : grouper en
-  blocs aide *par rapport à lui-même* (`B=64` vs `B=1` : 5,0× plus rapide à
-  n=4 ; 9,0× à n=16 ; 21,2× à n=64), mais **ne bat jamais** `SquaredGivensRls`
-  séquentiel, même à `B=64` :
+- **`BlockQrdRls`** (new module `block_qrd_rls`) — absorbs a block of `B`
+  new samples in a single QR reduction via Householder
+  reflectors (Golub & Van Loan, Alg. 5.1.1) on the augmented
+  `(n+B)×n` system, instead of `B` sequential Givens rotations. Each
+  reflector is applied to the remaining columns of the factor *and* to the `n_out`
+  columns of the right-hand side. Zero added external dependencies (dense loops
+  written by hand, no BLAS-3 GEMM — see below).
+- **Scope clarified in the module docs**: two distinct ideas
+  hide behind "multichannel block-channel FQRD-RLS" in the literature.
+  (1) block processing of several time samples — that is what
+  is delivered here. (2) the "fast" QRD-RLS algorithms with order
+  recursion (Cioffi–Kailath, in `O(n)` instead of `O(n²)` per sample) —
+  a completely different derivation, **not delivered**, which would require its
+  own from-scratch cross-validation rather than a generalization of
+  Gentleman's block size. Moreover, even within scope (1), the
+  real BLAS-3 gain (compact WY representation, `Q = I − Y·T·Yᵀ`, two
+  matrix-matrix products) is **not** implemented — each reflector is
+  applied column by column (one dot product + one `axpy` per remaining
+  column, BLAS-2 in form), explicitly documented as such rather than
+  oversold.
+- **Recency weighting inside a block** — derived then verified,
+  not assumed: `B` sequential calls to `update()` each scale
+  **all** of the existing factor by `√λ` (see the docs of
+  `squared_givens`), so `B` grouped samples must reproduce an
+  existing factor scaled by `λ^(B/2)` overall, the oldest
+  sample of the block by `λ^((B-1)/2)`, the newest by `λ⁰ = 1`.
+  Two cross-oracle tests confirm that this construction reproduces
+  exactly the sequential absorption: `update_block(..., block_size=1)`
+  matches `GivensQrdRls::update` to 1e-6 over 1000 steps, and grouping the same
+  stream into blocks of 5 matches one-by-one processing to 1e-6 over 400
+  samples. Also cross-verified in MIMO against `SquaredGivensRls`
+  (`n_in=3, n_out=2`, blocks of 8, 250 blocks) and on a drifting system.
+  5 new tests (60 total on `scirust-estimation`).
+- **Measured, not assumed** (x86_64 container, Intel Xeon @2.80GHz, 4 cores,
+  `cargo run --bin bench_rls --release`) — the honest result: grouping into
+  blocks helps *relative to itself* (`B=64` vs `B=1`: 5.0× faster at
+  n=4; 9.0× at n=16; 21.2× at n=64), but **never beats** sequential `SquaredGivensRls`,
+  even at `B=64`:
 
   | n | SquaredGivensRls | BlockQrdRls B=1 | BlockQrdRls B=64 |
   |---|---|---|---|
-  | 4 | 34,5 ns | 256,1 ns | 51,2 ns |
-  | 16 | 272,8 ns | 3 559,4 ns | 395,1 ns |
-  | 64 | 3 447,5 ns | 184 834,7 ns | 8 726,6 ns |
+  | 4 | 34.5 ns | 256.1 ns | 51.2 ns |
+  | 16 | 272.8 ns | 3 559.4 ns | 395.1 ns |
+  | 64 | 3 447.5 ns | 184 834.7 ns | 8 726.6 ns |
 
-  Explication : les réflecteurs de Householder réintroduisent le `√` et la
-  `÷` que la substitution de Gentleman avait éliminés du chemin chaud de
-  `SquaredGivensRls`. Le brief espérait un gain de débit bloc-canal ; la
-  mesure dit que ce gain n'existe pas à ces tailles avec cette formulation,
-  et que la vraie restructuration BLAS-3 (WY compacte) — ou un portage vers
-  de vrais noyaux SIMD — resterait nécessaire pour espérer dépasser l'axe 1.
-  Conservé malgré ce résultat négatif : c'est une implémentation correcte,
-  testée, du bloc-canal tel que demandé, et la mesure elle-même est la
-  réponse honnête à la question posée par le brief.
+  Explanation: Householder reflectors reintroduce the `√` and the
+  `÷` that Gentleman's substitution had eliminated from the hot path of
+  `SquaredGivensRls`. The brief hoped for a block-channel throughput gain; the
+  measurement says this gain does not exist at these sizes with this formulation,
+  and that the real BLAS-3 restructuring (compact WY) — or a port to
+  real SIMD kernels — would still be needed to hope to beat axis 1.
+  Kept despite this negative result: it is a correct, tested
+  implementation of block-channel as requested, and the measurement itself is the
+  honest answer to the question posed by the brief.
 
-### Ajouté — fluides & thermo, volet 5 : régions 3a/3b IF97 en sous-critique, équations backward `p(h,s)`
-Les deux derniers chantiers explicitement demandés sur les équations backward IF97 :
-- **`scirust-thermo::backward::region3_{v,t}_{ph,ps}`** — les équations
-  backward officielles **`v(p,h)`, `T(p,h)`, `v(p,s)`, `T(p,s)`** de la
-  région 3, dispatchées sur les sous-régions fittées **3a/3b** (frontière
-  `h_3ab(p)` pour les requêtes `(p,h)`, entropie critique pour `(p,s)`).
-  Contrairement à `region3_from_tp` (bissection de densité, restreinte au
-  supercritique car `p(ρ)` n'est pas monotone sous le point critique), ces
-  corrélations closed-form sont valides sur **tout** le domaine région 3,
-  sous-critique inclus — aucune densité à résoudre. Découverte notable en
-  écrivant le test de vérification : sous le point critique, la région 3
-  est bornée **en dessous par la frontière B23** et non par la courbe de
-  saturation — `B23(T) < Psat(T)` dans cette bande étroite (623,15 K à
-  647,096 K), ce qui cède à la région 3 une branche « vapeur-like » (3b)
-  même sous-critique, en plus de la branche liquide (3a) classique.
-- **`scirust-thermo::backward::region{1,2,3}_p_hs`** — équation backward
-  officielle **`p(h,s)`** pour les régions 1, 2 (dispatch 2a/2b/2c par la
-  frontière `hab_s(s)` et le seuil `s ≥ 5,85 kJ/(kg·K)`) et 3 (dispatch
-  3a/3b par l'entropie critique) — pression directement depuis l'état
-  thermodynamique (h,s), sans bissection ni connaissance préalable de T.
-- Méthodologie inchangée : les 14 groupes de coefficients (32 à 46 termes
-  chacun) ont été extraits programmatiquement du paquet Python de référence
-  `iapws`, scannés pour d'éventuels exposants non entiers (aucun cette
-  fois — la leçon du volet précédent tenue), puis vérifiés en Python pur
-  contre les 33 exemples numériques officiels des publications
-  Supp-Tv(ph,ps)3-2014, Supp-PHS12-2014 et Supp-phs3-2014 avant l'écriture
-  du Rust.
+### Added — fluids & thermo, installment 5: subcritical IF97 regions 3a/3b, backward `p(h,s)` equations
+The last two work items explicitly requested on the IF97 backward equations:
+- **`scirust-thermo::backward::region3_{v,t}_{ph,ps}`** — the official
+  backward equations **`v(p,h)`, `T(p,h)`, `v(p,s)`, `T(p,s)`** of
+  region 3, dispatched on the fitted subregions **3a/3b** (boundary
+  `h_3ab(p)` for `(p,h)` queries, critical entropy for `(p,s)`).
+  Unlike `region3_from_tp` (density bisection, restricted to the
+  supercritical regime because `p(ρ)` is not monotone below the critical point), these
+  closed-form correlations are valid on **all** of the region-3 domain,
+  subcritical included — no density to solve for. Notable discovery while
+  writing the verification test: below the critical point, region 3
+  is bounded **below by the B23 boundary** and not by the
+  saturation curve — `B23(T) < Psat(T)` in this narrow band (623.15 K to
+  647.096 K), which grants region 3 a "vapor-like" branch (3b)
+  even subcritical, in addition to the classic liquid branch (3a).
+- **`scirust-thermo::backward::region{1,2,3}_p_hs`** — official backward
+  equation **`p(h,s)`** for regions 1, 2 (2a/2b/2c dispatch via the
+  `hab_s(s)` boundary and the threshold `s ≥ 5.85 kJ/(kg·K)`) and 3 (dispatch
+  3a/3b via the critical entropy) — pressure directly from the
+  thermodynamic state (h,s), without bisection or prior knowledge of T.
+- Unchanged methodology: the 14 coefficient groups (32 to 46 terms
+  each) were extracted programmatically from the reference Python package
+  `iapws`, scanned for any non-integer exponents (none this
+  time — the lesson of the previous installment held), then verified in pure Python
+  against the 33 official numerical examples of the
+  Supp-Tv(ph,ps)3-2014, Supp-PHS12-2014 and Supp-phs3-2014 publications before writing
+  the Rust.
 
-### Ajouté — QRD-RLS sans racine carrée (Gentleman 1973) + décomposition systolique de McWhirter
-Trois axes de recherche proposés pour durcir/accélérer le RLS MIMO ; deux
-livrés avec preuve, un troisième explicitement différé plutôt que bâclé.
+### Added — square-root-free QRD-RLS (Gentleman 1973) + McWhirter systolic decomposition
+Three research axes proposed to harden/speed up MIMO RLS; two
+delivered with proof, a third explicitly deferred rather than rushed.
 
-- **`GivensQrdRls`** — référence QRD-RLS par rotations de Givens
-  séquentielles (`√`-based), la forme **information** (racine de `P⁻¹`), duale
-  de la forme **covariance** (`QrRls`/Potter) déjà dans le crate. Chaque
-  rotation est une transformation orthogonale exacte ⇒ stable par
-  construction, sans re-symétrisation. Cross-vérifié contre `VectorRls`
-  (poids à 1e-6 près sur 1500 pas aléatoires) — un second oracle indépendant
-  pour la même solution de moindres carrés.
-- **`SquaredGivensRls`** (Gentleman, *« Least squares computations by Givens
-  transformations without square roots »*, 1973) — la même récursion sans
-  aucune racine carrée : chaque ligne triangulaire est stockée comme un poids
-  `d_i` et un vecteur `t_i` normalisé (`t_i[i]=1`), et la substitution complète
-  du calcul de Givens fait disparaître tous les `√` (dérivation intégrale en
-  tête de module). Bonus : l'échelle `√d_i` de chaque ligne s'annule dans les
-  équations normales, donc l'extraction des poids par substitution arrière ne
-  nécessite **ni `√` ni division** (diagonale unitaire). MIMO natif
-  (`n_in`/`n_out`), zéro allocation tas.
-  **Vérifié, pas juste plausible** : le `R` physique reconstruit
-  (`√d_i·t_i`) colle au `R` `√`-based de `GivensQrdRls` à 1e-6 près sur 1500
-  pas — preuve que la dérivation sans racine est exacte, pas seulement
-  numériquement chanceuse ; version MIMO cross-vérifiée contre `RlsFilter`.
-  Deux bugs de dérivation ont été attrapés *par ces tests mêmes* avant tout
-  commit : la convention d'initialisation `R(0)` (racine de l'**information**,
-  donc `1/√delta`, pas `√delta`) et le poids `d_in` du résidu entrant, qui
-  **évolue à chaque ligne** et doit être propagé plutôt que réinitialisé —
-  exactement le genre d'erreur silencieuse qu'une dérivation « recopiée d'un
-  papier de mémoire » aurait laissée passer sans un oracle pour la détecter.
-  **Mesuré** (conteneur x86_64, Intel Xeon @2.80GHz, 4 cœurs, `cargo run
-  --bin bench_rls --release`) : plus rapide que `VectorRls` à toutes les
-  tailles (43,3 ns vs 75,0 ns à n=4 ; 313,9 ns vs 808,0 ns à n=16 ; 4 402,0 ns
-  vs 12 797,4 ns à n=64 — 1,7×–2,9×), et plus rapide que `QrRls` (racine
-  carrée) à toutes les tailles aussi (1,7×–2,2×) — conforme à la promesse de
-  la littérature (racine éliminée, moitié moins de multiplications).
-- **`squared_givens::systolic`** — le réseau triangulaire de McWhirter
-  (*« RLS minimization using a systolic array »*, 1983), rendu vérifiable :
-  deux fonctions pures `boundary_cell`/`internal_cell` à communication
-  **plus-proche-voisin uniquement** (aucune cellule ne lit la colonne d'une
-  autre), qui reproduisent `SquaredGivensRls::update` **bit pour bit** sur
-  400 pas aléatoires — la preuve que la mise à jour se décompose réellement
-  sans risque de concurrence de données. Présenté honnêtement comme un
-  **modèle logiciel de référence** de la structure de flux (le point d'ancrage
-  naturel pour un futur portage GPU/FPGA à ordonnancement en vagues), pas
-  comme une revendication de parallélisme matériel réalisé sur CPU.
-- **Axe bloc-canal (FQRD-RLS multicanal, BLAS-3) délibérément non livré** :
-  un vrai gain de débit bloc-canal nécessite un vrai GEMM par blocs (niveau
-  BLAS-3) branché sur les mises à jour Givens — ce qui romprait la frontière
-  volontaire du crate (zéro dépendance hors `serde`) en le couplant à
-  `scirust-core`/`scirust-simd`. Documenté ici comme plan concret plutôt que
-  silencieusement abandonné : traiter `B` échantillons par bloc via `B`
-  passes Givens/Squared-Givens séquentielles est déjà l'algorithme
-  bloc-récursif correct (amortit l'overhead d'appel, pas un vrai GEMM) ; le
-  vrai débit BLAS-3 demanderait de faire appel aux noyaux SIMD existants du
-  workspace pour les mises à jour internes — hors périmètre de ce lot.
-- 6 nouveaux tests (55 au total sur `scirust-estimation`) ; fmt/clippy
-  `-D warnings` propres.
+- **`GivensQrdRls`** — QRD-RLS reference via sequential Givens
+  rotations (`√`-based), the **information** form (root of `P⁻¹`), dual
+  of the **covariance** form (`QrRls`/Potter) already in the crate. Each
+  rotation is an exact orthogonal transformation ⇒ stable by
+  construction, without re-symmetrization. Cross-verified against `VectorRls`
+  (weights to 1e-6 over 1500 random steps) — a second independent oracle
+  for the same least-squares solution.
+- **`SquaredGivensRls`** (Gentleman, *"Least squares computations by Givens
+  transformations without square roots"*, 1973) — the same recursion without
+  any square root: each triangular row is stored as a weight
+  `d_i` and a normalized vector `t_i` (`t_i[i]=1`), and the full substitution
+  of the Givens computation makes all the `√` disappear (full derivation at
+  the head of the module). Bonus: the `√d_i` scale of each row cancels in
+  the normal equations, so weight extraction by back substitution
+  requires **neither `√` nor division** (unit diagonal). Native MIMO
+  (`n_in`/`n_out`), zero heap allocation.
+  **Verified, not just plausible**: the reconstructed physical `R`
+  (`√d_i·t_i`) matches the `√`-based `R` of `GivensQrdRls` to 1e-6 over 1500
+  steps — proof that the square-root-free derivation is exact, not only
+  numerically lucky; MIMO version cross-verified against `RlsFilter`.
+  Two derivation bugs were caught *by these very tests* before any
+  commit: the `R(0)` initialization convention (root of the **information**,
+  hence `1/√delta`, not `√delta`) and the weight `d_in` of the incoming residual, which
+  **changes at every row** and must be propagated rather than reset —
+  exactly the kind of silent error that a derivation "copied from memory of a paper"
+  would have let through without an oracle to detect it.
+  **Measured** (x86_64 container, Intel Xeon @2.80GHz, 4 cores, `cargo run
+  --bin bench_rls --release`): faster than `VectorRls` at all
+  sizes (43.3 ns vs 75.0 ns at n=4; 313.9 ns vs 808.0 ns at n=16; 4 402.0 ns
+  vs 12 797.4 ns at n=64 — 1.7×–2.9×), and faster than `QrRls` (square
+  root) at all sizes too (1.7×–2.2×) — consistent with the
+  literature's promise (root eliminated, half as many multiplications).
+- **`squared_givens::systolic`** — McWhirter's triangular array
+  (*"RLS minimization using a systolic array"*, 1983), made verifiable:
+  two pure functions `boundary_cell`/`internal_cell` with
+  **nearest-neighbor-only** communication (no cell reads another
+  cell's column), which reproduce `SquaredGivensRls::update` **bit for bit** over
+  400 random steps — proof that the update genuinely decomposes
+  without any data-race risk. Honestly presented as a
+  **reference software model** of the flow structure (the natural anchor
+  point for a future GPU/FPGA port with wavefront scheduling), not
+  as a claim of hardware parallelism realized on CPU.
+- **Block-channel axis (multichannel FQRD-RLS, BLAS-3) deliberately not delivered**:
+  a real block-channel throughput gain requires a real blocked GEMM (BLAS-3
+  level) hooked into the Givens updates — which would break the
+  crate's deliberate boundary (zero dependency beyond `serde`) by coupling it to
+  `scirust-core`/`scirust-simd`. Documented here as a concrete plan rather than
+  silently abandoned: processing `B` samples per block via `B`
+  sequential Givens/Squared-Givens passes is already the correct
+  block-recursive algorithm (amortizes call overhead, not a real GEMM); the
+  real BLAS-3 throughput would require calling on the workspace's existing SIMD
+  kernels for the internal updates — out of scope for this batch.
+- 6 new tests (55 total on `scirust-estimation`); fmt/clippy
+  `-D warnings` clean.
 
-### Mesuré — RLS scirust vs padasip, même machine (protocole exécuté sur Jetson)
-Le protocole `scripts/bench-rls-padasip.py` + `cargo run --bin bench_rls
---release` a tourné sur une **même machine** — le seul mode de comparaison
-autorisé (voir la discipline « claims backed by measurements »).
+### Measured — scirust RLS vs padasip, same machine (protocol run on Jetson)
+The protocol `scripts/bench-rls-padasip.py` + `cargo run --bin bench_rls
+--release` ran on a **single machine** — the only mode of comparison
+allowed (see the "claims backed by measurements" discipline).
 
-**Machine** : Jetson, L4T R38.4 (`generic` board), noyau `6.8.12-tegra`,
-aarch64, 14 cœurs (`uname -a` / `/etc/nv_tegra_release` / `nproc` — modèle
-exact non capturé par ces commandes ; classe Thor d'après le L4T R38 et les
-références Jetson existantes du dépôt).
+**Machine**: Jetson, L4T R38.4 (`generic` board), kernel `6.8.12-tegra`,
+aarch64, 14 cores (`uname -a` / `/etc/nv_tegra_release` / `nproc` — exact
+model not captured by these commands; Thor class according to L4T R38 and
+the repository's existing Jetson references).
 
-| n | `scirust::VectorRls` | padasip `FilterRLS` | rapport |
+| n | `scirust::VectorRls` | padasip `FilterRLS` | ratio |
 |---|---|---|---|
-| 4 | 59,7 ns | 8 636,2 ns | **144,7×** |
-| 16 | 532,3 ns | 10 640,4 ns | **20,0×** |
-| 64 | 7 792,0 ns | 73 349,3 ns | **9,4×** |
+| 4 | 59.7 ns | 8 636.2 ns | **144.7×** |
+| 16 | 532.3 ns | 10 640.4 ns | **20.0×** |
+| 64 | 7 792.0 ns | 73 349.3 ns | **9.4×** |
 
-Le rapport se resserre franchement avec `n` — comportement attendu et
-honnête, pas un artefact : à petit `n` le coût fixe par appel de
-l'interpréteur Python/NumPy (création d'objets, dispatch) domine ; à mesure
-que `n` grandit, le BLAS vectorisé de NumPy amortit ce coût et rattrape du
-terrain sur l'implémentation Rust scalaire boucle-par-boucle. Sur cette même
-machine, `QrRls` reproduit l'avantage déjà observé en conteneur x86_64 (plus
-rapide que `VectorRls` dès n=16 : 433,5 ns vs 532,3 ns à n=16, 6 278,9 ns vs
-7 792,0 ns à n=64 — pas de passe de symétrisation). `RlsFilterConst`, en
-revanche, ne montre **pas** ici l'avantage net vu en conteneur (34,0 ns à
-n=4, mais 7 894,2 ns à n=64, à peu près à égalité avec la version tas) —
-chiffres bruts consignés sans lissage, l'écart de déroulage/vectorisation
-entre cibles aarch64 et x86_64 reste à creuser plutôt qu'à sur-interpréter
-sur un seul run.
+The ratio tightens markedly with `n` — expected and
+honest behavior, not an artifact: at small `n` the fixed per-call cost of
+the Python/NumPy interpreter (object creation, dispatch) dominates; as
+`n` grows, NumPy's vectorized BLAS amortizes that cost and makes up
+ground on the scalar loop-by-loop Rust implementation. On this same
+machine, `QrRls` reproduces the advantage already observed in the x86_64 container (faster
+than `VectorRls` from n=16: 433.5 ns vs 532.3 ns at n=16, 6 278.9 ns vs
+7 792.0 ns at n=64 — no symmetrization pass). `RlsFilterConst`, on the
+other hand, does **not** show here the clear advantage seen in the container (34.0 ns at
+n=4, but 7 894.2 ns at n=64, roughly on par with the heap version) —
+raw figures recorded without smoothing, the unrolling/vectorization
+gap between aarch64 and x86_64 targets remains to be investigated rather than
+over-interpreted on a single run.
 
-### Ajouté — RLS niveau 3 : oubli directionnel, annulation multi-référence, QrRlsConst, re-conditionnement
-Le lot complet validé — l'anti-windup principiel et le bouclage avec le
-pipeline de débruitage :
-- **`DirectionalRls`** (oubli directionnel, Kulhavý / Cao-Schwartz) : n'oublie
-  que dans la **direction excitée** (découpe rang-1 de la matrice
-  d'information `R` le long du régresseur, mise à jour appariée de `P` par
-  Sherman-Morrison, O(n²)/échantillon, zéro allocation). **Test discriminant
-  du windup** : 2 000 pas excités sur une seule direction à λ=0,9 — le RLS
-  standard voit sa covariance orthogonale exploser (> 10⁵⁰, λ⁻ᵏ) ; le
-  directionnel la garde **bornée à sa valeur initiale**, puis se réadapte
-  sainement quand l'excitation revient. λ=1 ≡ RLS fenêtre croissante (testé
-  à 1e-8) ; suivi de dérive vérifié.
+### Added — RLS level 3: directional forgetting, multi-reference cancellation, `QrRlsConst`, reconditioning
+The complete batch validated — principled anti-windup and the closure with the
+denoising pipeline:
+- **`DirectionalRls`** (directional forgetting, Kulhavý / Cao-Schwartz): forgets
+  only in the **excited direction** (rank-1 cut of the information
+  matrix `R` along the regressor, matched update of `P` via
+  Sherman-Morrison, O(n²)/sample, zero allocation). **Discriminating windup
+  test**: 2 000 excited steps on a single direction at λ=0.9 — standard
+  RLS sees its orthogonal covariance explode (> 10⁵⁰, λ⁻ᵏ); the
+  directional one keeps it **bounded at its initial value**, then re-adapts
+  healthily when excitation returns. λ=1 ≡ growing-window RLS (tested
+  at 1e-8); drift tracking verified.
 - **`reference_noise_cancel` + `wavelet_rls_rts_smooth_multiref`**
-  (`scirust-signal::denoise::pipeline`) : annulation de bruit **convolutive
-  multi-référence** — `MimoFirRls` apprend en ligne les chemins FIR
-  capteurs-de-référence → primaire, l'erreur a priori EST le signal nettoyé ;
-  chaînée en étage 0 du pipeline Wavelet–RLS–RTS. Tests : interférence
-  convolutive 2 références retirée (> +20 dB vs brut) ; la chaîne
-  multi-référence bat le pipeline aveugle de > 6 dB en présence
-  d'interférence + bruit large bande.
-- **`QrRlsConst<const N>`** : racine carrée de Potter **sur pile**,
-  `core`-only — le filtre embarqué durci ultime (PSD par construction +
-  zéro tas + déroulage compile-time). **Bit-identique** au `QrRls` tas
-  (ordre d'accumulation aligné, testé au bit près sur 500 pas).
-- **Re-conditionnement long-horizon** : `QrRls::recondition` /
-  `QrRlsMimo::recondition` (re-factorisation `S ← chol(S·Sᵀ)`, préserve `P`
-  au rounding près, restaure la triangularité) et
-  `DirectionalRls::recondition` (`P ← R⁻¹` exact via le `Mat::inverse` du
-  crate) + diagnostic `consistency_error()`. La factorisation de Cholesky
-  locale est **vérifiée contre l'oracle `scirust-solvers`** (dev-dependency
-  volontaire : les dépendances de prod du crate restent serde seul).
-- **`scripts/bench-rls-padasip.py`** : la moitié Python du protocole de
-  comparaison inter-bibliothèques (à exécuter sur la même machine que
-  `bench_rls`, p. ex. le Jetson) — aucun chiffre inter-bibliothèques
-  revendiqué tant que les deux moitiés n'ont pas tourné sur un même hôte.
-- 49 tests `scirust-estimation` + 93 `scirust-signal` verts ;
-  fmt/clippy `-D warnings` propres.
+  (`scirust-signal::denoise::pipeline`): **convolutive multi-reference**
+  noise cancellation — `MimoFirRls` learns online the reference-sensor → primary FIR paths,
+  the a priori error IS the cleaned signal;
+  chained as stage 0 of the Wavelet–RLS–RTS pipeline. Tests: 2-reference
+  convolutive interference removed (> +20 dB vs raw); the
+  multi-reference chain beats the blind pipeline by > 6 dB in the presence
+  of interference + wideband noise.
+- **`QrRlsConst<const N>`**: Potter's square root **on the stack**,
+  `core`-only — the ultimate hardened embedded filter (PSD by construction +
+  zero heap + compile-time unrolling). **Bit-identical** to the heap `QrRls`
+  (aligned accumulation order, tested bit-for-bit over 500 steps).
+- **Long-horizon reconditioning**: `QrRls::recondition` /
+  `QrRlsMimo::recondition` (re-factorization `S ← chol(S·Sᵀ)`, preserves `P`
+  up to rounding, restores triangularity) and
+  `DirectionalRls::recondition` (exact `P ← R⁻¹` via the crate's `Mat::inverse`)
+  + `consistency_error()` diagnostic. The local Cholesky factorization
+  is **verified against the `scirust-solvers` oracle** (deliberate
+  dev-dependency: the crate's prod dependencies remain serde-only).
+- **`scripts/bench-rls-padasip.py`**: the Python half of the
+  cross-library comparison protocol (to be run on the same machine as
+  `bench_rls`, e.g. the Jetson) — no cross-library figure is
+  claimed until both halves have run on a single host.
+- 49 `scirust-estimation` + 93 `scirust-signal` tests green;
+  fmt/clippy `-D warnings` clean.
 
-### Ajouté — fluides & thermo, volet 3 : région 5 IF97, Rankine réel, Hardy Cross ↔ Colebrook
-Les trois « suites possibles » restantes du volet 2 sont livrées :
-- **`scirust-thermo::steam::region5`** — IAPWS-IF97 région 5 (vapeur
-  très haute température, 1073,15 < T ≤ 2273,15 K, ≤ 50 MPa : échappement
-  de turbine à gaz, chaudières de récupération ultra-supercritiques).
-  Même structure Gibbs idéal + résiduel que la région 2 (coefficients
-  extraits du même paquet de référence `iapws`, vérifiés en Python pur).
-  Oracles : les **exemples numériques officiels de la publication IF97**
-  pour la région 5 (v, h, u, s, cp, cv, w — six valeurs à 1e-8) ; jointure
-  physique avec la région 2 vérifiée à la frontière 1073,15 K.
-- **`scirust-thermo::cycles::rankine_real`** — cycle de Rankine
-  **irréversible** : turbine et pompe à rendement isentropique réel
-  (`RankineCycleReal`, avec l'efficacité idéale jointe pour comparaison
-  directe). L'état de sortie réel de la turbine est localisé directement
-  depuis son enthalpie réelle (titre direct dans la cloche, ou bissection
-  déterministe sur h si encore surchauffée) — sans avoir besoin des
-  lourdes équations « backward » T(p,h) IF97 par sous-région. Vérifié :
-  η_t=η_p=1 reproduit exactement le cycle idéal ; à 85 %/85 % le
-  rendement réel chute sous l'idéal et — fait physique non trivial —
-  la vapeur d'échappement devient plus sèche (titre plus élevé) qu'à
-  l'idéal, car une détente moins efficace laisse plus d'enthalpie dans
-  la vapeur ; premier principe vérifié exact sur le cycle réel.
-- **`scirust-fluids::network::hardy_cross_darcy`** — couplage direct de
-  Hardy Cross à `pipe::friction_factor` : `PhysicalPipe` (diamètre,
-  longueur, rugosité réels) plutôt qu'une résistance précalculée ; à
-  chaque itération externe, le facteur de friction de Darcy est
-  recalculé au Reynolds courant (laminaire/Colebrook-White/mélange,
-  exactement comme dans `scirust-fluids::pipe`), substitution successive
-  jusqu'à convergence — la méthode standard des solveurs de réseaux réels
-  pour la dépendance (faible) de f à Re. Vérifié : conduite plus large
-  transporte plus de débit, continuité exacte préservée, et la perte de
-  charge Darcy-Weisbach recalculée **à partir des dimensions physiques**
-  ferme la boucle à 1e-6 près (validation physique de bout en bout, pas
-  seulement la cohérence interne d'une itération).
-- Bilan : scirust-fluids 57 tests (+3), scirust-thermo 63 tests (+6),
-  clippy `-D warnings` propre, rustfmt appliqué.
-### Ajouté — RLS MIMO, le cran au-dessus : QR-RLS multi-sorties, FIR spatio-temporel, auto-λ, oracle Kalman
-Améliorations du filtre RLS MIMO en réutilisant les briques du dépôt :
-- **`QrRlsMimo`** : la forme racine carrée (facteur de Potter, PSD par
-  construction) étendue aux sorties multiples — le facteur `S` ne dépend que
-  des entrées, donc une seule récursion partagée entre toutes les sorties
-  (`O(n_in² + n_out·n_in)`/échantillon, zéro allocation). Tests : ligne 0
-  **bit-identique** au `QrRls` scalaire ; équivalence 1e-6 avec `RlsFilter`
-  sur système 2 sorties.
-- **Oracle croisé RLS ≡ Kalman** : à λ=1 le RLS *est* un filtre de Kalman à
-  état statique (`F=I, Q=0, H_k=u_kᵀ, R=1`). Nouveau test qui rejoue la même
-  trajectoire dans le `KalmanFilter` du crate (chemin matriciel générique avec
-  inversion explicite, reconstruit à chaque pas avec le `H` courant) et exige
-  l'accord à 1e-8 sur 300 pas — deux implémentations indépendantes du même
-  estimateur se vérifient mutuellement.
-- **`MimoFirRls`** : le vrai filtre adaptatif MIMO **spatio-temporel** —
-  lignes à retard par canal d'entrée, régresseur empilé sur un cœur
-  `RlsFilter`, noyau FIR identifié exposé par paire (sortie, entrée). Test :
-  un couplage convolutif 2×2 à 3 coefficients (diaphonie/écho) est identifié
-  à 1e-3 près sur bruit blanc. C'est la dimension temporelle qui manquait au
-  filtre instantané.
-- **`tune_lambda`** : choix du facteur d'oubli par **blancheur des
-  innovations** — chaque λ candidat est scoré par le test d'autocorrélation
-  `±1.96/√N`, et le plus grand λ que le diagnostic ne rejette pas gagne (la
-  règle de parcimonie de `denoise::adaptive::kalman_smooth_auto`, réappliquée
-  à l'identification). Tests : système statique → garde λ=1 ; système
-  dérivant → rejette λ=1.
-- 41 tests `scirust-estimation` verts ; fmt/clippy `-D warnings` propres.
+### Added — fluids & thermo, installment 3: IF97 region 5, real Rankine, Hardy Cross ↔ Colebrook
+The three remaining "possible follow-ups" of installment 2 are delivered:
+- **`scirust-thermo::steam::region5`** — IAPWS-IF97 region 5 (very
+  high temperature steam, 1073.15 < T ≤ 2273.15 K, ≤ 50 MPa: gas turbine
+  exhaust, ultra-supercritical heat recovery boilers).
+  Same ideal Gibbs + residual structure as region 2 (coefficients
+  extracted from the same reference package `iapws`, verified in pure Python).
+  Oracles: the **official numerical examples of the IF97 publication**
+  for region 5 (v, h, u, s, cp, cv, w — six values to 1e-8); physical
+  join with region 2 verified at the 1073.15 K boundary.
+- **`scirust-thermo::cycles::rankine_real`** — **irreversible** Rankine
+  cycle: turbine and pump at real isentropic efficiency
+  (`RankineCycleReal`, with the ideal efficiency joined for direct
+  comparison). The turbine's real outlet state is located directly
+  from its real enthalpy (direct quality inside the dome, or deterministic
+  bisection on h if still superheated) — without needing the
+  heavy per-subregion IF97 "backward" T(p,h) equations. Verified:
+  η_t=η_p=1 reproduces exactly the ideal cycle; at 85 %/85 % the
+  real efficiency drops below the ideal and — non-trivial physical fact —
+  the exhaust steam becomes drier (higher quality) than at
+  the ideal, because a less efficient expansion leaves more enthalpy in
+  the steam; first law verified exactly on the real cycle.
+- **`scirust-fluids::network::hardy_cross_darcy`** — direct coupling of
+  Hardy Cross to `pipe::friction_factor`: `PhysicalPipe` (real diameter,
+  length, roughness) instead of a precomputed resistance; at
+  each outer iteration, the Darcy friction factor is
+  recomputed at the current Reynolds number (laminar/Colebrook-White/mixed,
+  exactly as in `scirust-fluids::pipe`), successive substitution
+  until convergence — the standard method of real network solvers
+  for the (weak) dependence of f on Re. Verified: a wider pipe
+  carries more flow, exact continuity preserved, and the
+  Darcy-Weisbach head loss recomputed **from the physical dimensions**
+  closes the loop to 1e-6 (end-to-end physical validation, not
+  only the internal consistency of one iteration).
+- Summary: scirust-fluids 57 tests (+3), scirust-thermo 63 tests (+6),
+  clippy `-D warnings` clean, rustfmt applied.
 
-### Ajouté — preuve formelle a priori, FP8 reproductible, TCP inter-machines (volet 117)
-- **`scirust-core::formal_proof`** (nouveau) : preuve **a priori** (bornes
-  d'erreur dérivées analytiquement, pas testées point par point) de
-  l'arrondi correct pour `exp`/`tanh`/`sigmoid` — reste de Lagrange (Taylor)
-  + théorème γ_k de Higham (Horner), en arithmétique rationnelle exacte
-  (`num-rational`). Binaire `proof_formal_bounds` : borne d'erreur relative
-  ≈ 2⁻⁴⁷·⁰⁷, marge ≈ 4,4×10⁶ sous le seuil 2⁻²⁵. Complète (sans remplacer)
-  la vérification exhaustive a posteriori du volet 115-A ; `sin`/`cos`/`ln`/
-  `erf` restent hors périmètre (cœur s'annulant près de zéro — documenté).
-- **`scirust-core --bin proof_fp8_training`** : entraînement témoin
-  **FP8 E4M3 à arrondi stochastique** (même recette que le témoin bf16 du
-  volet 116) — `f32_to_fp8_stochastic` (nouveau, `lowprec.rs` refactoré en
-  `fp8_pre_round`/`fp8_finish` partagés avec la variante RNE existante).
-  Trajectoire de perte et codes FP8 finaux sous contrat d'empreinte,
-  bit-reproductibles cross-platform (validé QEMU avant commit).
-- **`proof_tcp_multihost`** (+ `scripts/proof-tcp-multihost.sh`) :
-  all-reduce à arbre fixe sur **TCP entre machines physiques séparées**
-  (pas seulement 127.0.0.1) — chaque rang régénère son entrée localement
-  (Philox seed+rang) et le rang 0 recalcule la référence en-process pour
-  comparer bit à bit au résultat reçu par le réseau : preuve
-  **auto-vérifiante**, sans empreinte à récolter au préalable. Validé
-  multi-processus (3 et 8 rangs) et en inter-architectures réel (un rang
-  sous émulation `qemu-aarch64` parlant TCP avec des rangs x86-64 natifs).
-- Gap CI comblé : `lowprec` et `tree_allreduce` n'étaient jamais exécutés
-  par le job QEMU `cross-check-aarch64` (validés manuellement seulement) —
-  ajoutés, ainsi que `formal_proof` et `proof_formal_bounds`.
-- 759 tests (+6), clippy et fmt propres.
+### Added — MIMO RLS, the notch above: multi-output QR-RLS, spatio-temporal FIR, auto-λ, Kalman oracle
+Improvements to the MIMO RLS filter reusing the repository's building
+blocks:
+- **`QrRlsMimo`**: the square-root form (Potter factor, PSD by
+  construction) extended to multiple outputs — the factor `S` depends only
+  on the inputs, so a single recursion is shared across all outputs
+  (`O(n_in² + n_out·n_in)`/sample, zero allocation). Tests: row 0
+  **bit-identical** to the scalar `QrRls`; 1e-6 equivalence with
+  `RlsFilter` on a 2-output system.
+- **Crossed RLS ≡ Kalman oracle**: at λ=1 the RLS *is* a Kalman filter with
+  static state (`F=I, Q=0, H_k=u_kᵀ, R=1`). New test replaying the same
+  trajectory in the crate's `KalmanFilter` (generic matrix path with
+  explicit inversion, rebuilt each step with the current `H`) and requiring
+  agreement to 1e-8 over 300 steps — two independent implementations of the
+  same estimator cross-validate each other.
+- **`MimoFirRls`**: the real **spatio-temporal** MIMO adaptive filter —
+  delay lines per input channel, regressor stacked on a core `RlsFilter`,
+  identified FIR kernel exposed per (output, input) pair. Test: a 2×2
+  convolutional coupling with 3 coefficients (crosstalk/echo) is identified
+  to 1e-3 on white noise. This is the temporal dimension the instantaneous
+  filter was missing.
+- **`tune_lambda`**: forgetting-factor choice by **innovation whiteness** —
+  each candidate λ is scored by the autocorrelation test `±1.96/√N`, and the
+  largest λ the diagnostic does not reject wins (the parsimony rule of
+  `denoise::adaptive::kalman_smooth_auto`, reapplied to identification).
+  Tests: static system → keeps λ=1; drifting system → rejects λ=1.
+- 41 `scirust-estimation` tests green; fmt/clippy `-D warnings` clean.
 
-### Ajouté — ζ de Riemann et 5 lois discrètes de plus (3e passe du volet probabilités)
-- **`scirust-special::riemann_zeta`/`riemann_zeta_tail`** — ζ(s) pour s > 1
-  par Euler–Maclaurin à budget fixe (somme directe des 19 premiers termes,
-  petits d'abord, + queue à m = 20 avec 10 termes de Bernoulli), ~1e-15
-  relatif, validé contre `scipy.special.zeta` et les identités ζ(2) = π²/6,
-  ζ(4) = π⁴/90, comportement au pôle ζ(s) ~ 1/(s−1) + γ. La **queue**
-  `Σ_{j≥m} j^(−s)` est exposée séparément : c'est elle qui donne une
-  fonction de survie de loi zêta O(1) et sans annulation `ζ − somme partielle`.
-- **`scirust-stats::discrete`, 5 lois** : **`Zeta`** (Zipf à support infini,
-  `scipy.stats.zipf` — tête sommée directement, queue Euler–Maclaurin ⇒
-  quantile utilisable même dans le régime à queue lourde s ≤ 2 où la
-  moyenne diverge) ; **`PoissonBinomial`** (succès de n Bernoulli
-  **hétérogènes** — fiabilité système, défauts par lot ; vecteur de masses
-  précalculé par la récurrence de convolution O(n²) exacte, cas homogène
-  = binomiale, testé) ; **`Multinomial`** et **`MultivariateHypergeometric`**
-  (vectorielles, API slice dédiée hors du trait univarié : ln_pmf/pmf,
-  moyenne, covariance pour la multinomiale, tirage séquentiel conditionnel
-  déterministe — binomiales en cascade / hypergéométriques sur l'urne
-  restante ; cas à 2 catégories = lois univariées, testé) ; oracles SciPy
-  1.17.1 et fraction exacte 280/2001 (`multivariate_hypergeom`).
-  45 tests + doctest sur le crate, clippy 0 avertissement.
+### Added — a priori formal proof, reproducible FP8, inter-machine TCP (installment 117)
+- **`scirust-core::formal_proof`** (new): **a priori** proof (error bounds
+  derived analytically, not tested point by point) of correct rounding for
+  `exp`/`tanh`/`sigmoid` — Lagrange remainder (Taylor) + Higham's γ_k
+  theorem (Horner), in exact rational arithmetic (`num-rational`). Binary
+  `proof_formal_bounds`: relative error bound ≈ 2⁻⁴⁷·⁰⁷, margin ≈ 4.4×10⁶
+  below the 2⁻²⁵ threshold. Complements (without replacing) the exhaustive
+  a posteriori verification of installment 115-A; `sin`/`cos`/`ln`/`erf`
+  remain out of scope (cores canceling near zero — documented).
+- **`scirust-core --bin proof_fp8_training`**: witness training in
+  **FP8 E4M3 with stochastic rounding** (same recipe as the installment-116
+  bf16 witness) — `f32_to_fp8_stochastic` (new, `lowprec.rs` refactored
+  into `fp8_pre_round`/`fp8_finish` shared with the existing RNE variant).
+  Loss trajectory and final FP8 codes under a fingerprint contract,
+  bit-reproducible cross-platform (QEMU-validated before commit).
+- **`proof_tcp_multihost`** (+ `scripts/proof-tcp-multihost.sh`):
+  fixed-tree all-reduce over **TCP between physically separate machines**
+  (not just 127.0.0.1) — each rank regenerates its input locally (Philox
+  seed+rank) and rank 0 recomputes the reference in-process to compare
+  bit-for-bit with the result received over the network: a **self-verifying**
+  proof, with no fingerprint to harvest beforehand. Validated
+  multi-process (3 and 8 ranks) and in real cross-architecture (one rank
+  under `qemu-aarch64` emulation talking TCP with native x86-64 ranks).
+- CI gap filled: `lowprec` and `tree_allreduce` were never executed by the
+  QEMU `cross-check-aarch64` job (validated manually only) — added, along
+  with `formal_proof` and `proof_formal_bounds`.
+- 759 tests (+6), clippy and fmt clean.
+### Added — Riemann ζ and 5 more discrete distributions (3rd pass of the probabilities installment)
+- **`scirust-special::riemann_zeta`/`riemann_zeta_tail`** — ζ(s) for s > 1
+  via Euler–Maclaurin at fixed budget (direct sum of the first 19 terms,
+  smallest first, + tail at m = 20 with 10 Bernoulli terms), ~1e-15
+  relative, validated against `scipy.special.zeta` and the identities ζ(2) = π²/6,
+  ζ(4) = π⁴/90, behavior at the pole ζ(s) ~ 1/(s−1) + γ. The **tail**
+  `Σ_{j≥m} j^(−s)` is exposed separately: it is what yields an
+  O(1) zeta-distribution survival function with no cancellation `ζ − partial sum`.
+- **`scirust-stats::discrete`, 5 distributions**: **`Zeta`** (Zipf with infinite support,
+  `scipy.stats.zipf` — head summed directly, Euler–Maclaurin tail ⇒
+  usable quantile even in the heavy-tailed regime s ≤ 2 where the
+  mean diverges); **`PoissonBinomial`** (successes of n **heterogeneous** Bernoulli
+  — system reliability, defects per batch; mass vector
+  precomputed by the exact O(n²) convolution recurrence, homogeneous case
+  = binomial, tested); **`Multinomial`** and **`MultivariateHypergeometric`**
+  (vector-valued, dedicated slice API outside the univariate trait: ln_pmf/pmf,
+  mean, covariance for the multinomial, deterministic sequential conditional
+  sampling — cascaded binomials / hypergeometrics on the remaining urn;
+  2-category case = univariate distributions, tested); SciPy oracles
+  1.17.1 and exact fraction 280/2001 (`multivariate_hypergeom`).
+  45 tests + doctest on the crate, clippy 0 warnings.
 
-### Ajouté — all-reduce TCP réel + entraînement bf16-SR reproductible (volet 116)
-- **`tcp_tree_all_reduce_rank`** (+ trait `WireState`, sérialisation
-  little-endian de Vec<f32>/Vec<ExactAcc>) : l'all-reduce à arbre fixe sur
-  **sockets TCP réels** — même ordre d'absorption que le moteur in-process,
-  donc mêmes bits (testé sous gigue, n ∈ {3, 8}, FixedOrderSum et ExactSum).
-  Multi-processus/multi-machine ready.
-- **`scirust-core --bin proof_lowprec_training`** : entraînement témoin
-  **bf16 à arrondi stochastique** (maîtres f32, copies forward bf16
-  quantifiées par SR-Philox contre-basé, graphe portable, Adam) — la
-  trajectoire de perte ET les codes bf16 finaux sous contrat d'empreinte,
-  bit-reproductibles cross-platform (validé QEMU avant commit). Intégré au
-  script de preuve et au job CI QEMU.
-### Ajouté — durcissement RLS : zéro-allocation, const-generic, QR-RLS racine carrée, benchmarks mesurés
-Les 4 points du plan validé après la revue du texte Gemini — chaque
-affirmation de ce lot est adossée à un test ou une mesure :
-- **`update()` zéro-allocation** (`RlsFilter`, `VectorRls`) : les
-  intermédiaires (`P·u`, erreur a priori) vivent dans des buffers persistants
-  (`#[serde(skip)]`, redimensionnement paresseux post-désérialisation) ; le
-  gain est replié à la volée — plus aucune allocation tas par échantillon
-  (l'ancienne boucle en faisait 4). `RlsFilter::update` retourne désormais
-  `&[f64]` (vue interne) au lieu d'un `Vec` alloué.
-- **`RlsFilterConst<const N_IN, const N_OUT>`** (`rls_const`) : variante
-  entièrement sur pile, `core`-only (extractible en `no_std` pour
-  l'embarqué), dimensions connues du compilateur ⇒ déroulage/vectorisation
-  réels. Arithmétique **bit-identique** à la version tas — vérifié par un
-  test qui compare les trajectoires de poids au bit près sur 500 pas.
-- **`QrRls`** (`qr_rls`) : RLS **racine carrée** — propage le facteur `S`
-  (`P = S·Sᵀ`, mise à jour de rang 1 de Potter, la famille de méthodes du
-  `UdFilter` maison). La semi-définie-positivité de la covariance tient **par
-  construction** (`xᵀSSᵀx = ‖Sᵀx‖² ≥ 0`), pas par re-symétrisation forcée —
-  la réponse honnête au risque de divergence du RLS standard (aucune
-  prétention au-delà : l'estimée reste tributaire de l'excitation, documenté).
-  Tests : équivalence aux poids près (1e-6) avec le RLS standard sur données
-  saines ; stress 100 000 pas, λ=0,9, entrées quasi-colinéaires → P finie,
-  diagonale ≥ 0, mineurs principaux 2×2 ≥ 0 ; suivi d'un système dérivant.
-- **Benchmarks mesurés** (`--bin bench_rls`, release, conteneur CI x86_64 —
-  chiffres liés à cette machine, à re-mesurer ailleurs) : ns/update
-  `VectorRls` / `QrRls` / `RlsFilterConst` : n=4 → 40 / 47 / 34 ; n=16 →
-  633 / 476 / 326 ; n=64 → 10 017 / 6 740 / 8 451. Constats mesurés : la
-  variante const-generic est ~2× plus rapide à n=16 (déroulage réel), et le
-  QR-RLS **bat** le RLS standard dès n=16 (pas de passe de symétrisation).
-  Comparaison padasip non réalisée ici (échec d'installation dans le
-  conteneur) — point ouvert, aucune revendication inter-bibliothèques.
+### Added — real TCP all-reduce + reproducible bf16-SR training (installment 116)
+- **`tcp_tree_all_reduce_rank`** (+ `WireState` trait, little-endian
+  serialization of Vec<f32>/Vec<ExactAcc>): fixed-tree all-reduce over
+  **real TCP sockets** — same absorption order as the in-process engine,
+  hence identical bits (tested under jitter, n ∈ {3, 8}, FixedOrderSum and ExactSum).
+  Multi-process/multi-machine ready.
+- **`scirust-core --bin proof_lowprec_training`**: control training
+  **bf16 with stochastic rounding** (f32 masters, forward copies bf16
+  quantized by counter-based SR-Philox, portable graph, Adam) — the
+  loss trajectory AND the final bf16 codes under a fingerprint contract,
+  bit-reproducible cross-platform (validated under QEMU before commit). Integrated into the
+  proof script and the QEMU CI job.
 
-### Ajouté — fluides & thermo, volet 2 : IF97 complet (Rankine), convection, réseaux
-Suite annoncée du volet précédent — les trois chantiers « suite possible »
-du LIVESTATE sont livrés :
-- **`scirust-thermo::steam` — IAPWS-IF97 régions 1 et 2** (en plus de la
-  région 4 existante) : équations de Gibbs complètes donnant v, h, u, s,
-  cp, cv et la vitesse du son pour le **liquide comprimé** (région 1,
-  273,15–623,15 K, jusqu'à 100 MPa) et la **vapeur surchauffée**
-  (région 2, jusqu'à 1073,15 K, bornée par la ligne de saturation et la
-  parabole **B23** région 2/3, elle aussi implémentée). Les 34 + 9 + 43
-  coefficients ont été extraits **programmatiquement** de
-  l'implémentation de référence (paquet `iapws`) — zéro transcription
-  manuelle. États saturés `saturated_liquid`/`saturated_vapor`.
-  Oracles : **tables de vérification officielles IF97 5 et 15**
-  reproduites à 1e-8 sur les six points (toutes propriétés), paire B23,
-  tables vapeur classiques à 100 °C, cohérence d'équilibre de phase
-  (g_f ≈ g_g, h_fg ≈ T·s_fg à ~1e-4 près, l'écart des fits régionaux).
-- **`scirust-thermo::cycles::rankine_ideal` — cycle de Rankine complet**
-  sur les propriétés IF97 : pompe isentropique (v·Δp), chaudière isobare,
-  détente isentropique (échappement humide par titrage dans la cloche,
-  ou surchauffé par bissection déterministe), condenseur isobare.
-  Rendement, travaux, chaleurs, titre de sortie. Oracles : exemple
-  classique de Cengel (3 MPa/350 °C/75 kPa → η ≈ 26,0 %, x₄ ≈ 0,886),
-  premier principe exact, borne de Carnot, sens physique de la pression
-  de condenseur.
-- **`scirust-thermo::convection`** — convection externe et naturelle :
-  plaque plane laminaire (0,664, = analogie de Colburn exacte) et mixte
-  (raccord continu à Re = 5×10⁵ vérifié), **Churchill–Bernstein**
-  (cylindre en écoulement transverse), **Ranz–Marshall** (sphère, limite
-  de conduction Nu = 2 exacte), **Churchill–Chu** (plaque verticale et
-  cylindre horizontal en convection naturelle), nombre de Rayleigh.
-  Domaines de validité imposés.
-- **`scirust-fluids::network` — méthode de Hardy Cross** pour les
-  réseaux de conduites maillés : loi de perte de charge
-  h = r·|Q|^{n−1}·Q (n = 2 Darcy–Weisbach, 1,852 Hazen–Williams),
-  corrections de boucle préservant exactement la continuité aux nœuds,
-  balayage déterministe, inversion de débit gérée par la loi signée.
-  Oracles : répartitions analytiques (2 et 3 conduites en parallèle,
-  fermeture des boucles à ~1e-8), exposant Hazen–Williams, entrées
-  dégénérées rejetées.
-- Bilan : scirust-fluids 54 tests (+6), scirust-thermo 57 tests (+18),
-  clippy `-D warnings` propre, rustfmt appliqué.
+### Added — RLS hardening: zero-allocation, const-generic, square-root QR-RLS, measured benchmarks
+The 4 items of the plan validated after the Gemini text review — every
+claim in this batch is backed by a test or a measurement:
+- **Zero-allocation `update()`** (`RlsFilter`, `VectorRls`): the
+  intermediates (`P·u`, a priori error) live in persistent buffers
+  (`#[serde(skip)]`, lazy resizing after deserialization); the
+  gain is folded on the fly — no more heap allocation per sample
+  (the old loop did 4). `RlsFilter::update` now returns
+  `&[f64]` (internal view) instead of an allocated `Vec`.
+- **`RlsFilterConst<const N_IN, const N_OUT>`** (`rls_const`): fully
+  stack-based variant, `core`-only (extractable to `no_std` for
+  embedded), compiler-known dimensions ⇒ real unrolling/vectorization.
+  **Bit-identical** arithmetic to the heap version — verified by a
+  test comparing weight trajectories bit-for-bit over 500 steps.
+- **`QrRls`** (`qr_rls`): **square-root** RLS — propagates the factor `S`
+  (`P = S·Sᵀ`, Potter rank-1 update, the method family of the in-house
+  `UdFilter`). The positive semi-definiteness of the covariance holds **by
+  construction** (`xᵀSSᵀx = ‖Sᵀx‖² ≥ 0`), not by forced re-symmetrization —
+  the honest answer to the standard RLS divergence risk (no
+  claim beyond that: the estimate still depends on excitation, documented).
+  Tests: weight-level equivalence (1e-6) with standard RLS on healthy data;
+  stress 100 000 steps, λ=0.9, nearly collinear inputs → P finite,
+  diagonal ≥ 0, 2×2 leading principal minors ≥ 0; tracking of a drifting system.
+- **Measured benchmarks** (`--bin bench_rls`, release, x86_64 CI container —
+  figures tied to this machine, to be re-measured elsewhere): ns/update
+  `VectorRls` / `QrRls` / `RlsFilterConst`: n=4 → 40 / 47 / 34; n=16 →
+  633 / 476 / 326; n=64 → 10 017 / 6 740 / 8 451. Measured findings: the
+  const-generic variant is ~2× faster at n=16 (real unrolling), and
+  QR-RLS **beats** standard RLS from n=16 on (no symmetrization pass).
+  padasip comparison not performed here (installation failure in the
+  container) — open point, no cross-library claims.
 
-### Ajouté — preuve CR totale, all-reduce arbre fixe, basses précisions (volet 115)
-- **Arrondi correct sur 100 % du domaine f32** pour les 7 transcendantales
-  portables : les 465 entrées fautives identifiées au volet 114 (sorties
-  vérifiées par l'oracle en précision arbitraire) sont servies par des
-  **tables d'exceptions** consultées avant le chemin analytique — résultat de
-  classe RLIBM (CR sur tout le domaine), obtenu par vérification exhaustive ;
-  la preuve formelle machine-checkée des bornes reste l'étape suivante
-  (documenté). Catégorie `oracle` dans le certificat ; empreintes
-  dense/exhaustives re-récoltées.
-- **`scirust-core::tree_allreduce`** : all-reduce **à arbre fixe**,
-  transport-agnostique — absorption des enfants dans l'ordre de l'arbre
-  (hors-ordre mis en attente) ⇒ résultat indépendant du timing ; avec
-  `ExactSum` (Kulisch), indépendant aussi de la topologie et correctement
-  arrondi. Démontré sous gigue adversariale (Philox) sur n ∈ {2,3,5,8,16}.
-  Le jalon « réduction multi-nœud à arbre fixe » du GROWTH_PLAN.
-- **`scirust-core::lowprec`** : bf16/f16/FP8 (OCP E4M3/E5M2) reproductibles —
-  conversions RNE bit-manipulées (portables par construction, roundtrips
-  exhaustifs 65 536 + 256 codes, frontières au milieu exact), **arrondi
-  stochastique contre-basé** (Philox : reproductible, order-independent,
-  non biaisé), `gemm_bf16_exact` (produits exacts, accumulation ordre fixe).
-  Explicitement hors périmètre de RepDL.
-### Ajouté — 4 lois discrètes supplémentaires (`scirust-stats::discrete`, suite du volet loterie)
-- Comble les écarts vs SciPy listés « suites possibles » dans la PR #280 :
-  **`NegativeBinomial`** (échecs avant le r-ième succès, convention
-  `scipy.stats.nbinom`, r réel autorisé — paramétrisation de Pólya pour la
-  régression de comptage surdispersée ; CDF fermée par bêta incomplète
-  régularisée I_p(r, k+1), survie directe sans `1 − cdf`),
-  **`BetaBinomial`** (binomiale à p Beta(a, b)-distribué — proportions
-  surdispersées ; a = b = 1 redonne l'uniforme discrète, testé),
-  **`Zipfian`** finie sur les rangs 1..=n (`scipy.stats.zipfian` ;
-  normalisation harmonique généralisée sommée petits-termes-d'abord en ordre
-  fixe ; s = 0 = uniforme ; la zêta à support infini nécessiterait ζ de
-  Riemann et n'est volontairement pas approximée), et **`Skellam`**
-  (différence de deux Poisson — support ℤ entier, donc API `i64` propre hors
-  du trait u64 ; pmf/cdf/sf par convolution déterministe à troncature fixe
-  sur la base `scirust-special` plutôt que par Bessel I_k, ~1e-12 vs SciPy ;
-  tirage déterministe = différence de deux tirages Poisson inverse-CDF).
-- Validation : oracles SciPy 1.17.1 en dur dans les tests (pmf/cdf/sf/ppf,
-  moments), invariants Σ pmf = 1, symétrie de Skellam à taux égaux,
-  cdf + sf = 1 sur les deux queues ℤ, r = 1 ⇒ géométrique décalée.
-  40 tests unitaires + doctest au total sur le crate, clippy propre.
+### Added — fluids & thermo, installment 2: full IF97 (Rankine), convection, networks
+Announced continuation of the previous installment — the three "possible follow-up"
+work items of the LIVESTATE are delivered:
+- **`scirust-thermo::steam` — IAPWS-IF97 regions 1 and 2** (in addition to the
+  existing region 4): complete Gibbs equations giving v, h, u, s,
+  cp, cv and the speed of sound for **compressed liquid** (region 1,
+  273.15–623.15 K, up to 100 MPa) and **superheated vapor**
+  (region 2, up to 1073.15 K, bounded by the saturation line and the
+  **B23** region 2/3 parabola, also implemented). The 34 + 9 + 43
+  coefficients were extracted **programmatically** from
+  the reference implementation (`iapws` package) — zero manual
+  transcription. Saturated states `saturated_liquid`/`saturated_vapor`.
+  Oracles: **official IF97 verification tables 5 and 15**
+  reproduced to 1e-8 at the six points (all properties), B23 pair,
+  classic steam tables at 100 °C, phase-equilibrium consistency
+  (g_f ≈ g_g, h_fg ≈ T·s_fg to ~1e-4, the deviation of the regional fits).
+- **`scirust-thermo::cycles::rankine_ideal` — complete Rankine cycle**
+  on IF97 properties: isentropic pump (v·Δp), isobaric boiler,
+  isentropic expansion (wet exhaust by quality determination inside the dome,
+  or superheated by deterministic bisection), isobaric condenser.
+  Efficiency, work, heats, exit quality. Oracles: classic
+  Cengel example (3 MPa/350 °C/75 kPa → η ≈ 26.0%, x₄ ≈ 0.886),
+  exact first law, Carnot bound, physical meaning of the condenser
+  pressure.
+- **`scirust-thermo::convection`** — external and natural convection:
+  laminar flat plate (0.664, = exact Colburn analogy) and mixed
+  (continuous junction at Re = 5×10⁵ verified), **Churchill–Bernstein**
+  (cylinder in cross-flow), **Ranz–Marshall** (sphere, exact
+  conduction limit Nu = 2), **Churchill–Chu** (vertical plate and
+  horizontal cylinder in natural convection), Rayleigh number.
+  Validity ranges enforced.
+- **`scirust-fluids::network` — Hardy Cross method** for
+  looped pipe networks: head-loss law
+  h = r·|Q|^{n−1}·Q (n = 2 Darcy–Weisbach, 1.852 Hazen–Williams),
+  loop corrections preserving node continuity exactly,
+  deterministic sweep, flow reversal handled by the signed law.
+  Oracles: analytical distributions (2 and 3 pipes in parallel,
+  loop closure to ~1e-8), Hazen–Williams exponent, degenerate
+  inputs rejected.
+- Summary: scirust-fluids 54 tests (+6), scirust-thermo 57 tests (+18),
+  clean clippy `-D warnings`, rustfmt applied.
 
-### Ajouté — mécanique des fluides & thermodynamique (`scirust-fluids`, `scirust-thermo`)
-- **`scirust-fluids`** — mécanique des fluides déterministe (Rust pur, zéro
-  dépendance, `forbid(unsafe_code)`, entrées validées → `FluidsError` typé) :
-  - `dimensionless` : Reynolds, Prandtl, Mach, Froude, Weber, Péclet,
-    Strouhal, Nusselt ;
-  - `pipe` : facteurs de friction de Darcy (laminaire 64/Re,
-    **Colebrook–White implicite** résolu par Newton déterministe, Haaland,
-    Swamee–Jain), dispatch continu sur tout le domaine de Reynolds
-    (zone critique = interpolation documentée), pertes de charge
-    Darcy–Weisbach (Δp et hauteur), pertes singulières, diamètre
-    hydraulique ;
-  - `bernoulli` : pressions dynamique/totale, Pitot, Torricelli, équation
-    de Bernoulli entre deux stations, débitmétrie Venturi et orifice ;
-  - `external` : traînée de Stokes, courbe de traînée standard de la
-    sphère (Clift–Gauvin, Re ≤ 3×10⁵), **vitesse terminale de chute**
-    (bissection déterministe sur le bilan des forces) ;
-  - `boundary_layer` : plaque plane Blasius (δ, δ*, θ, c_f) et
-    corrélations turbulentes en loi 1/7 ;
-  - `compressible` : vitesse du son, rapports isentropiques (T₀/T, p₀/p,
-    ρ₀/ρ, A/A*), **relations de choc normal** (M₂, p₂/p₁, ρ₂/ρ₁, T₂/T₁,
-    p₀₂/p₀₁) ;
-  - `channel` : équation de Manning, profondeurs critique et normale
-    (bissection déterministe), énergie spécifique, ressaut hydraulique
+### Added — full correct-rounding proof, fixed-tree all-reduce, low precisions (installment 115)
+- **Correct rounding over 100% of the f32 domain** for the 7 portable
+  transcendentals: the 465 faulty inputs identified in installment 114 (outputs
+  verified by the arbitrary-precision oracle) are served by
+  **exception tables** consulted before the analytic path — a result of
+  the RLIBM class (CR over the whole domain), obtained by exhaustive verification;
+  the machine-checked formal proof of the bounds remains the next step
+  (documented). `oracle` category in the certificate; dense/exhaustive
+  fingerprints re-collected.
+- **`scirust-core::tree_allreduce`**: **fixed-tree** all-reduce,
+  transport-agnostic — children absorbed in tree order
+  (out-of-order held back) ⇒ timing-independent result; with
+  `ExactSum` (Kulisch), also topology-independent and correctly
+  rounded. Demonstrated under adversarial jitter (Philox) on n ∈ {2,3,5,8,16}.
+  The "multi-node fixed-tree reduction" milestone of the GROWTH_PLAN.
+- **`scirust-core::lowprec`**: reproducible bf16/f16/FP8 (OCP E4M3/E5M2) —
+  bit-manipulated RNE conversions (portable by construction, exhaustive
+  roundtrips 65 536 + 256 codes, exact midpoints), **counter-based
+  stochastic rounding** (Philox: reproducible, order-independent,
+  unbiased), `gemm_bf16_exact` (exact products, fixed-order accumulation).
+  Explicitly out of scope of RepDL.
+
+### Added — 4 additional discrete distributions (`scirust-stats::discrete`, continuation of the lottery installment)
+- Fills the gaps vs SciPy listed as "possible follow-ups" in PR #280:
+  **`NegativeBinomial`** (failures before the r-th success, `scipy.stats.nbinom`
+  convention, real r allowed — Pólya parametrization for
+  overdispersed count regression; closed-form CDF via the regularized
+  incomplete beta I_p(r, k+1), direct survival without `1 − cdf`),
+  **`BetaBinomial`** (binomial with Beta(a, b)-distributed p — overdispersed
+  proportions; a = b = 1 recovers the discrete uniform, tested),
+  **`Zipfian`** finite over ranks 1..=n (`scipy.stats.zipfian`;
+  generalized harmonic normalization summed smallest-terms-first in fixed
+  order; s = 0 = uniform; the infinite-support zeta would require Riemann ζ
+  and is deliberately not approximated), and **`Skellam`**
+  (difference of two Poissons — full ℤ support, hence a clean `i64` API outside
+  the u64 trait; pmf/cdf/sf by deterministic convolution with fixed truncation
+  on the `scirust-special` base rather than via Bessel I_k, ~1e-12 vs SciPy;
+  deterministic sampling = difference of two inverse-CDF Poisson draws).
+- Validation: hard-coded SciPy 1.17.1 oracles in the tests (pmf/cdf/sf/ppf,
+  moments), invariants Σ pmf = 1, Skellam symmetry at equal rates,
+  cdf + sf = 1 on both ℤ tails, r = 1 ⇒ shifted geometric.
+  40 unit tests + doctest in total on the crate, clean clippy.
+
+### Added — fluid mechanics & thermodynamics (`scirust-fluids`, `scirust-thermo`)
+- **`scirust-fluids`** — deterministic fluid mechanics (pure Rust, zero
+  dependency, `forbid(unsafe_code)`, validated inputs → typed `FluidsError`):
+  - `dimensionless`: Reynolds, Prandtl, Mach, Froude, Weber, Péclet,
+    Strouhal, Nusselt;
+  - `pipe`: Darcy friction factors (laminar 64/Re,
+    **implicit Colebrook–White** solved by deterministic Newton, Haaland,
+    Swamee–Jain), continuous dispatch over the whole Reynolds domain
+    (critical zone = documented interpolation), Darcy–Weisbach
+    head losses (Δp and head), minor losses, hydraulic
+    diameter;
+  - `bernoulli`: dynamic/total pressures, Pitot, Torricelli, Bernoulli
+    equation between two stations, Venturi and orifice flow metering;
+  - `external`: Stokes drag, standard sphere drag curve
+    (Clift–Gauvin, Re ≤ 3×10⁵), **terminal fall velocity**
+    (deterministic bisection on the force balance);
+  - `boundary_layer`: Blasius flat plate (δ, δ*, θ, c_f) and
+    turbulent correlations in the 1/7 power law;
+  - `compressible`: speed of sound, isentropic ratios (T₀/T, p₀/p,
+    ρ₀/ρ, A/A*), **normal shock relations** (M₂, p₂/p₁, ρ₂/ρ₁, T₂/T₁,
+    p₀₂/p₀₁);
+  - `channel`: Manning equation, critical and normal depths
+    (deterministic bisection), specific energy, hydraulic jump
     (Bélanger).
-  49 tests oracle : diagramme de Moody, tables NACA 1135 (fractions
-  exactes du choc à M=2 : p₂/p₁ = 4,5, ρ₂/ρ₁ = 8/3), constantes de
-  Blasius, courbe de traînée standard, résidu Colebrook ≤ 1e-10, ISA.
-- **`scirust-thermo`** — thermodynamique déterministe (mêmes garanties,
-  `ThermoError` typé) :
-  - `ideal_gas` : gaz parfait calorifiquement idéal (état, cp/cv,
-    travail/chaleur des processus isotherme, isobare, isochore,
-    adiabatique, polytropique, variation d'entropie) ;
-  - `cycles` : Carnot (rendement + COP frigo/pompe à chaleur), Otto,
-    Diesel, Brayton (air standard) ;
-  - `heat_transfer` : résistances de conduction (mur plan, coquille
-    cylindrique), convection, rayonnement (σ CODATA exacte), **DTLM**,
-    **efficacité-NUT** (contre-courant et co-courant, limites C_r = 0/1
-    exactes), Dittus–Boelter à domaine de validité **imposé** ;
-  - `psychro` : air humide ASHRAE (pression de saturation
-    **Hyland–Wexler** sur glace et eau liquide, rapport d'humidité, point
-    de rosée par bissection déterministe, enthalpie, volume spécifique) ;
-  - `steam` : ligne de saturation eau/vapeur **IAPWS-IF97 région 4**
-    (p_sat(T) et T_sat(p), formes fermées mutuellement inverses).
-  40 tests oracle : tables de vérification officielles IF97 (35/36,
-  concordance 1e-8), tables psychrométriques ASHRAE, rendements
-  classiques des cycles, tables NUT d'Incropera ; cohérence croisée
-  IF97 ↔ Hyland–Wexler (< 0,5 %) et cycle de Carnot à entropie nulle.
-- Réponse au constat « scirust n'offre pas de solutions aux
-  problématiques de mécanique des fluides et de thermodynamique » :
-  ces deux crates posent le socle (corrélations et relations exactes
-  de référence) sur lequel des verticaux CFD/procédés pourront s'appuyer.
-### Ajouté — RLS multi-canaux + pipeline composite Wavelet–RLS–RTS (intégration de la PR #278)
-- **`scirust-estimation::rls`** (`RlsFilter`, `VectorRls`) : filtre adaptatif
-  **moindres carrés récursifs** multi-canaux (matrice de poids `n_out × n_in`
-  apprise en ligne, gain `k = P·u/(λ + uᵀPu)`, facteur d'oubli `λ`,
-  covariance inverse `P` avec **symétrisation forcée** `P=(P+Pᵀ)/2` contre la
-  dérive de définie-positivité), déterministe `f64`, sérialisable. Comble le
-  trou « identification en ligne » du crate : la famille Kalman estime l'état
-  d'un modèle *connu*, le RLS **apprend** le modèle. Repris tel quel de la
-  PR #278 (développée sur Jetson), avec ses tests de convergence.
-- **`denoise::pipeline`** (`wavelet_rls_rts_smooth`, `_1d`) : le pipeline
-  composite `x̂ = M_RTS·[(I−Δ_RLS)·Wᵀ·𝒯_τ(W·s)]` de la PR #278, rebasé sur la
-  DWT périodisée du framework — il y gagne les bases Db4/Db6/Db8, les
-  longueurs arbitraires (padding par réflexion) et l'estimation σ robuste sur
-  la vraie bande fine (correction de la fenêtre à offset fixe de l'original).
-  Le seuillage doux s'applique à *tous* les coefficients (bande
-  d'approximation comprise), fidèle au design original : le biais d'amplitude
-  systématique ainsi introduit est précisément ce que l'étage RLS apprend et
-  corrige — vérifié par un test discriminant (pipeline > seuillage seul, le
-  mutant sans étages 2-3 échoue) ; `delta_norm` calculé en O(n) sans matrice
-  n×n. `scirust-signal` dépend désormais de `scirust-estimation` (pas de
-  cycle : celui-ci ne dépend que de serde).
-- Remplace la PR #278 (conflit de module `denoise.rs` vs `denoise/` et
-  duplication seuils/DWT avec le framework fusionné depuis) ; 122 tests
-  cumulés sur les deux crates + 1 doctest ; fmt/clippy `-D warnings` propres.
+  49 oracle tests: Moody diagram, NACA 1135 tables (exact
+  shock fractions at M=2: p₂/p₁ = 4.5, ρ₂/ρ₁ = 8/3), Blasius
+  constants, standard drag curve, Colebrook residual ≤ 1e-10, ISA.
+- **`scirust-thermo`** — deterministic thermodynamics (same guarantees,
+  typed `ThermoError`):
+  - `ideal_gas`: calorically perfect ideal gas (state, cp/cv,
+    work/heat of isothermal, isobaric, isochoric,
+    adiabatic, polytropic processes, entropy variation);
+  - `cycles`: Carnot (efficiency + refrigerator/heat-pump COP), Otto,
+    Diesel, Brayton (air standard);
+  - `heat_transfer`: conduction resistances (plane wall, cylindrical
+    shell), convection, radiation (exact CODATA σ), **LMTD**,
+    **NTU-effectiveness** (counter-flow and parallel-flow, exact C_r = 0/1
+    limits), Dittus–Boelter with **enforced** validity range;
+  - `psychro`: ASHRAE moist air (saturation pressure
+    **Hyland–Wexler** over ice and liquid water, humidity ratio, dew
+    point by deterministic bisection, enthalpy, specific volume);
+  - `steam`: water/vapor saturation line **IAPWS-IF97 region 4**
+    (p_sat(T) and T_sat(p), mutually inverse closed forms).
+  40 oracle tests: official IF97 verification tables (35/36,
+  1e-8 agreement), ASHRAE psychrometric tables, classic
+  cycle efficiencies, Incropera NTU tables; cross-consistency
+  IF97 ↔ Hyland–Wexler (< 0.5%) and zero-entropy Carnot cycle.
+- Answer to the observation "scirust offers no solutions to
+  fluid mechanics and thermodynamics problems":
+  these two crates lay the foundation (exact reference correlations
+  and relations) on which CFD/process verticals can build.
 
-### Ajouté — TV exacte (Condat), ondelettes db6/db8, seuil SURE, Kalman à tendance (`scirust-signal::denoise`, lot 3)
-- **`total_variation_exact`** : débruitage TV 1-D **exact** par l'algorithme
-  direct de Condat (IEEE SPL 2013) — le minimiseur global unique de
-  `½‖x−y‖² + λ·TV(x)` en un seul balayage O(n), sans itération ni tolérance.
-  L'optimalité est **prouvée par les conditions KKT dans les tests** (la somme
-  courante `sᵢ = Σ(xⱼ−yⱼ)` reste dans `[−λ,+λ]`, touche exactement `±λ` aux
-  sauts du signe correspondant, finit à 0 — objectif strictement convexe ⇒
-  KKT ⇔ optimum global), sur 6 entrées variées (échelons, sinusoïde, bruit
-  pur, signal court, λ minuscule/énorme) ; objectif vérifié ≤ celui de
-  l'approximation IRLS existante ; λ énorme ⇒ aplatissement exact à la moyenne.
-- **Ondelettes Daubechies-6 et Daubechies-8** (`Wavelet::{Db6, Db8}`, 3 et 4
-  moments nuls) : constantes dérivées par factorisation spectrale et
-  **épinglées indépendamment par test** des identités qui les définissent
-  (`Σh=√2`, `‖h‖=1`, orthogonalité à double décalage, moments nuls du miroir
-  en quadrature à ~1e-10) ; reconstruction parfaite multi-niveaux pour les
-  quatre bases.
-- **Seuil SURE par niveau** (`wavelet_denoise_sure`, SureShrink
-  Donoho-Johnstone 1995) : minimise l'estimateur de risque sans biais de Stein
-  `SURE(t) = m − 2·#{|uᵢ|≤t} + Σmin(uᵢ²,t²)` bande par bande (préfixes de
-  carrés sur magnitudes triées, candidats plafonnés au seuil universel), avec
-  le repli « hybride » vers le seuil universel dans les bandes trop creuses.
-  Vérifié : bat le seuil universel en SNR sur un signal dense (deux tons) où
-  VisuShrink sur-lisse.
-- **`kalman_trend_smooth`** : lisseur de Kalman/RTS à **tendance locale**
-  (état 2-D niveau+pente, F=[[1,1],[0,1]]). Là où le modèle à niveau seul
-  arbitre retard contre bruit sur un signal en rampe, le modèle à tendance la
-  suit sans biais : test discriminant — une rampe propre est reproduite à
-  <1e-3 près là où le modèle à niveau (mêmes variances) fait >100× pire ;
-  gain SNR vérifié sur signal tendanciel bruité.
-- Ré-exports module + crate ; 86 tests unitaires + 1 doctest au total ;
-  `cargo fmt`/`clippy -D warnings` propres ; zéro dépendance hors
+### Added — multi-channel RLS + composite Wavelet–RLS–RTS pipeline (integration of PR #278)
+- **`scirust-estimation::rls`** (`RlsFilter`, `VectorRls`): multi-channel
+  **recursive least squares** adaptive filter (weight matrix `n_out × n_in`
+  learned online, gain `k = P·u/(λ + uᵀPu)`, forgetting factor `λ`,
+  inverse covariance `P` with **forced symmetrization** `P=(P+Pᵀ)/2` against
+  positive-definiteness drift), deterministic `f64`, serializable. Fills the
+  crate's "online identification" gap: the Kalman family estimates the state
+  of a *known* model, the RLS **learns** the model. Taken as-is from
+  PR #278 (developed on a Jetson), with its convergence tests.
+- **`denoise::pipeline`** (`wavelet_rls_rts_smooth`, `_1d`): the composite
+  pipeline `x̂ = M_RTS·[(I−Δ_RLS)·Wᵀ·𝒯_τ(W·s)]` of PR #278, rebased onto the
+  framework's periodized DWT — gaining the Db4/Db6/Db8 bases, arbitrary
+  lengths (reflection padding) and robust σ estimation on
+  the true fine band (correction of the original's fixed-offset window).
+  Soft thresholding applies to *all* coefficients (approximation band
+  included), faithful to the original design: the systematic amplitude bias
+  thus introduced is precisely what the RLS stage learns and
+  corrects — verified by a discriminating test (pipeline > thresholding alone,
+  the mutant without stages 2-3 fails); `delta_norm` computed in O(n) with no
+  n×n matrix. `scirust-signal` now depends on `scirust-estimation` (no
+  cycle: the latter depends only on serde).
+- Replaces PR #278 (`denoise.rs` vs `denoise/` module conflict and
+  threshold/DWT duplication with the framework merged since); 122 tests
+  accumulated on the two crates + 1 doctest; clean fmt/clippy `-D warnings`.
+
+### Added — exact TV (Condat), db6/db8 wavelets, SURE threshold, Kalman with trend (`scirust-signal::denoise`, batch 3)
+- **`total_variation_exact`**: **exact** 1-D TV denoising via Condat's
+  direct algorithm (IEEE SPL 2013) — the unique global minimizer of
+  `½‖x−y‖² + λ·TV(x)` in a single O(n) sweep, without iteration or tolerance.
+  Optimality is **proved via the KKT conditions in the tests** (the running
+  sum `sᵢ = Σ(xⱼ−yⱼ)` stays within `[−λ,+λ]`, touches `±λ` exactly at
+  jumps of the corresponding sign, ends at 0 — strictly convex objective ⇒
+  KKT ⇔ global optimum), on 6 varied inputs (steps, sinusoid, pure
+  noise, short signal, tiny/huge λ); objective verified ≤ that of
+  the existing IRLS approximation; huge λ ⇒ exact flattening to the mean.
+- **Daubechies-6 and Daubechies-8 wavelets** (`Wavelet::{Db6, Db8}`, 3 and 4
+  vanishing moments): constants derived by spectral factorization and
+  **pinned independently by test** to the identities that define them
+  (`Σh=√2`, `‖h‖=1`, double-shift orthogonality, vanishing moments of the
+  quadrature mirror to ~1e-10); perfect multi-level reconstruction for the
+  four bases.
+- **Level-wise SURE threshold** (`wavelet_denoise_sure`, SureShrink
+  Donoho-Johnstone 1995): minimizes Stein's unbiased risk estimator
+  `SURE(t) = m − 2·#{|uᵢ|≤t} + Σmin(uᵢ²,t²)` band by band (prefixes of
+  squares over sorted magnitudes, candidates capped at the universal threshold), with
+  the "hybrid" fallback to the universal threshold in bands that are too sparse.
+  Verified: beats the universal threshold in SNR on a dense signal (two tones) where
+  VisuShrink over-smooths.
+- **`kalman_trend_smooth`**: Kalman/RTS smoother with **local trend**
+  (2-D level+slope state, F=[[1,1],[0,1]]). Where the level-only model
+  trades lag against noise on a ramp signal, the trend model
+  follows it without bias: discriminating test — a clean ramp is reproduced to
+  <1e-3 where the level model (same variances) does >100× worse;
+  SNR gain verified on noisy trending signal.
+- Module + crate re-exports; 86 unit tests + 1 doctest in total;
+  clean `cargo fmt`/`clippy -D warnings`; zero dependency beyond
   `scirust-core`/serde.
-### Ajouté — environnements de simulation multi-domaines (`scirust-sim`)
-- **`scirust-sim`** — la couche unifiée « voici un système, avance-le dans le
-  temps, laisse un agent interagir avec » qui manquait à la plate-forme :
-  - **Moteur déterministe** : trait `System` (`y' = f(t, y)`, même forme
-    in-place que les fermetures de `scirust-solvers::ode::dopri5`) + RK4 à pas
-    fixe (`simulate` → `Trajectory`, invariants linéaires préservés à
-    l'arrondi près) ; trait `SecondOrderSystem` + **Euler symplectique**
-    (`simulate_second_order`) — le test montre l'orbite à deux corps qui reste
-    fermée là où Euler explicite spirale visiblement vers l'extérieur.
-  - **Couche agent-dans-la-boucle** : trait `Environment` façon gym
-    (`reset` / `step(action) → observation, récompense, fin`, miroir de
-    `scirust-learning::rl::Env`), `run_episode`, **CartPole** (constantes de
-    l'implémentation de référence, épisodes bit-rejouables par graine) et
-    **GridWorld** déterministe.
-  - **Huit domaines, tous testés contre oracle** : mécanique
-    (masse-ressort-amortisseur vs forme close sous-amortie, pendule non
-    linéaire avec conservation d'énergie à grande amplitude, projectile à
-    traînée linéaire vs solution exacte), orbital (Kepler deux corps :
-    énergie et moment cinétique conservés à 1e-9, orbite circulaire fermée
-    après exactement une période), épidémiologie (SIR/SEIR : population
-    conservée à l'arrondi, seuil épidémique à R₀ = 1, relation
-    transcendante exacte de taille finale), écologie (intégrale première de
-    Lotka–Volterra conservée, forme close logistique), chimie (réactions
-    consécutives vs solution de Bateman, réaction réversible relaxant vers
-    K = k_f/k_r), thermique (refroidissement de Newton, barreau 1-D validé
-    sur le taux de décroissance du mode propre *discret* et le principe du
-    maximum), électrique (charge RC, RLC série vs forme close + passivité),
-    stochastique/files d'attente (GBM et Ornstein–Uhlenbeck échantillonnés
-    par leurs lois de transition *exactes*, file M/M/1 par événements
-    discrets retrouvant L = ρ/(1−ρ), W = 1/(μ−λ) et la loi de Little).
-  - **SplitMix64** semé explicite (vecteurs de référence publiés vérifiés),
-    zéro dépendance, `#![forbid(unsafe_code)]`, `#![deny(missing_docs)]`,
-    aucune panique sur entrée malformée (`SimError`), 66 tests + doctest,
-    ajouté à la porte Miri de la CI.
 
-### Ajouté — les 4 chantiers restants de la cartographie (volet 114)
-- **`scirust-core::philox`** — RNG **contre-basé** Philox4x32-10 (Salmon
-  et al., SC'11), clean-room depuis le papier et **validé contre les
-  vecteurs de test publiés** de Random123 (+ implémentation Python
-  indépendante). Sortie = fonction pure (clé, compteur) ⇒ dropout/init/
-  shuffle parallélisables sur n'importe quel découpage de threads en
-  restant bit-identiques (l'« aléa order-independent » façon JAX,
-  trou commun RepDL/scirust). Arithmétique entière pure ⇒ portable par
-  construction. 6 tests (KAT publiés, invariance au découpage, 4 threads
-  bit-exacts, statistiques, empreinte-contrat).
-- **`scirust-core::exact_acc`** — accumulateur **exact** de Kulisch pour
-  produits f32 (virgule fixe 704 bits couvrant tout l'intervalle des
-  produits) : `dot_exact`/`gemm_exact` **correctement arrondis** (une seule
-  opération d'arrondi), indépendants de l'ordre, à **fusion associative**
-  (multithread bit-exact quel que soit le découpage) — la réponse au trou
-  « GEMM reproductible et parallélisable » (classe ReproBLAS, en plus
-  fort : somme exacte). Vérifié bit à bit contre la référence Shewchuk
-  (deux constructions indépendantes du même réel arrondi) ; cancellation
-  catastrophique et sous-normaux traités. 6 tests.
-- **`NdVar::rope_portable`** (tape N-D) — RoPE dont fréquences
-  (`exp`/`ln` portables) et rotations (`sin`/`cos` portables, Payne–Hanek)
-  n'appellent aucune libm : encodage positionnel des transformers bit-exact
-  inter-plates-formes, forward et backward. **`fft_portable`/`ifft_portable`**
+### Added — multi-domain simulation environments (`scirust-sim`)
+- **`scirust-sim`** — the unified "here is a system, step it forward in
+  time, let an agent interact with it" layer the platform was missing:
+  - **Deterministic engine**: `System` trait (`y' = f(t, y)`, same in-place
+    form as the `scirust-solvers::ode::dopri5` closures) + fixed-step RK4
+    (`simulate` → `Trajectory`, linear invariants preserved to
+    rounding); `SecondOrderSystem` trait + **symplectic Euler**
+    (`simulate_second_order`) — the test shows the two-body orbit staying
+    closed where explicit Euler visibly spirals outward.
+  - **Agent-in-the-loop layer**: gym-style `Environment` trait
+    (`reset` / `step(action) → observation, reward, done`, mirror of
+    `scirust-learning::rl::Env`), `run_episode`, **CartPole** (constants of
+    the reference implementation, episodes bit-replayable by seed) and
+    deterministic **GridWorld**.
+  - **Eight domains, all tested against oracle**: mechanics
+    (mass-spring-damper vs underdamped closed form, nonlinear
+    pendulum with energy conservation at large amplitude, projectile with
+    linear drag vs exact solution), orbital (two-body Kepler:
+    energy and angular momentum conserved to 1e-9, circular orbit closed
+    after exactly one period), epidemiology (SIR/SEIR: population
+    conserved to rounding, epidemic threshold at R₀ = 1, exact
+    transcendental final-size relation), ecology (Lotka–Volterra
+    first integral conserved, logistic closed form), chemistry (consecutive
+    reactions vs Bateman solution, reversible reaction relaxing toward
+    K = k_f/k_r), thermal (Newton cooling, 1-D rod validated
+    on the decay rate of the *discrete* eigenmode and the maximum
+    principle), electrical (RC charge, series RLC vs closed form + passivity),
+    stochastic/queues (GBM and Ornstein–Uhlenbeck sampled
+    by their *exact* transition laws, M/M/1 queue by discrete
+    events recovering L = ρ/(1−ρ), W = 1/(μ−λ) and Little's law).
+  - **SplitMix64** with explicit seed (published reference vectors verified),
+    zero dependency, `#![forbid(unsafe_code)]`, `#![deny(missing_docs)]`,
+    no panic on malformed input (`SimError`), 66 tests + doctest,
+    added to the CI's Miri gate.
+
+### Added — the 4 remaining work items of the mapping (installment 114)
+- **`scirust-core::philox`** — **counter-based** RNG Philox4x32-10 (Salmon
+  et al., SC'11), clean-room from the paper and **validated against the
+  published test vectors** of Random123 (+ independent Python
+  implementation). Output = pure function of (key, counter) ⇒ dropout/init/
+  shuffle parallelizable over any thread partition while
+  remaining bit-identical (the JAX-style "order-independent randomness",
+  common RepDL/scirust gap). Pure integer arithmetic ⇒ portable by
+  construction. 6 tests (published KATs, partition invariance, 4 threads
+  bit-exact, statistics, fingerprint contract).
+- **`scirust-core::exact_acc`** — **exact** Kulisch accumulator for
+  f32 products (704-bit fixed point covering the whole product
+  range): `dot_exact`/`gemm_exact` **correctly rounded** (a single
+  rounding operation), order-independent, with **associative fusion**
+  (multithread bit-exact regardless of partitioning) — the answer to the
+  "reproducible and parallelizable GEMM" gap (ReproBLAS class, in fact
+  stronger: exact sum). Verified bit-for-bit against the Shewchuk reference
+  (two independent constructions of the same rounded real); catastrophic
+  cancellation and subnormals handled. 6 tests.
+- **`NdVar::rope_portable`** (N-D tape) — RoPE whose frequencies
+  (portable `exp`/`ln`) and rotations (portable `sin`/`cos`, Payne–Hanek)
+  call no libm: bit-exact cross-platform positional encoding of transformers,
+  forward and backward. **`fft_portable`/`ifft_portable`**
   (scirust-signal) — twiddle factors via `sincos_small_f64`
-  (Cody–Waite + polynômes portables, nouvelle API f64 petit-argument de
-  `portable_f32`) : analyse spectrale bit-identique inter-plates-formes.
-  Empreintes-contrat commises pour les deux.
-- **Certification d'arrondi correct** (`portable_f32::certify` + modes
-  `--certify`/`--eval` du binaire de preuve) : pour chaque entrée f32
-  (balayage exhaustif 7 × 2³²), un certificat d'intervalle prouve que le
-  résultat publié est LE f32 correctement arrondi ; l'évaluateur interne
-  est revalidé contre la fonction expédiée sur chaque entrée. Les entrées
-  non certifiées sont tranchées hors ligne en précision arbitraire
-  (`scripts/verify-certify-offline.py` : Decimal 60 chiffres, milieux
-  comparés en rationnels exacts — pas de double arrondi). Résultats de la
-  campagne : voir LIVESTATE volet 114.
+  (Cody–Waite + portable polynomials, new small-argument f64 API of
+  `portable_f32`): bit-identical cross-platform spectral analysis.
+  Fingerprint contracts committed for both.
+- **Correct-rounding certification** (`portable_f32::certify` + `--certify`/`--eval`
+  modes of the proof binary): for every f32 input
+  (exhaustive sweep 7 × 2³²), an interval certificate proves that the
+  published result is THE correctly rounded f32; the internal evaluator
+  is re-validated against the shipped function on every input. Non-certified
+  inputs are decided offline in arbitrary precision
+  (`scripts/verify-certify-offline.py`: Decimal 60 digits, midpoints
+  compared in exact rationals — no double rounding). Results of the
+  campaign: see LIVESTATE, installment 114.
 
-### Ajouté — famille Adaptive, ondelettes Db4, soustraction spectrale (`scirust-signal::denoise`, suite)
-- **Famille `Adaptive` livrée** (`denoise::adaptive`) — la cinquième famille de la
-  taxonomie n'est plus « réservée » :
-  - **`kalman_smooth`** : filtre de Kalman à niveau local (marche aléatoire +
-    bruit blanc) suivi du lisseur **Rauch-Tung-Striebel** — estimation
-    bidirectionnelle sans déphasage.
-  - **`kalman_smooth_auto`** : auto-réglage des variances par **règle de
-    parcimonie sur la blancheur des innovations** — un filtre bien spécifié
-    produit des innovations blanches, mais sur un signal non-marche-aléatoire la
-    blancheur croît indéfiniment avec `q` (le filtre finit par tout suivre) ;
-    on prend donc le plus petit `q` dont la blancheur reste à une tolérance du
-    maximum : le modèle le plus lisse que le diagnostic ne rejette pas. Vérifié :
-    ~17 dB de gain SNR sur sinusoïde bruitée là où l'argmax naïf n'en donnait
-    que ~1,4 ; suit un échelon de niveau sans le gommer.
-  - **`lms_line_enhancer` / `rls_line_enhancer`** : rehausseurs de ligne
-    adaptatifs (prédicteur sur le signal retardé — NLMS normalisé, RLS à oubli
-    exponentiel). Extraient une raie périodique du bruit large bande **sans
-    référence externe ni fréquence a priori**, et la suivent si elle dérive.
-    RLS vérifié convergent sur enregistrement court (~2·taps échantillons).
-- **Ondelettes Daubechies-4** (`Wavelet::Db4`) : la DWT est refactorisée en
-  banc de filtres orthonormal **périodisé générique** (`Wavelet::{Haar, Db4}`,
-  miroir en quadrature `g[j]=(−1)^j·h[K−1−j]`) ; `wavelet_denoise_with` expose le
-  choix de base, `wavelet_denoise` reste l'enveloppe Haar rétro-compatible.
-  Tests : orthonormalité des taps, **reconstruction parfaite** mono- et
-  multi-niveaux (< 1e-10) pour les deux bases, et Db4 > Haar en SNR sur signal
-  lisse (2 moments nuls ⇒ moins d'artefacts blocs).
-- **Soustraction spectrale** (`spectral_subtraction`) : soustraction en
-  **puissance** avec sur-soustraction et plancher spectral
-  (Berouti-Schwartz-Makhoul 1979, le raffinement de la méthode de Boll — pas
-  sa règle en magnitude) : gain par bin `√(max(floor², 1 − over·P_n/|X|²))`,
-  phase bruitée conservée — le front-end classique du rehaussement de parole.
-- **Garde-fou NLMS** : `lms_line_enhancer` refuse `mu ≥ 2` (limite de stabilité
-  en moyenne quadratique — au-delà la sortie divergeait vers ±∞) par
-  passe-plat, la convention du module pour les paramètres hors plage.
-- `catalog()` couvre désormais réellement les cinq familles (`KalmanAuto` ajouté) ;
-  wrappers `Denoiser` pour Kalman auto et ALE ; ré-exports crate-niveau.
-- **Revue adversariale multi-agents passée sur le diff** (4 dimensions ×
-  vérification contradictoire, mutation testing) ; les manques de tests
-  confirmés sont comblés par des tests *discriminants* : la passe arrière RTS
-  est vérifiée par l'absence de déphasage (pic de corrélation croisée au lag 0
-  — un mutant réduit au filtre causal échoue à lag 8), les paramètres
-  `over`/`floor` de la soustraction spectrale sont épinglés par une identité
-  exacte (`over` énorme ⇒ sortie ≡ `floor·x`), et chaque entrée du `catalog()`
-  est exécutée avec vérification du câblage des wrappers (une transposition
-  `taps`/`delay` compilerait silencieusement).
-- 77 tests unitaires + 1 doctest au total sur le crate ; `cargo fmt`/`clippy -D
-  warnings` propres ; toujours zéro dépendance hors `scirust-core`/serde.
+### Added — Adaptive family, Db4 wavelets, spectral subtraction (`scirust-signal::denoise`, continuation)
+- **`Adaptive` family delivered** (`denoise::adaptive`) — the fifth family of the
+  taxonomy is no longer "reserved":
+  - **`kalman_smooth`**: local-level Kalman filter (random walk +
+    white noise) followed by the **Rauch-Tung-Striebel** smoother — bidirectional
+    estimation without phase lag.
+  - **`kalman_smooth_auto`**: automatic variance tuning by a **sparsity rule on
+    the whiteness of the innovations** — a well-specified filter
+    produces white innovations, but on a non-random-walk signal
+    whiteness grows without bound with `q` (the filter ends up following everything);
+    one therefore takes the smallest `q` whose whiteness stays within tolerance of the
+    maximum: the smoothest model the diagnostic does not reject. Verified:
+    ~17 dB SNR gain on noisy sinusoid where the naive argmax gave only
+    ~1.4; follows a level step without smoothing it away.
+  - **`lms_line_enhancer` / `rls_line_enhancer`**: adaptive line
+    enhancers (predictor on the delayed signal — normalized NLMS, RLS with exponential
+    forgetting). Extract a periodic line from broadband noise **without
+    external reference or a priori frequency**, and track it if it drifts.
+    RLS verified convergent on short recording (~2·taps samples).
+- **Daubechies-4 wavelets** (`Wavelet::Db4`): the DWT is refactored into a
+  **generic periodized** orthonormal filter bank (`Wavelet::{Haar, Db4}`,
+  quadrature mirror `g[j]=(−1)^j·h[K−1−j]`); `wavelet_denoise_with` exposes the
+  basis choice, `wavelet_denoise` remains the backward-compatible Haar wrapper.
+  Tests: tap orthonormality, **perfect reconstruction** single- and
+  multi-level (< 1e-10) for both bases, and Db4 > Haar in SNR on smooth
+  signal (2 vanishing moments ⇒ fewer blocking artifacts).
+- **Spectral subtraction** (`spectral_subtraction`): subtraction in
+  **power** with over-subtraction and spectral floor
+  (Berouti-Schwartz-Makhoul 1979, the refinement of Boll's method — not
+  its magnitude rule): per-bin gain `√(max(floor², 1 − over·P_n/|X|²))`,
+  noisy phase preserved — the classic speech-enhancement front end.
+- **NLMS guard rail**: `lms_line_enhancer` refuses `mu ≥ 2` (mean-square
+  stability limit — beyond it the output diverged toward ±∞) via
+  no-op pass, the module's convention for out-of-range parameters.
+- `catalog()` now genuinely covers the five families (`KalmanAuto` added);
+  `Denoiser` wrappers for auto Kalman and ALE; crate-level re-exports.
+- **Multi-agent adversarial review passed on the diff** (4 dimensions ×
+  contradictory verification, mutation testing); confirmed test gaps
+  are filled by *discriminating* tests: the RTS backward pass
+  is verified by the absence of phase lag (cross-correlation peak at lag 0
+  — a mutant reduced to the causal filter fails at lag 8), the spectral
+  subtraction `over`/`floor` parameters are pinned by an exact
+  identity (huge `over` ⇒ output ≡ `floor·x`), and every `catalog()` entry
+  is run with wrapper wiring verification (a `taps`/`delay` transposition
+  would compile silently).
+- 77 unit tests + 1 doctest in total on the crate; clean `cargo fmt`/`clippy -D
+  warnings`; still zero dependency beyond `scirust-core`/serde.
 
-### Ajouté — entraînement 100 % portable + tanh/sigmoid portables (volet 113)
-- **`Var::{exp_portable, ln_portable, matmul_portable}`** : primitives
-  d'autodiff opt-in dont forward ET backward n'appellent aucune libm ni
-  noyau SIMD par architecture — bit-exactes inter-plates-formes (backwards :
-  exp depuis la sortie stockée ; ln = g⊙1/x division IEEE ; matmul via le
-  GEMM portable et des transposes). `CrossEntropyLoss::new_portable()`
-  bascule le log-softmax interne dessus (perte + gradient portables ;
-  gradient ≡ voie libm à 1e-6, empreinte figée).
-- **`scirust-core --bin proof_portable_training`** : entraînement témoin
-  100 % portable (MLP 32×16×10, 30 pas Adam, données/init PCG) dont la
-  trajectoire de perte et les **poids finaux** sont comparés à des
-  empreintes commises — mêmes poids au bit près sur toute machine conforme.
-  Intégré à `scripts/proof-portable-f32.sh` et au job CI QEMU aarch64.
-- **`tanh_f32` / `sigmoid_f32`** dans `portable_f32` (cœur `exp_f64`
-  factorisé, formes stables des deux côtés, saturations analysées, tanh
-  impaire exacte) : fidèlement arrondis (≤ 1 ulp vs oracle libm f64 sur
-  200 000 points), contrats contract/dense/exhaustif commis, binaire de
-  preuve étendu à 4 fonctions. Premier lot de la cartographie des trous
-  (AUDIT_REPDL §post-scriptum) : débloque LSTM/GRU portables et GELU-tanh.
-- **`sin_f32` / `cos_f32`** portables avec réduction d'argument de
-  **Payne & Hanek en arithmétique entière pure** (u128) — exacte pour tout
-  f32 fini jusqu'à 3,4×10³⁸. Les 448 bits de 2/π sont générés par nos soins
-  (π par Chudnovsky, vérification par recomposition — aucune table copiée
-  d'une libm). Quadrant + 128 bits de fraction signée ; conversion
-  i128 → f64 correctement arrondie ⇒ fidélité maintenue même aux pires cas
-  de réduction du format f32. Oracle ≤ 1 ulp vs libm f64 sur 200 000 points
-  toutes magnitudes ; parités bit-exactes ; contrats
-  contract/dense/exhaustif commis (binaire de preuve : 6 fonctions).
-  Débloque : RoPE portable (transformers), FFT portable, encodages
-  positionnels.
-- **`erf_f32` / `gelu_f32`** portables — **lot 1 complet**. erf : série de
-  Maclaurin f64 à arrêt relatif déterministe, saturation |x| ≥ 4,
-  raccourci petit-argument préservant ±0 ; GELU **exact**
-  (x/2·(1+erf(x/√2)) via le cœur f64, sans cast intermédiaire).
-  Précision vérifiée contre une table de référence **indépendante**
-  (série en Decimal 60 chiffres — pas la libm). Contrats
-  contract/dense(/exhaustif pour erf) commis ; binaire de preuve :
-  8 balayages. La voie portable offre désormais exp, ln, tanh, sigmoid,
-  sin, cos, erf, GELU — strictement plus que les transcendantales de
-  RepDL — toutes fidèlement arrondies et bit-exactes inter-plates-formes
-  par construction.
+### Added — 100% portable training + portable tanh/sigmoid (installment 113)
+- **`Var::{exp_portable, ln_portable, matmul_portable}`**: opt-in autodiff
+  primitives whose forward AND backward call no libm nor per-architecture SIMD
+  kernel — bit-exact cross-platform (backward: exp from the stored output;
+  ln = g⊙1/x IEEE division; matmul via the portable GEMM and transposes).
+  `CrossEntropyLoss::new_portable()` switches its internal log-softmax onto it
+  (portable loss + gradient; gradient ≡ libm path at 1e-6, frozen fingerprint).
+- **`scirust-core --bin proof_portable_training`**: 100% portable witness
+  training (MLP 32×16×10, 30 Adam steps, PCG data/init) whose loss trajectory
+  and **final weights** are compared to committed fingerprints — identical
+  weights bit for bit on any conforming machine. Integrated into
+  `scripts/proof-portable-f32.sh` and the QEMU aarch64 CI job.
+- **`tanh_f32` / `sigmoid_f32`** in `portable_f32` (shared `exp_f64` core,
+  stable forms on both sides, analyzed saturations, exact odd tanh): faithfully
+  rounded (≤ 1 ulp vs libm f64 oracle on 200,000 points), contract/dense/
+  exhaustive contracts committed, proof binary extended to 4 functions. First
+  batch of the gap mapping (AUDIT_REPDL §postscript): unblocks portable
+  LSTM/GRU and GELU-tanh.
+- **`sin_f32` / `cos_f32`** portable with argument reduction by **Payne &
+  Hanek in pure integer arithmetic** (u128) — exact for any finite f32 up to
+  3.4×10³⁸. The 448 bits of 2/π are generated by us (π via Chudnovsky,
+  verification by recomposition — no table copied from a libm). Quadrant + 128
+  bits of signed fraction; correctly rounded i128 → f64 conversion ⇒ fidelity
+  maintained even in the worst reduction cases of the f32 format. Oracle ≤ 1 ulp
+  vs libm f64 on 200,000 points over all magnitudes; bit-exact parities;
+  contract/dense/exhaustive contracts committed (proof binary: 6 functions).
+  Unblocks: portable RoPE (transformers), portable FFT, positional encodings.
+- **`erf_f32` / `gelu_f32`** portable — **batch 1 complete**. erf: f64
+  Maclaurin series with deterministic relative stopping, saturation |x| ≥ 4,
+  small-argument shortcut preserving ±0; GELU **exact**
+  (x/2·(1+erf(x/√2)) via the f64 core, without intermediate cast). Accuracy
+  verified against an **independent** reference table (series in 60-digit
+  Decimal — not libm). Contract/dense(/exhaustive for erf) contracts committed;
+  proof binary: 8 sweeps. The portable path now offers exp, ln, tanh, sigmoid,
+  sin, cos, erf, GELU — strictly more than RepDL's transcendentals — all
+  faithfully rounded and bit-exact cross-platform by construction.
 
-### Ajouté — débruitage & détection de bruit extensibles (`scirust-signal::denoise`)
-- **Nouveau module `denoise`** : une boîte à outils de suppression de bruit
-  pensée pour être *exhaustive par familles* plutôt que par énumération. Une
-  taxonomie fermée (`DenoiserFamily` : Linear / Rank / Transform / Variational /
-  Adaptive) et un trait uniforme `Denoiser` : ajouter une méthode = choisir sa
-  famille et implémenter le trait. Couverture actuelle, chaque routine validée
-  par un gain de SNR mesuré sur un signal synthétique à référence propre connue :
-  - **Linéaire** (`linear`) : moyenne mobile, lissage gaussien, **Savitzky-Golay**
-    (ajustement polynomial par moindres carrés, préserve les pics — testé exact
-    sur un polynôme), moyenne mobile exponentielle.
-  - **Rang / ordre** (`rank`) : filtre **médian**, **Hampel** (rejet d'impulsions
-    par MAD, filtre à décision), moyenne α-tronquée, plus `impulse_mask` qui
-    étiquette explicitement quels échantillons sont du bruit.
-  - **Transformé** (`transform`) : passe-bas/passe-haut FFT idéaux, **notch** et
-    suppression du 50/60 Hz + harmoniques, filtre de **Wiener** (bruit blanc),
-    **débruitage par ondelettes** (Haar multi-niveaux, seuil universel VisuShrink
-    `σ√(2 ln N)` avec σ robuste par MAD, seuillage doux/dur).
-  - **Variationnel** (`variational`) : lisseur de **Tikhonov** (L2, système
-    tridiagonal résolu par Thomas) et **Variation Totale** (L1, IRLS lagged-
-    diffusivity, préserve les fronts — vérifié meilleur que Tikhonov sur un
-    échelon bruité).
-- **Détection & séparation bruit/information** (`denoise::detect`) : `classify`
-  caractérise le bruit sans le nommer via un panel fixe de descripteurs (σ robuste
-  par MAD ; kurtosis/facteur de crête du résidu ; planéité spectrale ; périodicité
-  par **test g de Fisher** insensible au nombre de bins ; force de tendance ;
-  pente de couleur `1/f`) et un arbre de décision → `NoiseType`
+### Added — extensible denoising & noise detection (`scirust-signal::denoise`)
+- **New `denoise` module**: a denoising toolbox designed to be *exhaustive by
+  families* rather than by enumeration. A closed taxonomy (`DenoiserFamily`:
+  Linear / Rank / Transform / Variational / Adaptive) and a uniform `Denoiser`
+  trait: adding a method = choosing its family and implementing the trait.
+  Current coverage, each routine validated by a measured SNR gain on a synthetic
+  signal with a known clean reference:
+  - **Linear** (`linear`): moving average, Gaussian smoothing,
+    **Savitzky-Golay** (least-squares polynomial fit, preserves peaks — tested
+    exact on a polynomial), exponential moving average.
+  - **Rank / order** (`rank`): **median** filter, **Hampel** (impulse rejection
+    via MAD, decision filter), α-trimmed mean, plus `impulse_mask` which
+    explicitly labels which samples are noise.
+  - **Transform** (`transform`): ideal FFT low-pass/high-pass, **notch** and
+    50/60 Hz + harmonics removal, **Wiener** filter (white noise),
+    **wavelet denoising** (multi-level Haar, universal VisuShrink threshold
+    `σ√(2 ln N)` with robust MAD σ, soft/hard thresholding).
+  - **Variational** (`variational`): **Tikhonov** smoother (L2, tridiagonal
+    system solved by Thomas) and **Total Variation** (L1, lagged-diffusivity
+    IRLS, preserves edges — verified better than Tikhonov on a noisy step).
+- **Noise/information detection & separation** (`denoise::detect`): `classify`
+  characterizes noise without naming it via a fixed set of descriptors (robust
+  MAD σ; kurtosis/crest factor of the residual; spectral flatness; periodicity
+  via the **Fisher g test** insensitive to the number of bins; trend strength;
+  `1/f` color slope) and a decision tree → `NoiseType`
   (Gaussian / Impulsive / Periodic / Colored / Baseline / LowNoise). `separate`
-  décompose le signal en information + bruit **puis falsifie la séparation** par un
-  **test de blancheur** du résidu (autocorrélation vs bande `±1.96/√N`) :
-  `leaked_structure` signale si de l'information a fui dans le bruit — la garantie
-  qui rend la séparation vérifiable et non simplement plausible.
-- **Pipeline « débruiteur universel »** `denoise_auto` : détecte → choisit la
-  famille adaptée → applique (Hampel pour l'impulsif, notch pour le tonal,
-  retrait de tendance pour la dérive, Wiener/ondelettes pour le large bande),
-  et `catalog()` fournit un jeu de débruiteurs par défaut couvrant chaque famille.
-- 27 tests unitaires + 1 doctest ; zéro dépendance hors `scirust-core`/serde ;
-  `cargo fmt`/`clippy -D warnings` propres.
+  decomposes the signal into information + noise **then falsifies the
+  separation** with a **whiteness test** of the residual (autocorrelation vs the
+  `±1.96/√N` band): `leaked_structure` flags whether information leaked into the
+  noise — the guarantee that makes the separation verifiable and not merely
+  plausible.
+- **'Universal denoiser' pipeline** `denoise_auto`: detects → chooses the
+  suited family → applies (Hampel for impulsive, notch for tonal, trend removal
+  for drift, Wiener/wavelets for broadband), and `catalog()` provides a default
+  set of denoisers covering each family.
+- 27 unit tests + 1 doctest; zero dependency outside `scirust-core`/serde;
+  `cargo fmt`/`clippy -D warnings` clean.
 
-### Ajouté — preuve aarch64 en CI + softmax portable dans la tape (volet 112, suite)
-- **CI : le job `cross-check-aarch64` exécute désormais du code aarch64**
-  (qemu-user + gcc-aarch64-linux-gnu) : tests `portable_f32` + binaire de
-  preuve en mode standard sur `aarch64-unknown-linux-gnu`. QEMU implémente
-  fidèlement IEEE-754 : chaque run CI vérifie réellement l'identité bit à
-  bit x86↔ARM du contrat commis (commandes validées localement : 13/13
-  tests + verdict=PASS sous qemu). Ferme le point ouvert « CI aarch64 =
-  check only » tracé depuis le volet 108.
+### Added — aarch64 proof in CI + portable softmax in the tape (panel 112, continued)
+- **CI: the `cross-check-aarch64` job now runs aarch64 code**
+  (qemu-user + gcc-aarch64-linux-gnu): `portable_f32` tests + the proof binary
+  in standard mode on `aarch64-unknown-linux-gnu`. QEMU implements IEEE-754
+  faithfully: every CI run really verifies the committed contract's bit-for-bit
+  x86↔ARM identity (commands validated locally: 13/13 tests + verdict=PASS
+  under qemu). Closes the open point "CI aarch64 = check only" tracked since
+  panel 108.
 - **`Var::softmax_portable()`** (+ `Tensor::softmax_portable`,
-  `Op::SoftmaxPortable` dans reverse.rs et parallel.rs) : softmax par ligne
-  dont le forward passe par `portable_f32::softmax_f32` et dont le backward
-  calcule le jacobien **depuis la sortie stockée** — aucun appel libm dans
-  le nœud, donc forward ET gradient bit-exacts inter-plates-formes. Opt-in :
-  `Var::softmax` (libm) est inchangé. Tests : forward bit-identique à la
-  référence portable, gradient équivalent au nœud libm (≤ 1e-5), empreinte
-  du gradient figée (contrat cross-platform de l'entraînement).
+  `Op::SoftmaxPortable` in reverse.rs and parallel.rs): row-wise softmax whose
+  forward goes through `portable_f32::softmax_f32` and whose backward computes
+  the Jacobian **from the stored output** — no libm call in the node, so both
+  forward AND gradient are bit-exact cross-platform. Opt-in: `Var::softmax`
+  (libm) is unchanged. Tests: forward bit-identical to the portable reference,
+  gradient equivalent to the libm node (≤ 1e-5), gradient fingerprint frozen
+  (cross-platform training contract).
 
-### Ajouté — preuve cross-platform exécutable de la voie f32 portable (volet 112)
-- **`scirust-core --bin proof_portable_f32`** : binaire de preuve
-  auto-vérifiant — recalcule sur la machine locale les goldens ponctuels,
-  les empreintes FNV-1a des balayages de l'espace des bits f32 de
-  `exp_f32`/`ln_f32` (contrat pas 65 537, dense pas 257, **exhaustif pas 1**
-  — les 2³² entrées — avec `--full`) et les composites softmax/GEMM, puis
-  compare tout aux constantes `PROOF_*` **commises dans le dépôt**
-  (calculées sur x86-64). Code de sortie 0 ⇔ `verdict=PASS` ⇔ la machine
-  reproduit les résultats x86-64 bit à bit. Lignes canoniques hors
-  contexte `#` : leur SHA-256 doit être identique entre machines.
-- **`scripts/proof-portable-f32.sh`** : enrobage à la convention du dépôt
-  (bundle d'évidence horodaté `proof-portable-f32-<UTC>/` : platform.txt,
-  report.txt, canonical.sha256 ; reste sur la machine, `.gitignore`d).
-  Protocole documenté dans `docs/TEST_PROTOCOL.md` (volet x86_64 Debian +
-  volet Jetson/aarch64).
-- Le contrat de preuve de `portable_f32` est désormais public
-  (`PROOF_*`, `sweep_fingerprint`, `proof_softmax_fingerprint`,
-  `proof_gemm_fingerprint`) et partagé entre les tests unitaires et le
-  binaire ; empreintes denses et exhaustives ajoutées au contrat.
+### Added — executable cross-platform proof of the portable f32 path (panel 112)
+- **`scirust-core --bin proof_portable_f32`**: self-verifying proof binary —
+  recomputes locally the point goldens, the FNV-1a fingerprints of the f32
+  bit-space sweeps of `exp_f32`/`ln_f32` (contract step 65,537, dense step 257,
+  **exhaustive step 1** — all 2³² entries — with `--full`) and the
+  softmax/GEMM composites, then compares everything against the `PROOF_*`
+  constants **committed in the repository** (computed on x86-64). Exit code 0 ⇔
+  verdict=PASS ⇔ the machine reproduces the x86-64 results bit for bit. Canonical
+  lines outside `#` context: their SHA-256 must be identical between machines.
+- **`scripts/proof-portable-f32.sh`**: wrapper following the repository
+  convention (timestamped evidence bundle `proof-portable-f32-<UTC>/`:
+  platform.txt, report.txt, canonical.sha256; stays on the machine,
+  `.gitignore`d). Protocol documented in `docs/TEST_PROTOCOL.md` (x86_64 Debian
+  panel + Jetson/aarch64 panel).
+- The `portable_f32` proof contract is now public (`PROOF_*`,
+  `sweep_fingerprint`, `proof_softmax_fingerprint`, `proof_gemm_fingerprint`)
+  and shared between the unit tests and the binary; dense and exhaustive
+  fingerprints added to the contract.
 
-### Ajouté — audit de couverture RepDL et fermeture des écarts (volet 111)
-- **`docs/audits/AUDIT_REPDL_2026-07-10.md`** : audit de couverture fonctionnelle
-  élément par élément de [microsoft/RepDL](https://github.com/microsoft/RepDL)
-  (MIT, arXiv:2510.09180) contre SciRust — 18/23 items déjà couverts, 2 par
-  composition, 1 non applicable par conception, 3 fermés ci-dessous. Analyse
-  du risque de copyright : **aucun code RepDL dans le dépôt** (citations
-  documentaires uniquement), démarche clean-room actée par écrit (audit §3).
-- **`Adam::with_amsgrad()`** (`scirust-core`) : variante AMSGrad (Reddi,
-  Kale & Kumar, ICLR 2018) — le dénominateur utilise le maximum historique
-  du 2ᵉ moment (bias-corrigé), jamais décroissant. Oracle de convergence +
-  test de la propriété anti-pic (pas AMSGrad < 10 % des pas Adam après un
-  pic de gradient).
-- **`scirust_runtime::hash`** : empreintes SHA-256 hex de slices `f32`, de
-  tenseurs (forme incluse) et de `state_dict` (clés triées ⇒ indépendant de
-  l'ordre d'insertion) ; encodage little-endian des bits IEEE-754 ⇒
-  identique sur toute plate-forme pour des données bit-identiques.
-  L'outil de *constat* de la reproductibilité (deux machines, même hash),
-  complément cryptographique des fingerprints FNV-1a. 5 tests.
-- **`reproducible::{exp_via_f64, ln_via_f64}`** (`scirust-core`) :
-  transcendantales f32 par promotion en `f64` — même classe de technique
-  que RepDL, documentation honnête de la garantie (fidèlement arrondi ;
-  correctement arrondi hors dilemme du fabricant de tables ; identité
-  inter-plates-formes probable mais non prouvée). Test de fidélité
-  ≤ 0,5 ulp sur 8 000 points.
-- **`scirust-core::portable_f32`** — la **voie f32 portable** : `exp_f32`,
-  `ln_f32`, `softmax_f32`, `dot_f32`, `gemm_f32` en Rust pur **sans libm**,
-  n'employant que des opérations IEEE-754 de base en ordre fixe ⇒ résultats
-  **bit-exacts inter-plates-formes par construction** (l'axe « cross-platform
-  f32 » où RepDL était plus fort, réalisé ici sans TCB externe). exp :
-  réduction k·ln 2 (scindage hi/lo) + Taylor deg 13 ; ln : normalisation de
-  mantisse + série atanh ; softmax : max-subtract + exp portable +
-  `reproducible_sum` (équivariant bit à bit sous permutation) ; dot/gemm :
-  produits f64 exacts, accumulation séquentielle f64. Garanties énoncées
-  sans sur-promesse : fidèlement arrondi (≤ 1 ulp, vérifié contre l'oracle
-  libm f64 sur 200 000 points) ; arrondi correct *prouvé* = travail futur ;
-  caveat x87/i586 documenté. 13 tests dont goldens bit-à-bit et empreintes
-  FNV d'un balayage complet de l'espace des bits f32 (pas 65 537) — le
-  contrat de portabilité à exécuter sur ARM ; empreintes identiques
-  debug/release. Implémentation clean-room (méthodes mathématiques
-  publiques ; aucun code fdlibm/musl/RepDL consulté).
+### Added — RepDL coverage audit and gap closure (panel 111)
+- **`docs/audits/AUDIT_REPDL_2026-07-10.md`**: element-by-element functional
+  coverage audit of [microsoft/RepDL](https://github.com/microsoft/RepDL)
+  (MIT, arXiv:2510.09180) against SciRust — 18/23 items already covered, 2 by
+  composition, 1 not applicable by design, 3 closed below. Copyright risk
+  analysis: **no RepDL code in the repository** (documentary citations only),
+  clean-room approach recorded in writing (audit §3).
+- **`Adam::with_amsgrad()`** (`scirust-core`): AMSGrad variant (Reddi, Kale &
+  Kumar, ICLR 2018) — the denominator uses the historical maximum of the
+  (bias-corrected) 2nd moment, never decreasing. Convergence oracle + test of
+  the anti-spike property (AMSGrad steps < 10% of Adam steps after a gradient
+  spike).
+- **`scirust_runtime::hash`**: hex SHA-256 fingerprints of `f32` slices, of
+  tensors (shape included) and of `state_dict` (sorted keys ⇒ independent of
+  insertion order); little-endian encoding of IEEE-754 bits ⇒ identical on any
+  platform for bit-identical data. The *attestation* tool of reproducibility
+  (two machines, same hash), cryptographic complement to the FNV-1a
+  fingerprints. 5 tests.
+- **`reproducible::{exp_via_f64, ln_via_f64}`** (`scirust-core`): f32
+  transcendentals by promotion to `f64` — same technique class as RepDL, honest
+  documentation of the guarantee (faithfully rounded; correctly rounded outside
+  the table-maker's dilemma; cross-platform identity likely but not proven).
+  Fidelity test ≤ 0.5 ulp on 8,000 points.
+- **`scirust-core::portable_f32`** — the **portable f32 path**: `exp_f32`,
+  `ln_f32`, `softmax_f32`, `dot_f32`, `gemm_f32` in pure Rust **without libm**,
+  using only basic IEEE-754 operations in fixed order ⇒ results **bit-exact
+  cross-platform by construction** (the 'cross-platform f32' axis on which
+  RepDL was stronger, achieved here without an external TCB). exp: k·ln 2
+  reduction (hi/lo split) + degree-13 Taylor; ln: mantissa normalization + atanh
+  series; softmax: max-subtract + portable exp + `reproducible_sum`
+  (bit-wise equivariant under permutation); dot/gemm: exact f64 products,
+  sequential f64 accumulation. Guarantees stated without over-promising:
+  faithfully rounded (≤ 1 ulp, verified against the libm f64 oracle on 200,000
+  points); correct rounding *proven* = future work; x87/i586 caveat documented.
+  13 tests including bit-for-bit goldens and FNV fingerprints of a full sweep of
+  the f32 bit space (step 65,537) — the portability contract to run on ARM;
+  identical fingerprints in debug/release. Clean-room implementation (public
+  mathematical methods; no fdlibm/musl/RepDL code consulted).
 
-### Modifié — acteur CHECKUPAUTO remplacé par TAREK ZEKRITI
-- **Attribution** : le champ `authors` de `scirust-burn-bridge` passe de
-  "CheckupAuto" à "Tarek Zekriti" ; l'identité git locale des commits est
-  désormais TAREK ZEKRITI \<zekrititarek@gmail.com\>.
-- **URLs/slugs GitHub** : toutes les références `CHECKUPAUTO/*` (26 fichiers —
-  `repository` des Cargo.toml, README, LICENSE.md, RELEASING, SBOM CycloneDX,
-  rapports techniques ×8 langues, scripts de protocole, docs scirust-rsi,
-  URI SARIF de scirust-som) pointent vers `Memorithm/*`, l'org qui héberge
-  réellement les dépôts.
-- **Marque également remplacée (2e passe, sur confirmation utilisateur)** :
-  emails de contact `contact@checkupauto.fr` → `zekrititarek@gmail.com`
-  (LICENSE, LICENSING, SECURITY, plaquette, en-têtes des rapports ×8 langues)
-  et identifiant SPDX `LicenseRef-CheckupAuto-Dual` →
-  `LicenseRef-TarekZekriti-Dual` (LICENSE + Cargo.toml racine,
-  scirust-burn-bridge, scirust-license ; `deny.toml` et le SBOM n'y
-  référençaient rien).
+### Changed — CHECKUPAUTO actor replaced by TAREK ZEKRITI
+- **Attribution**: the `authors` field of `scirust-burn-bridge` changes from
+  "CheckupAuto" to "Tarek Zekriti"; the local git identity of commits is now
+  TAREK ZEKRITI \<zekrititarek@gmail.com\>.
+- **GitHub URLs/slugs**: all `CHECKUPAUTO/*` references (26 files — the
+  `repository` of the Cargo.tomls, README, LICENSE.md, RELEASING, CycloneDX
+  SBOM, technical reports ×8 languages, protocol scripts, scirust-rsi docs,
+  scirust-som SARIF URI) point to `Memorithm/*`, the org that actually hosts
+  the repositories.
+- **Brand also replaced (2nd pass, on user confirmation)**: contact emails
+  `contact@checkupauto.fr` → `zekrititarek@gmail.com` (LICENSE, LICENSING,
+  SECURITY, brochure, headers of the reports ×8 languages) and the SPDX
+  identifier `LicenseRef-CheckupAuto-Dual` → `LicenseRef-TarekZekriti-Dual`
+  (LICENSE + root Cargo.toml, scirust-burn-bridge, scirust-license;
+  `deny.toml` and the SBOM referenced nothing there).
 
-### Ajouté — draft de soumission Correctness '26 (`paper/correctness26/`)
-- **Venue actée** : Correctness '26 (10ᵉ Int. Workshop on Software
-  Correctness for HPC Applications, SC26 Chicago), deadline 23 juillet 2026,
-  notification 1ᵉʳ septembre. Plateforme d'évaluation : **Jetson AGX Thor**
-  (décision utilisateur). JOSS écarté (licence PolyForm non-OSI, décision
-  utilisateur de ne pas re-licencier).
-- **Draft complet** : `main.tex` (ACM sigconf, ~8 pages : intro
-  « déterminisme-comme-évidence », related work avec pivot RepDL honnête,
-  trois régimes numériques + invariant σ, entraînement bit-reproductible
-  T1-T4, inférence-comme-artefact d'audit, int8 déterministe edge, gate σ +
-  étude négative « dead guards » 22 dépôts/9,16 M LOC, coût mesuré du
-  déterminisme avec la table x86-64/Thor et l'identité bit-à-bit
-  cross-platform des empreintes, limitations, table claims → évidence en
-  `table*`) ; `references.bib` (7 références, métadonnées vérifiées sur
-  arXiv/éditeur le 2026-07-10, aucune référence inventée) ; `README.md`
-  (build latexmk/Overleaf, TODO de soumission). Contrôle structurel
-  effectué : environnements/accolades équilibrés, citations et refs toutes
-  résolues. Chaque claim du papier est adossée à la table de
-  `paper/PAPER_PLAN.md` — aucune claim sans témoin exécutable.
+### Added — Correctness '26 submission draft (`paper/correctness26/`)
+- **Venue decided**: Correctness '26 (10th Int. Workshop on Software
+  Correctness for HPC Applications, SC26 Chicago), deadline July 23, 2026,
+  notification September 1st. Evaluation platform: **Jetson AGX Thor** (user
+  decision). JOSS ruled out (non-OSI PolyForm license, user decision not to
+  relicense).
+- **Complete draft**: `main.tex` (ACM sigconf, ~8 pages: 'determinism-as-
+  evidence' intro, related work with an honest RepDL pivot, three numerical
+  regimes + σ invariant, bit-reproducible training T1-T4, inference-as-audit-
+  artifact, deterministic edge int8, σ gate + 'dead guards' negative study 22
+  repositories/9.16 M LOC, measured determinism cost with the x86-64/Thor table
+  and the cross-platform bit-for-bit identity of the fingerprints, limitations,
+  claims → evidence table in `table*`); `references.bib` (7 references,
+  metadata verified on arXiv/publisher on 2026-07-10, no invented reference);
+  `README.md` (latexmk/Overleaf build, submission TODO). Structural check
+  performed: balanced environments/braces, all citations and refs resolved.
+  Every claim of the paper is backed by the table of `paper/PAPER_PLAN.md` —
+  no claim without an executable witness.
 
-### Ajouté/Modifié — honnêteté du README, étude empirique « dead guards », positionnement paper
-- **Correction d'honnêteté (claims d'unicité)** : la claim « No mainstream
-  framework ships this guarantee tested » (README) et ses équivalents FR
-  (`docs/INDUSTRIAL_ROADMAP.md`, `docs/DOSSIER_FINANCEURS.md`, entrée
-  historique 0.14.0 de ce fichier — rectifiée, pas réécrite) sont
-  **falsifiées par RepDL** (Microsoft, 2025, arXiv:2510.09180 :
-  reproductibilité bit-à-bit **cross-platform** d'un sous-ensemble f32 de
-  PyTorch par arrondi correct). Remplacées par la formulation exacte : à
-  notre connaissance, SciRust est le seul framework DL **auto-contenu**
-  (pile 100 % Rust auditable, zéro FFI dans le chemin de calcul) offrant
-  simultanément entraînement multi-thread bit-identique testé en CI, int8
-  déterministe embarqué et artefacts d'audit ; RepDL est plus fort sur
-  l'axe cross-platform f32, en surcouche d'un TCB C++/Python, sans basse
-  précision ni pièces d'audit.
-- **`epsilon-audit --mine <dir>`** (crate `scirust-sigma`, module public
-  `mine`, std-only) : minage multi-langage (Rust, C/C++/CUDA/OpenCL,
-  shaders WGSL/GLSL/Metal/compute) des « gardes epsilon mortes » — littéraux
-  f32 sous `f32::MIN_POSITIVE` (M1, flush FTZ/DAZ) ou sous `1/f32::MAX`
-  (M2, inversion en `inf`). Heuristiques de typage documentées
-  (suffixe/ligne ; littéral nu C = double, jamais compté ; shaders f32 par
-  défaut), comparaison au seuil sur la valeur **arrondie en f32**
-  (sémantique de matérialisation), exclusions `test*/`/`bench*/`/vendor,
-  détection des drapeaux fast-math/FTZ dans les fichiers de build, rapport
-  Markdown+TSV déterministe scellé SHA-256. 27 tests unitaires sur fixtures
-  synthétiques (M1 réel, M2 réel, f64 bénin, exclusion test, bornes de
-  plage, commentaires/chaînes). Lecture seule, exit 0 (analytique).
-- **Étude empirique `docs/DEAD_GUARDS_STUDY.md`** : campagne sur **22 dépôts
-  publics** (llama.cpp, ggml, candle, burn, pytorch, tensorflow,
+### Added/Changed — README honesty, 'dead guards' empirical study, paper positioning
+- **Honesty fix (uniqueness claims)**: the claim "No mainstream framework
+  ships this guarantee tested" (README) and its FR equivalents
+  (`docs/INDUSTRIAL_ROADMAP.md`, the investor dossier, historical 0.14.0
+  entry of this file — rectified, not rewritten) are **falsified by RepDL**
+  (Microsoft, 2025, arXiv:2510.09180: bit-for-bit **cross-platform**
+  reproducibility of an f32 subset of PyTorch via correct rounding). Replaced
+  by the exact formulation: to our knowledge, SciRust is the only
+  **self-contained** DL framework (100% auditable Rust stack, zero FFI in the
+  computation path) simultaneously offering multi-thread bit-identical training
+  tested in CI, deterministic embedded int8 and audit artifacts; RepDL is
+  stronger on the cross-platform f32 axis, as an overlay on a C++/Python TCB,
+  without low precision or audit pieces.
+- **`epsilon-audit --mine <dir>`** (crate `scirust-sigma`, public module
+  `mine`, std-only): multi-language mining (Rust, C/C++/CUDA/OpenCL,
+  WGSL/GLSL/Metal/compute shaders) of "dead epsilon guards" — f32 literals
+  below `f32::MIN_POSITIVE` (M1, FTZ/DAZ flush) or below `1/f32::MAX`
+  (M2, inversion to `inf`). Documented typing heuristics (suffix/line; bare C
+  literal = double, never counted; f32 shaders by default), comparison to the
+  threshold on the value **rounded to f32** (materialization semantics),
+  `test*/`/`bench*/`/vendor exclusions, detection of fast-math/FTZ flags in
+  build files, deterministic Markdown+TSV report sealed with SHA-256. 27 unit
+  tests on synthetic fixtures (real M1, real M2, benign f64, test exclusion,
+  range bounds, comments/strings). Read-only, exit 0 (analytical).
+- **Empirical study `docs/DEAD_GUARDS_STUDY.md`**: campaign on **22 public
+  repositories** (llama.cpp, ggml, candle, burn, pytorch, tensorflow,
   onnxruntime, OpenBLAS, eigen, cutlass, ndarray, nalgebra, faer-rs, tract,
-  wgpu, glam, ncnn, MNN, tvm, whisper.cpp, stable-diffusion.cpp, wonnx —
-  SHA enregistrés, 0 échec de clone), **9 160 848 lignes** scannées,
-  14 candidats bruts, revue manuelle intégrale → **0 garde morte
-  confirmée** (14 BENIGN : tolérances de test `approx` de ndarray,
-  constantes sous-normales délibérées du lexer WGSL de naga). Verdict
-  **NO-GO** (règle : ≥ 3 confirmés dans ≥ 2 dépôts) — résultat négatif
-  consigné honnêtement ; en contrepartie, le modèle de menace FTZ est
-  confirmé (9/22 dépôts activent fast-math/FTZ dans leurs builds). Aucune
-  issue/PR ouverte, aucun contact extérieur.
-- **Matériel paper (Lot 3)** : `paper/RELATED_WORK.md` (section citable —
-  Goldberg/Monniaux/ReproBLAS ; PyTorch deterministic mode/EasyScale/RepDL
-  avec paragraphe pivot ; arXiv:2410.09172 pour la voie sanitized) et
-  `paper/PAPER_PLAN.md` (titre + 2 variantes ; venues : atelier
-  correctness/reproducibility recommandé — JOSS bloqué par la licence
-  PolyForm non-OSI en l'état ; plan de sections ; **table claims →
-  évidence** T1-P1 mappant chaque claim sur son test exact avec commande ;
-  réponses aux faiblesses anticipées).
-- **Fermeture des TODO-EVIDENCE du plan (S2, R4, O1)** — décisions actées :
-  - **S2** : le gate `epsilon-audit --check` est câblé en CI (nouveau job
-    `epsilon-audit` dans `.github/workflows/ci.yml`) — aucune garde f32
-    sous σ_sanitized ne peut plus entrer dans `scirust-gpu/src` sans
-    casser le build.
-  - **R4** : nouveau test CI
+  wgpu, glam, ncnn, MNN, tvm, whisper.cpp, stable-diffusion.cpp, wonnx — SHAs
+  recorded, 0 clone failure), **9,160,848 lines** scanned, 14 raw candidates,
+  full manual review → **0 confirmed dead guard** (14 BENIGN: `approx` test
+  tolerances of ndarray, deliberate subnormal constants of naga's WGSL lexer).
+  Verdict **NO-GO** (rule: ≥ 3 confirmed in ≥ 2 repositories) — negative result
+  honestly recorded; in return, the FTZ threat model is confirmed (9/22
+  repositories enable fast-math/FTZ in their builds). No issue/PR opened, no
+  external contact.
+- **Paper material (Lot 3)**: `paper/RELATED_WORK.md` (citable section —
+  Goldberg/Monniaux/ReproBLAS; PyTorch deterministic mode/EasyScale/RepDL with
+  pivot paragraph; arXiv:2410.09172 for the sanitized path) and
+  `paper/PAPER_PLAN.md` (title + 2 variants; venues: correctness/reproducibility
+  workshop recommended — JOSS blocked by the non-OSI PolyForm license as-is;
+  section plan; **claims → evidence table** T1-P1 mapping each claim to its
+  exact test with command; answers to anticipated weaknesses).
+- **Closure of the plan's TODO-EVIDENCE (S2, R4, O1)** — decisions recorded:
+  - **S2**: the `epsilon-audit --check` gate is wired in CI (new
+    `epsilon-audit` job in `.github/workflows/ci.yml`) — no f32 guard below
+    σ_sanitized can enter `scirust-gpu/src` anymore without breaking the build.
+  - **R4**: new CI test
     `forward_fingerprint_is_thread_count_invariant`
-    (`scirust-runtime/tests/fingerprint_thread_invariance.rs`) — le
-    fingerprint 64 bits du forward (MLP 784-256-10, batches synthétiques
-    100 % entiers, portables) est bit-identique sous des pools rayon de
-    1/2/4/8 threads, et stable à la ré-exécution. `rayon` ajouté en
-    dev-dependency de `scirust-runtime` (déjà au lockfile — zéro nouveau
-    téléchargement).
-  - **O1** : banc « coût du déterminisme »
-    (`scirust-core/src/bin/bench_reduction_overhead.rs`) — réduction en
-    ordre de worker figé (pattern de `train_batch_threaded`) vs
-    accumulation en ordre d'arrivée (canal), magnitudes ±1e16 rendant
-    l'ordre observable, empreintes bit-à-bit par répétition. Mesure x86
-    (4 cœurs, release, dim=100 352, 30 reps) : **l'ordre figé est plus
-    rapide** (0,76×-0,93× du temps de la baseline) et bit-stable ; la
-    baseline « arrivée » a produit 3 empreintes distinctes à 8 threads
-    (non-déterminisme réel observé). Wall-clock ⇒ protocole, jamais CI ;
-    volet Jetson via `scripts/bench-o1-jetson.sh` (rapport plateforme
-    consigné, épinglage d'horloges opt-in `--pin-clocks`, 3 runs, tests
-    natifs Q3 NEON + R4 fingerprint, bundle d'évidence horodaté et
-    git-ignoré), documenté dans `docs/TEST_PROTOCOL.md`. **Volet Jetson
-    mesuré (AGX Thor, 14 cœurs, MAXN, 3×30 reps)** : ordre figé ≈ gratuit
-    jusqu'à 2 threads (0,93-0,99×), ~1-3 % à 4, ~6-11 % à 8 ; et les
-    empreintes de la réduction figée sont **bit-identiques x86_64 ↔
-    aarch64** — reproductibilité cross-platform du pattern, mesurée.
-    Corrections script : env cargo sous sudo (secure_path) ; `--lib` sur le
-    filtre Q3 (le tail ne montrait que le dernier target de test).
+    (`scirust-runtime/tests/fingerprint_thread_invariance.rs`) — the 64-bit
+    forward fingerprint (MLP 784-256-10, 100% integer synthetic batches,
+    portable) is bit-identical under rayon pools of 1/2/4/8 threads, and stable
+    across re-executions. `rayon` added as a dev-dependency of
+    `scirust-runtime` (already in the lockfile — zero new download).
+  - **O1**: 'cost of determinism' bench
+    (`scirust-core/src/bin/bench_reduction_overhead.rs`) — worker-order-frozen
+    reduction (pattern of `train_batch_threaded`) vs arrival-order accumulation
+    (channel), ±1e16 magnitudes making the order observable, bit-for-bit
+    fingerprints per repetition. x86 measurement (4 cores, release,
+    dim=100,352, 30 reps): **the frozen order is faster** (0.76×–0.93× of the
+    baseline time) and bit-stable; the 'arrival' baseline produced 3 distinct
+    fingerprints at 8 threads (real observed non-determinism). Wall-clock ⇒
+    protocol, never CI; Jetson panel via `scripts/bench-o1-jetson.sh` (platform
+    report recorded, opt-in clock pinning `--pin-clocks`, 3 runs, native Q3
+    NEON + R4 fingerprint tests, timestamped and git-ignored evidence bundle),
+    documented in `docs/TEST_PROTOCOL.md`. **Measured Jetson panel (AGX Thor,
+    14 cores, MAXN, 3×30 reps)**: frozen order ≈ free up to 2 threads
+    (0.93–0.99×), ~1–3% at 4, ~6–11% at 8; and the frozen-reduction
+    fingerprints are **bit-identical x86_64 ↔ aarch64** — cross-platform
+    reproducibility of the pattern, measured. Script fixes: cargo env under
+    sudo (secure_path); `--lib` on the Q3 filter (the tail only showed the last
+    test target).
 
-### Ajouté — `scirust-sigma` : bornes structurelles σ (« couvercle de zéro ») + audit des epsilons
-Nouvelle crate feuille **sans dépendance externe** (`std` seul) qui nomme et
-encode l'invariant numérique jusqu'ici implicite du contrat de déterminisme :
+### Added — `scirust-sigma`: structural σ bounds ('zero lid') + epsilon audit
+New leaf crate **without external dependency** (`std` only) that names and
+encodes the numerical invariant, until now implicit, of the determinism
+contract:
 
-- **σ = couvercle de zéro par régime.** Chaque voie numérique déterministe
-  (`scirust-gpu/src/deterministic.rs`) a un plus petit positif représentable :
-  entier exact `1`, fixe Q15.16 `2⁻¹⁶`, fixe Q31.32 `2⁻³²`, f32 *sanitized*
-  `f32::MIN_POSITIVE`, f32 brut / f64 brut = plus petit sous-normal. Constantes
-  nommées (`SIGMA_SANITIZED_F32`, `SIGMA_RAW_F32`, `SIGMA_RAW_F64`, `SIGMA_Q15_16`,
-  `SIGMA_Q31_32`), `sigma_f32`/`sigma_f64`, `guard_denominator_f32/f64`, et
-  l'**invariant central** `is_valid_guard_f32` (une garde anti-zéro sous σ est
-  *morte* sur la voie sanitized : `sanitize_f32` l'écrase). Comportements de bord
-  (0, négatif, NaN, régime sans σ f32) définis et testés — 12 tests unitaires
-  aux valeurs bit-à-bit (`to_bits()`).
-- **Test d'alignement** (`tests/sanitize_alignment.rs`) : affirme, sans coupler
-  la crate à `scirust-gpu`, que le seuil de `sanitize_f32` (= `f32::MIN_POSITIVE`)
-  est bit-identique à `SIGMA_SANITIZED_F32`. Casse si l'un bouge sans l'autre.
-- **Binaire `epsilon-audit`** (std-only ; `sha2` déjà au lockfile scelle le
-  rapport) : scanner lexical maison (hors commentaires/chaînes) qui classe les
-  ~14 400 littéraux flottants `< 1.0` du workspace en A (algorithme, ne pas
-  migrer) / B (garde zéro, cible σ) / C (test) / D (convergence) / U (non classé),
-  et produit `docs/EPSILON_AUDIT.md` (rapport déterministe, scellé SHA-256).
-- **Gate CI `--check`** : sort ≠ 0 si une garde f32 sous σ_sanitized subsiste
-  hors test dans `scirust-gpu/src`. Exit 0 sur l'arbre actuel (aucune garde
-  morte sur la voie sanitized ; 686 littéraux gpu/src inspectés). Sécurité :
-  contrôle préventif d'une classe de défauts (garde morte → `Inf`/`NaN`
-  silencieux) invisible en revue humaine, sans surface d'approvisionnement
-  ajoutée, artefact scellé, binaire strictement en lecture seule.
+- **σ = zero lid per regime.** Each deterministic numerical path
+  (`scirust-gpu/src/deterministic.rs`) has a smallest representable positive:
+  exact integer `1`, fixed-point Q15.16 `2⁻¹⁶`, fixed-point Q31.32 `2⁻³²`, f32
+  *sanitized* `f32::MIN_POSITIVE`, raw f32 / raw f64 = smallest subnormal.
+  Named constants (`SIGMA_SANITIZED_F32`, `SIGMA_RAW_F32`, `SIGMA_RAW_F64`,
+  `SIGMA_Q15_16`, `SIGMA_Q31_32`), `sigma_f32`/`sigma_f64`,
+  `guard_denominator_f32/f64`, and the **central invariant**
+  `is_valid_guard_f32` (an anti-zero guard under σ is *dead* on the sanitized
+  path: `sanitize_f32` overwrites it). Edge behaviors (0, negative, NaN, regime
+  without f32 σ) defined and tested — 12 unit tests at bit-for-bit values
+  (`to_bits()`).
+- **Alignment test** (`tests/sanitize_alignment.rs`): asserts, without coupling
+  the crate to `scirust-gpu`, that the `sanitize_f32` threshold
+  (= `f32::MIN_POSITIVE`) is bit-identical to `SIGMA_SANITIZED_F32`. Breaks if
+  one moves without the other.
+- **`epsilon-audit` binary** (std-only; `sha2` already in the lockfile seals
+  the report): homegrown lexical scanner (outside comments/strings) that
+  classifies the ~14,400 floating literals `< 1.0` of the workspace into A
+  (algorithm, do not migrate) / B (zero guard, σ target) / C (test) / D
+  (convergence) / U (unclassified), and produces `docs/EPSILON_AUDIT.md`
+  (deterministic report, SHA-256 sealed).
+- **CI `--check` gate**: exit ≠ 0 if an f32 guard below σ_sanitized remains
+  outside tests in `scirust-gpu/src`. Exit 0 on the current tree (no dead guard
+  on the sanitized path; 686 gpu/src literals inspected). Safety: preventive
+  control of a class of defects (dead guard → silent `Inf`/`NaN`) invisible in
+  human review, without added supply-chain surface, sealed artifact, strictly
+  read-only binary.
 
-### Ajouté — crates voisines : carte CUSUM (`scirust-spc`) et incertitude élargie GUM (`scirust-metrology`)
-Deux compléments dans les crates voisines du tolérancement, chacun vérifié par
-un cross-check Monte-Carlo embarqué dans ses tests :
+### Added — neighboring crates: CUSUM chart (`scirust-spc`) and GUM expanded uncertainty (`scirust-metrology`)
+Two additions in the crates neighboring tolerancing, each verified by a
+Monte-Carlo cross-check embedded in its tests:
 
-- **`scirust-spc::cusum`** : **carte de contrôle CUSUM** tabulaire bilatérale.
-  Sommes cumulées `Cᵢ⁺ = max(0, Cᵢ₋₁⁺ + (xᵢ−μ₀) − K)` / `Cᵢ⁻` avec valeur de
-  référence `K = k·σ` et intervalle de décision `H = h·σ`, signal de dérive, et
-  **ARL** par l'approximation de Siegmund (`b = h+1,166`), combinée en bilatéral
-  `1/ARL = 1/ARL⁺ + 1/ARL⁻`. Complète EWMA comme détecteur à mémoire des petites
-  dérives soutenues. *Cross-check* : taux de fausse alarme Monte-Carlo (N(0,1))
-  vs l'ARL₀ ≈ 168 pour `k=0,5, h=4`.
-- **`scirust-metrology::expanded`** : **incertitude élargie** GUM. Degrés de
-  liberté effectifs de Welch–Satterthwaite `ν_eff = u_c⁴ / Σ(uᵢ⁴/νᵢ)`, facteur
-  d'élargissement `k = t_{(1+p)/2}(ν_eff)` (quantile de Student par développement
-  de Cornish–Fisher, exact quand `ν_eff→∞ ⇒ k→1,96`), incertitude élargie
-  `U = k·u_c` et intervalle de couverture. Boucle le GUM après `combined_uncertainty`.
-  *Cross-check* : quantiles `t` vs tables (t₀,₉₇₅(10)=2,228, …).
+- **`scirust-spc::cusum`**: tabular two-sided **CUSUM control chart**.
+  Cumulative sums `Cᵢ⁺ = max(0, Cᵢ₋₁⁺ + (xᵢ−μ₀) − K)` / `Cᵢ⁻` with reference
+  value `K = k·σ` and decision interval `H = h·σ`, drift signal, and **ARL** via
+  the Siegmund approximation (`b = h+1.166`), combined two-sided
+  `1/ARL = 1/ARL⁺ + 1/ARL⁻`. Complements EWMA as a memory detector of small
+  sustained drifts. *Cross-check*: Monte-Carlo false-alarm rate (N(0,1)) vs
+  the ARL₀ ≈ 168 for `k=0.5, h=4`.
+- **`scirust-metrology::expanded`**: GUM **expanded uncertainty**. Effective
+  degrees of freedom of Welch–Satterthwaite `ν_eff = u_c⁴ / Σ(uᵢ⁴/νᵢ)`,
+  coverage factor `k = t_{(1+p)/2}(ν_eff)` (Student quantile via the
+  Cornish–Fisher expansion, exact when `ν_eff→∞ ⇒ k→1.96`), expanded
+  uncertainty `U = k·u_c` and coverage interval. Closes the GUM loop after
+  `combined_uncertainty`. *Cross-check*: `t` quantiles vs tables
+  (t₀.₉₇₅(10)=2.228, …).
 
-### Ajouté — plan & économie : ajustements ISO 286, échantillonnage double/séquentiel, perte de Taguchi (`scirust-tolerance`)
-Trois modules qui bordent la cotation : la table normalisée des ajustements, les
-plans d'échantillonnage à taille moyenne réduite, et le coût de non-qualité relié
-à l'inertie. Chaque module est vérifié par cross-check de fuzzing contre une
-**référence indépendante** :
+### Added — plan & economics: ISO 286 fits, double/sequential sampling, Taguchi loss (`scirust-tolerance`)
+Three modules that border dimensioning: the standardized fits table, the
+sampling plans with reduced average size, and the cost of non-quality linked to
+inertia. Each module is verified by fuzzing cross-check against an
+**independent reference**:
 
-- **`fits`** : **limites et ajustements ISO 286**. Tolérance normalisée `ITn` à
-  partir du facteur `i = 0,45·∛D + 0,001·D` (µm) et des multiplicateurs de grade
-  (IT5–IT18), écarts fondamentaux d'**arbre** `d, e, f, g, h` (formules ISO
-  vérifiées), et **classification d'ajustement** trou/arbre en système à trou de
-  base H (jeu maxi/mini, catégorie jeu / incertain / serrage). *Cross-check* :
-  identité « étendue de jeu = IT_trou + IT_arbre », recomputation indépendante du
-  `IT` par la formule du facteur `i`, monotonie en grade.
-- **`sequential`** : **échantillonnage double et séquentiel** (SPRT de Wald).
-  Plan double `(n1,c1,r1,n2,c2)` de CE binomiale `Pa(p) = P(d1≤c1) + Σ P(d1=k)·P(d2≤c2−k)`
-  et nombre moyen d'échantillon `ASN = n1 + n2·P(c1<d1<r1)` ; SPRT à deux droites
-  frontières `d = s·n ∓ h` (accepter / rejeter / continuer). *Cross-check* :
-  CE et ASN du plan double vs Monte-Carlo direct ; garantie de la CE du SPRT aux
-  deux points de conception.
-- **`taguchi`** : **perte de Taguchi et coût de non-qualité**. Perte quadratique
-  `L = k(y−T)²`, coefficient `k = A/Δ²` calé sur le coût à la limite, et l'identité
-  `E[L] = k·(σ²+δ²) = k·I²` — la raison exacte pour laquelle le tolérancement
-  inertiel minimise directement la perte de Taguchi. Variantes plus-petit/plus-grand-
-  c'est-mieux et **tolérance économique** `Δ = Δ₀·√(A/A₀)`. *Cross-check* : Monte-Carlo
-  de la perte quadratique vs `k·I²` ; équilibre de la tolérance économique.
+- **`fits`**: **ISO 286 limits and fits**. Standard tolerance `ITn` from the
+  factor `i = 0.45·∛D + 0.001·D` (µm) and the grade multipliers (IT5–IT18),
+  fundamental **shaft** deviations `d, e, f, g, h` (verified ISO formulas), and
+  **fit classification** hole/shaft in the basic-hole system H (max/min
+  clearance, clearance / uncertain / interference category). *Cross-check*:
+  identity 'clearance range = IT_hole + IT_shaft', independent recomputation of
+  the `IT` by the factor-`i` formula, monotonicity in grade.
+- **`sequential`**: **double and sequential sampling** (Wald SPRT). Double plan
+  `(n1,c1,r1,n2,c2)` with binomial OC `Pa(p) = P(d1≤c1) + Σ P(d1=k)·P(d2≤c2−k)`
+  and average sample number `ASN = n1 + n2·P(c1<d1<r1)`; SPRT with two straight
+  boundaries `d = s·n ∓ h` (accept / reject / continue). *Cross-check*: OC and
+  ASN of the double plan vs direct Monte-Carlo; SPRT OC guarantee at the two
+  design points.
+- **`taguchi`**: **Taguchi loss and cost of non-quality**. Quadratic loss
+  `L = k(y−T)²`, coefficient `k = A/Δ²` calibrated on the cost at the limit, and
+  the identity `E[L] = k·(σ²+δ²) = k·I²` — the exact reason why inertial
+  tolerancing directly minimizes Taguchi loss. Smaller-is-better /
+  larger-is-better variants and **economic tolerance** `Δ = Δ₀·√(A/A₀)`.
+  *Cross-check*: Monte-Carlo of the quadratic loss vs `k·I²`; economic
+  tolerance equilibrium.
 
-Câblés dans `scirust-mcp` (`tolerance_fits`, `tolerance_sequential`,
-`tolerance_taguchi`). Fuzz global : **118 476 checks / 0 erreur** sur 29 modules.
-
-### Ajouté — atelier : échantillonnage aux attributs, interférence contrainte-résistance, étude de capabilité par sous-groupes (`scirust-tolerance`)
-Trois modules qui complètent la boîte à outils qualité d'atelier : accepter un
-lot sans mesurer, chiffrer la fiabilité d'un **ajustement** aléatoire, et mener
-une vraie **étude de capabilité** à sous-groupes rationnels. Chaque module est
-vérifié par cross-check de fuzzing contre une **référence indépendante** :
-
-- **`attributes`** : **échantillonnage aux attributs** (ISO 2859-1 / MIL-STD-105).
-  Plan simple `(n, c)` — accepter si défectueux `≤ c` — de courbe d'efficacité
-  binomiale exacte `Pa(p) = Σ_{d≤c} C(n,d) pᵈ(1−p)ⁿ⁻ᵈ` (récurrence stable), avec
-  **conception à deux points** (balayage de `c` croissant, plus petit `n` tenant
-  le point producteur) et qualité moyenne après contrôle (AOQ). *Cross-check* :
-  Monte-Carlo direct de la règle d'acceptation vs la CE binomiale ; les plans
-  conçus tiennent les deux points nominaux.
-- **`interference`** : **interférence contrainte-résistance** et fiabilité
-  d'ajustement. Fiabilité `R = P(S > L) = Φ(β)`, `β = (μ_S−μ_L)/√(σ_S²+σ_L²)`
-  (indice de fiabilité), et analyse d'**ajustement** alésage/arbre : jeu
-  `C = alésage − arbre ∼ N(μ_h−μ_s, σ_h²+σ_s²)`, `P(jeu > 0)` (ajustement libre)
-  vs `P(jeu < 0)` (serrage) — la probabilité qu'une paire tirée au hasard
-  s'assemble comme prévu, qu'un pire-cas min/max ne donne pas. *Cross-check* :
-  Monte-Carlo de `P(S>L)` vs la forme close ; identités de partition du jeu.
-- **`subgroup`** : **étude de capabilité par sous-groupes rationnels** (MSA AIAG /
-  ISO 22514-2). Sépare la dispersion **intra-sous-groupe** (court terme,
-  `σ̂ = R̄/d₂ = s̄/c₄` via les constantes de cartes de contrôle) qui porte les
-  indices de **capabilité** `Cp`/`Cpk`, de la dispersion **globale** (long terme)
-  qui porte les indices de **performance** `Pp`/`Ppk` : un grand `Cp` avec un
-  petit `Pp` signale un procédé stable mais qui dérive. *Cross-check* :
-  recalcul indépendant du σ global ; accord des estimateurs `R̄/d₂` et `s̄/c₄` ;
-  identité du `Cp`.
-
-Câblés dans `scirust-mcp` (`tolerance_attributes_plan`, `tolerance_interference`,
-`tolerance_subgroup_capability`). Fuzz global : **113 336 checks / 0 erreur** sur
-26 modules.
-
-### Ajouté — qualité de procédé : échantillonnage aux mesures, Six-Sigma, attribution des causes (`scirust-tolerance`)
-Trois modules qui prolongent la couche mesure & analyse vers le **pilotage
-qualité** que les suites concurrentes (Minitab, Q-DAS) offrent autour de la
-cotation : accepter un lot sur mesures, chiffrer le rendement d'un procédé
-multi-étapes, et remonter des données à la cause. Chaque module est vérifié par
-cross-check de fuzzing contre une **référence indépendante** :
-
-- **`variables`** : **échantillonnage aux mesures** (ISO 3951 / MIL-STD-414,
-  forme `k`). Accepte le lot quand la distance normalisée `Q = (limite−x̄)/σ ≥ k` ;
-  courbe d'efficacité en forme close `Pa(p) = Φ(√n_eff·(z_p−k))` avec `z_p = −Φ⁻¹(p)`,
-  et **conception à deux points** `√n = (z_{1−α}+z_{1−β})/(z_aql−z_rql)`,
-  `k = (z_aql·z_{1−β}+z_rql·z_{1−α})/(z_{1−α}+z_{1−β})` depuis (AQL, RQL, α, β).
-  Méthodes `σ` connu et `s` inconnu (échantillon gonflé de `1+k²/2`) ; écart-type
-  maximal admissible pour un lot centré `MSD = (USL−LSL)/(2k)`, pendant aux mesures
-  du budget inertiel `I_max`. *Cross-check* : Monte-Carlo direct de la règle
-  d'acceptation vs la CE close ; identité `MSD`.
-- **`sixsigma`** : **comptabilité de rendement Six-Sigma**. DPU, DPMO, rendement
-  de passage `Y = e^(−DPU)`, **rendement roulé** `RTY = ∏ Yᵢ` (la probabilité
-  qu'une pièce franchisse *toutes* les étapes sans reprise, invisible sur une
-  seule capabilité), rendement normalisé `RTY^(1/étapes)`, et les conversions
-  rendement↔niveau sigma↔DPMO `Z = Φ⁻¹(Y)+décalage` avec le décalage `1,5σ`
-  Motorola (d'où « 6σ ⇒ 3,4 DPMO »). *Cross-check* : aller-retours vs la queue
-  normale indépendante ; `RTY` vs produit explicite ; `−ln Y = DPU` de Poisson.
-- **`attribution`** : **attribution des causes pilotée par les données**. Ajuste
-  l'assemblage mesuré aux composants co-mesurés par moindres carrés `y ≈ β₀ + Σ βⱼxⱼ`
-  et décompose la variance expliquée par l'identité exacte (MCO avec constante)
-  `Σⱼ βⱼ·Cov(xⱼ,y) = Var(ŷ) = R²·Var(y)` : sensibilités **empiriques** `βⱼ` (à
-  confronter aux `αⱼ` de conception), parts signées `cⱼ = βⱼ·Cov(xⱼ,y)/Var(y)`
-  (somment à `R²`, mesure de Pratt) et **reste inexpliqué** `1−R²` qui trahit une
-  cause hors du jeu mesuré. *Cross-check* : identité `Σcⱼ = R²` ; récupération des
-  coefficients générateurs ; `c = corr²` à un seul régresseur.
-
-Câblés dans `scirust-mcp` (`tolerance_variables_plan`, `tolerance_six_sigma`,
-`tolerance_attribution`). Fuzz global : **111 926 checks / 0 erreur** sur 23
+Wired into `scirust-mcp` (`tolerance_fits`, `tolerance_sequential`,
+`tolerance_taguchi`). Global fuzz: **118,476 checks / 0 errors** over 29
 modules.
 
-### Ajouté — la couche mesure & analyse du tolérancement inertiel (`scirust-tolerance`)
-Six modules qui portent la crate au niveau des produits concurrents (Minitab,
-Q-DAS, 3DCS, CETOL) sur ce qu'ils font *autour* de la cotation : qualifier le
-moyen de mesure, borner statistiquement, séparer les leviers, ajuster une loi,
-approfondir la GD&T et chiffrer l'incertitude d'un indice. Chaque module est
-vérifié par cross-check de fuzzing contre une **référence indépendante** :
+### Added — workshop: attribute sampling, stress-strength interference, capability study by subgroups (`scirust-tolerance`)
+Three modules that complete the workshop quality toolbox: accepting a lot
+without measuring, quantifying the reliability of a random **fit**, and running
+a real **capability study** on rational subgroups. Each module is verified by
+fuzzing cross-check against an **independent reference**:
 
-- **`msa`** : **Gage R&R croisé par ANOVA** (MSA AIAG). Décomposition du modèle
-  `yᵢⱼₖ = μ + Partᵢ + Opⱼ + (Part·Op)ᵢⱼ + εᵢⱼₖ` en composantes de variance
-  répétabilité `EV` / reproductibilité `AV` / pièce `PV`, avec `%R&R` (variation
-  d'étude), `%contribution`, `%tolérance = 6σ_GRR/(USL−LSL)`, `ndc = ⌊1,41·σ_PV/σ_GRR⌋`
-  et verdict AIAG (bandes 10 %/30 %). *Cross-check* : identité de décomposition
-  des sommes de carrés ; constructions à répétabilité/reproductibilité nulles.
-- **`interval`** : **intervalles statistiques de tolérance** (ISO 16269-6).
-  Facteur bilatéral de Howe `k = z_{(1+p)/2}·√(ν(1+1/n)/χ²_{ν,α})` et unilatéral
-  de Natrella (forme fermée) ; tendent tous deux (lentement, en `1−1,645√(2/ν)`)
-  vers le quantile normal. *Cross-check* : couverture Monte-Carlo du vrai contenu.
-- **`sensitivity::dual_contributions`** : **GeoFactor / sensibilité duale** — pour
-  chaque contributeur, magnification géométrique `|αᵢ|`, part sur la **moyenne**
-  d'assemblage `αᵢδᵢ` (somment à `δ_Y`) *et* part sur la **variance** `αᵢ²σᵢ²/σ_Y²`
-  (somment à 1), à la manière de 3DCS/CETOL : distingue une cote à **recentrer**
-  d'une cote à **resserrer**, ce que la seule part de variance masque.
-- **`distfit`** : **ajustement de loi** (ISO 22514-2). Familles Normale /
-  Lognormale / Rayleigh / Weibull (régression des rangs médians), meilleur ajuste-
-  ment par vraisemblance maximale, et **capabilité par percentiles**
-  `Cp = (USL−LSL)/(X₀.₉₉₈₆₅−X₀.₀₀₁₃₅)`. *Cross-check* : aller-retour `cdf∘quantile` ;
-  la Normale retrouve le `Cp` classique ; récupération des paramètres.
-- **`position` (GD&T avancée)** : **condition virtuelle / résultante** (`VC`
-  interne `MMC−t`, externe `MMC+t`), **décalage de référence** (glissement depuis
-  le MMB) et **position composée** à deux étages (PLTZF/FRTZF). *Cross-check* :
-  monotonie et bornes des enveloppes vs la taille réelle du détail.
-- **`capability` (IC de capabilité)** : intervalle de confiance **exact** (χ²) sur
-  `Cp` et **grand-échantillon** (Bissell) sur `Cpk`. *Cross-check* : couverture
-  Monte-Carlo de l'IC de `Cp`.
+- **`attributes`**: **attribute sampling** (ISO 2859-1 / MIL-STD-105). Simple
+  plan `(n, c)` — accept if defective ≤ `c` — with exact binomial operating
+  curve `Pa(p) = Σ_{d≤c} C(n,d) pᵈ(1−p)ⁿ⁻ᵈ` (stable recurrence), with
+  **two-point design** (sweep of increasing `c`, smallest `n` holding the
+  producer point) and average outgoing quality (AOQ). *Cross-check*: direct
+  Monte-Carlo of the acceptance rule vs the binomial OC; the designed plans
+  hold the two nominal points.
+- **`interference`**: **stress-strength interference** and fit reliability.
+  Reliability `R = P(S > L) = Φ(β)`, `β = (μ_S−μ_L)/√(σ_S²+σ_L²)`
+  (reliability index), and bore/shaft **fit** analysis: clearance
+  `C = bore − shaft ∼ N(μ_h−μ_s, σ_h²+σ_s²)`, `P(clearance > 0)` (free fit) vs
+  `P(clearance < 0)` (interference) — the probability that a randomly drawn
+  pair assembles as intended, which a worst-case min/max does not give.
+  *Cross-check*: Monte-Carlo of `P(S>L)` vs the closed form; clearance
+  partition identities.
+- **`subgroup`**: **capability study on rational subgroups** (MSA AIAG /
+  ISO 22514-2). Separates **within-subgroup** dispersion (short-term,
+  `σ̂ = R̄/d₂ = s̄/c₄` via control-chart constants) which carries the
+  **capability** indices `Cp`/`Cpk`, from the **overall** dispersion
+  (long-term) which carries the **performance** indices `Pp`/`Ppk`: a large
+  `Cp` with a small `Pp` signals a stable but drifting process. *Cross-check*:
+  independent recomputation of the overall σ; agreement of the `R̄/d₂` and
+  `s̄/c₄` estimators; `Cp` identity.
 
-Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interval`,
+Wired into `scirust-mcp` (`tolerance_attributes_plan`, `tolerance_interference`,
+`tolerance_subgroup_capability`). Global fuzz: **113,336 checks / 0 errors**
+over 26 modules.
+
+### Added — process quality: variables sampling, Six Sigma, cause attribution (`scirust-tolerance`)
+Three modules that extend the measurement & analysis layer toward the **quality
+control** that competing suites (Minitab, Q-DAS) offer around dimensioning:
+accepting a lot on measurements, quantifying the yield of a multi-stage
+process, and tracing data back to cause. Each module is verified by fuzzing
+cross-check against an **independent reference**:
+
+- **`variables`**: **variables sampling** (ISO 3951 / MIL-STD-414, `k` method).
+  Accepts the lot when the normalized distance `Q = (limit−x̄)/σ ≥ k`;
+  closed-form operating curve `Pa(p) = Φ(√n_eff·(z_p−k))` with `z_p = −Φ⁻¹(p)`,
+  and **two-point design** `√n = (z_{1−α}+z_{1−β})/(z_aql−z_rql)`,
+  `k = (z_aql·z_{1−β}+z_rql·z_{1−α})/(z_{1−α}+z_{1−β})` from (AQL, RQL, α, β).
+  `σ` known and `s` unknown methods (sample inflated by `1+k²/2`); maximum
+  allowable standard deviation for a centered lot `MSD = (USL−LSL)/(2k)`,
+  pendant to the inertial budget `I_max` on measurements. *Cross-check*: direct
+  Monte-Carlo of the acceptance rule vs the closed-form OC; `MSD` identity.
+- **`sixsigma`**: **Six-Sigma yield accounting**. DPU, DPMO, throughput yield
+  `Y = e^(−DPU)`, **rolled throughput yield** `RTY = ∏ Yᵢ` (the probability
+  that a part crosses *all* steps without rework, invisible on a single
+  capability), normalized yield `RTY^(1/steps)`, and the
+  yield↔sigma-level↔DPMO conversions `Z = Φ⁻¹(Y)+shift` with the Motorola
+  `1.5σ` shift (hence "6σ ⇒ 3.4 DPMO"). *Cross-check*: round-trips vs the
+  independent normal tail; `RTY` vs explicit product; `−ln Y = DPU` of Poisson.
+- **`attribution`**: **data-driven cause attribution**. Fits the measured
+  assembly to the co-measured components by least squares `y ≈ β₀ + Σ βⱼxⱼ`
+  and decomposes the explained variance by the exact identity (OLS with
+  constant) `Σⱼ βⱼ·Cov(xⱼ,y) = Var(ŷ) = R²·Var(y)`: **empirical**
+  sensitivities `βⱼ` (to compare to the design `αⱼ`), signed shares
+  `cⱼ = βⱼ·Cov(xⱼ,y)/Var(y)` (sum to `R²`, Pratt measure) and the
+  **unexplained remainder** `1−R²` that betrays a cause outside the measured
+  set. *Cross-check*: identity `Σcⱼ = R²`; recovery of the generating
+  coefficients; `c = corr²` with a single regressor.
+
+Wired into `scirust-mcp` (`tolerance_variables_plan`, `tolerance_six_sigma`,
+`tolerance_attribution`). Global fuzz: **111,926 checks / 0 errors** over 23
+modules.
+
+### Added — the measurement & analysis layer of inertial tolerancing (`scirust-tolerance`)
+Six modules that bring the crate to the level of competing products (Minitab,
+Q-DAS, 3DCS, CETOL) on what they do *around* dimensioning: qualifying the
+measurement device, bounding statistically, separating the levers, fitting a
+distribution, deepening GD&T and quantifying the uncertainty of an index. Each
+module is verified by fuzzing cross-check against an **independent reference**:
+
+- **`msa`**: **crossed Gage R&R by ANOVA** (MSA AIAG). Decomposition of the
+  model `yᵢⱼₖ = μ + Partᵢ + Opⱼ + (Part·Op)ᵢⱼ + εᵢⱼₖ` into the variance
+  components repeatability `EV` / reproducibility `AV` / part `PV`, with `%R&R`
+  (study variation), `%contribution`, `%tolerance = 6σ_GRR/(USL−LSL)`,
+  `ndc = ⌊1.41·σ_PV/σ_GRR⌋` and the AIAG verdict (10%/30% bands). *Cross-check*:
+  sum-of-squares decomposition identity; constructions with null
+  repeatability/reproducibility.
+- **`interval`**: **statistical tolerance intervals** (ISO 16269-6). Howe's
+  two-sided factor `k = z_{(1+p)/2}·√(ν(1+1/n)/χ²_{ν,α})` and Natrella's
+  one-sided (closed form); both tend (slowly, in `1−1.645√(2/ν)`) toward the
+  normal quantile. *Cross-check*: Monte-Carlo coverage of the true content.
+- **`sensitivity::dual_contributions`**: **GeoFactor / dual sensitivity** — for
+  each contributor, geometric magnification `|αᵢ|`, share of the assembly
+  **mean** `αᵢδᵢ` (sum to `δ_Y`) *and* share of the **variance** `αᵢ²σᵢ²/σ_Y²`
+  (sum to 1), in the manner of 3DCS/CETOL: distinguishes a dimension to
+  **recenter** from a dimension to **tighten**, which the variance share alone
+  masks.
+- **`distfit`**: **distribution fitting** (ISO 22514-2). Normal / Lognormal /
+  Rayleigh / Weibull families (median-rank regression), best fit by maximum
+  likelihood, and **capability by percentiles**
+  `Cp = (USL−LSL)/(X₀.₉₉₈₆₅−X₀.₀₀₁₃₅)`. *Cross-check*: `cdf∘quantile`
+  round-trip; the Normal recovers the classic `Cp`; parameter recovery.
+- **`position` (advanced GD&T)**: **virtual / resultant condition** (`VC`
+  internal `MMC−t`, external `MMC+t`), **datum shift** (slippage from the MMB)
+  and two-stage **composite position** (PLTZF/FRTZF). *Cross-check*:
+  monotonicity and bounds of the envelopes vs the actual size of the feature.
+- **`capability` (capability CI)**: **exact** (χ²) confidence interval on `Cp`
+  and **large-sample** (Bissell) on `Cpk`. *Cross-check*: Monte-Carlo coverage
+  of the `Cp` CI.
+
+Wired into `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interval`,
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
-`tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
-
-### Ajouté — transpileur : **MATLAB `range(v)`** — étendue statistique, prouvée contre Octave réel (Phase 2, incrément 49)
-`range(v) = max(v) − min(v)` (étendue de l'échantillon), composée depuis les nœuds de
-réduction `Max`/`Min` déjà vérifiés — aucun nouveau nœud SIR, std-only. L'inférence de
-type reconnaît `range` comme une réduction (argument vecteur).
-
-- `range(v)` : vecteur → scalaire (différence max−min).
-
-Un cas d'oracle (`range(v)` sur un vecteur de 7 éléments). **Oracle 140/140** (200
-essais chacun) ; **97 tests unitaires** (1 nouveau).
-*Non-vacuité* : remplacer la soustraction par une addition (`max+min` au lieu de
-`max−min`) fait diverger le cas `range` — la composition est bien portante.
-
-### Ajouté — transpileur : **MATLAB `fftshift` / `ifftshift`** — centrage du spectre, prouvés contre Octave réel (Phase 2, incrément 48)
-Compagnons de la FFT : `fftshift(v)` ramène la composante de fréquence nulle au
-centre (échange des deux moitiés = `circshift` de `⌊n/2⌋`) et `ifftshift(v)` l'inverse
-(`circshift` de `⌈n/2⌉`) — inverses **exacts** pour les longueurs paires **et
-impaires**. Nouveaux nœuds SIR `Fftshift`/`Ifftshift` (vecteur→vecteur) et helpers de
-prélude déterministes bâtis sur `np::circshift`, réutilisant la réindexation modulaire
-déjà prouvée.
-
-- `fftshift(v)`, `ifftshift(v)` : vecteur réel → vecteur (même longueur).
-- S'appliquent naturellement sur un spectre de magnitude réel : `fftshift(abs(fft(x)))`.
-
-Trois cas d'oracle (`fftshift`/`ifftshift` en longueur **impaire** pour distinguer
-`⌊·⌋`/`⌈·⌉`, plus `fftshift(abs(fft(x)))` — FFT routée + abs complexe + décalage).
-**Oracle 139/139** (200 essais chacun) ; **96 tests unitaires** (1 nouveau).
-*Non-vacuité* : faire utiliser `⌊n/2⌋` à `ifftshift` (au lieu de `⌈n/2⌉`) fait diverger
-le cas `ifftshift` en longueur impaire tandis que `fftshift` reste vert — la distinction
-plancher/plafond est bien portante.
-
-### Ajouté — transpileur : **MATLAB `fft` / `ifft`** routées vers `scirust-signal`, prouvées contre Octave réel (Phase 2, incrément 47)
-Premier **routage de traitement du signal** côté MATLAB : `fft(x)` (DFT complexe
-d'un vecteur réel), `ifft(c)` (DFT inverse) et `abs(fft(x))` (spectre de magnitude)
-émettent le kernel FFT vérifié de `scirust-signal` plutôt que de le redériver —
-réutilisant exactement la machinerie complexe (`Fft`/`Ifft`/`ComplexArray`/`ComplexAbs`)
-déjà prouvée côté Python.
-
-- `fft(x)` : vecteur réel → vecteur complexe (spectre complet à N points).
-- `ifft(c)` : vecteur complexe → vecteur complexe (DFT inverse, `1/N`).
-- `abs(z)` sur un spectre complexe → tableau réel des magnitudes (routé
-  distinctement de l'`abs` réel élément par élément).
-
-Le harnais de l'oracle sérialise désormais les résultats complexes d'Octave en
-`(re, im)` entrelacés pour s'aligner sur la sortie Rust `ComplexArray` (un
-`ifft(fft(x))` qu'Octave réduit au réel est complété par des parties imaginaires
-nulles). Trois cas d'oracle prouvés contre Octave réel (compilés via cargo avec
-`scirust-signal`). **Oracle 136/136** (200 essais chacun) ; **95 tests unitaires**
-(1 nouveau).
-*Non-vacuité* : router `fft` vers `rfft` (demi-spectre) fait diverger les trois cas
-FFT (longueurs 10/16 et 5/8, crash du round-trip) — le routage `fft` est bien portant.
-
-### Ajouté — transpileur : **MATLAB `sec` / `csc` / `cot`** — trigonométrie réciproque, prouvée contre Octave réel (Phase 2, incrément 46)
-Achève la trigonométrie : les fonctions réciproques `sec = 1/cos`, `csc = 1/sin`,
-`cot = 1/tan`, chacune appliquant la fonction trig de base (scalaire ou élément par
-élément) puis prenant l'inverse via le nouveau helper `reciprocal` (`1.0 / e`,
-scalaire ou diffusion).
-
-- `sec(x)`, `csc(x)`, `cot(x)` : scalaire ou vecteur (élément par élément).
-
-Quatre cas d'oracle (`sec`/`csc`/`cot` scalaires sur des plages hors pôles, plus
-`sec(flip(v))` élément par élément). **Oracle 133/133** (200 essais chacun) ;
-**94 tests unitaires** (1 nouveau).
-*Non-vacuité* : router `sec` vers `sin` (au lieu de `cos`) fait diverger les deux cas
-`sec` tandis que `csc`/`cot` restent verts — le mappage réciproque est bien portant.
-
-### Ajouté — transpileur : **MATLAB `asind` / `acosd` / `atand`** — trigonométrie inverse en degrés, prouvée contre Octave réel (Phase 2, incrément 45)
-Complète la famille trigonométrique en degrés : `asind`/`acosd`/`atand` appliquent
-l'inverse `asin`/`acos`/`atan` (résultat en radians, scalaire ou élément par élément)
-puis convertissent l'angle en **degrés** (`× 180/π`, via le helper `scale_by_const`
-partagé avec `rad2deg`).
-
-- `asind(x)`, `acosd(x)`, `atand(x)` : scalaire ou vecteur (élément par élément).
-- Domaines : `asind`/`acosd` sur `[-1, 1]` ; `atand` sur tous les réels.
-
-Quatre cas d'oracle (`asind`/`acosd`/`atand` scalaires, plus `atand(flip(v))` élément
-par élément). **Oracle 129/129** (200 essais chacun) ; **93 tests unitaires** (1 nouveau).
-*Non-vacuité* : remplacer le facteur `180/π` par `90/π` pour la trigo inverse en
-degrés fait diverger les quatre cas tandis que `rad2deg` (facteur propre) reste vert —
-le facteur de conversion est bien portant.
-
-### Ajouté — transpileur : **MATLAB `sind` / `cosd` / `tand`** — trigonométrie en degrés, prouvée contre Octave réel (Phase 2, incrément 44)
-Trigonométrie à argument en **degrés** : `sind`/`cosd`/`tand` convertissent l'argument
-en radians (`× π/180`, scalaire ou par diffusion) puis appliquent `sin`/`cos`/`tan`
-(scalaire ou élément par élément). La logique de conversion est factorisée dans un
-helper `scale_by_const` partagé avec `deg2rad`/`rad2deg`.
-
-- `sind(x)`, `cosd(x)`, `tand(x)` : scalaire ou vecteur (élément par élément).
-
-*Frontière (honnête)* : les cas particuliers MATLAB (zéro exact / `Inf` exact aux
-multiples de 90°) ne sont **pas** répliqués — la définition simple `f(x·π/180)` est
-utilisée (l'oracle tire des angles aléatoires qui n'atteignent jamais ces points).
-
-Quatre cas d'oracle (`sind`/`cosd`/`tand` scalaires, plus `cosd(flip(v))` élément par
-élément). **Oracle 125/125** (200 essais chacun) ; **92 tests unitaires** (1 nouveau).
-*Non-vacuité* : remplacer le facteur `π/180` par `π/90` pour la trigo en degrés fait
-diverger les quatre cas `sind`/`cosd`/`tand` tandis que `deg2rad` (facteur propre)
-reste vert — le facteur de conversion est bien portant.
-
-### Ajouté — transpileur : **MATLAB `circshift(v, k)`** — décalage circulaire, prouvé contre Octave réel (Phase 2, incrément 43)
-Réindexation modulaire : `circshift(v, k)` décale circulairement le vecteur de `k`
-positions (`result[i] = v[(i−k) mod n]`, longueur inchangée), avec `k` arrondi à
-l'entier le plus proche et réduit modulo `n` — donc **tout signe / toute amplitude**
-est valide. Nouveau nœud SIR `Circshift { arr, k }` et helper de prélude déterministe
-`np::circshift` (arithmétique via `rem_euclid`, sûre pour les décalages négatifs).
-
-- `circshift(v, k)` : `v` vecteur, `k` scalaire entier (littéral ou variable) →
-  vecteur décalé (même longueur).
-
-Deux cas d'oracle (`circshift(v, 2)` positif, `circshift(v, -3)` négatif). **Oracle
-121/121** (200 essais chacun) ; **91 tests unitaires** (1 nouveau).
-*Non-vacuité* : inverser le sens du décalage (`i + k` au lieu de `i − k`) fait
-diverger les deux cas `circshift` (positif ET négatif) — le sens de la réindexation
-est bien portant.
-
-### Ajouté — transpileur : **MATLAB `gradient(v)`** — gradient numérique à pas unitaire, prouvé contre Octave réel (Phase 2, incrément 42)
-Différentiation numérique : `gradient(v)` renvoie un vecteur de **même longueur**
-que l'entrée, par différences **centrées** à l'intérieur `(v[i+1] − v[i−1])/2` et
-**unilatérales** aux deux extrémités (`v[1] − v[0]`, `v[n−1] − v[n−2]`), à pas
-unitaire — exactement `gradient` de MATLAB/Octave. Nouveau nœud SIR `Gradient`
-(vecteur→vecteur, comme `diff`) et helper de prélude déterministe `np::gradient`.
-
-- `gradient(v)` : `v` vecteur → vecteur de dérivées numériques (même longueur).
-- Cas limites : `gradient([x]) = [0]` ; `gradient([]) = []`.
-
-Un cas d'oracle (`gradient(v)` sur un vecteur de 7 éléments). **Oracle 119/119**
-(200 essais chacun) ; **90 tests unitaires** (2 nouveaux — routage + structure de la
-formule centrée/unilatérale).
-*Non-vacuité* : diviser la différence centrée par `3` au lieu de `2` fait diverger
-le cas `gradient` (dès l'indice intérieur) tandis que `diff` reste vert — le facteur
-central est bien portant.
-
-### Ajouté — transpileur : **MATLAB `log2` / `asinh` / `acosh` / `atanh`** — log base-2 et trigonométrie hyperbolique inverse, prouvées contre Octave réel (Phase 2, incrément 41)
-Achève le vocabulaire élémentaire : le **logarithme base 2** `log2` et les trois
-inverses hyperboliques **arc-sinus** `asinh` / **arc-cosinus** `acosh` /
-**arc-tangente** `atanh`, chacune une fonction unaire s'appliquant en scalaire **ou**
-élément par élément (même mécanisme éprouvé que `sin`/`asin`), mappée 1:1 sur la
-méthode `f64` correspondante.
-
-- `log2(x)`, `asinh(x)`, `acosh(x)`, `atanh(x)` : scalaire ou vecteur (élément par
-  élément).
-- Domaines : `log2` sur `(0, ∞)` ; `asinh` sur tous les réels ; `acosh` sur `[1, ∞)` ;
-  `atanh` sur `(-1, 1)`.
-
-Cinq cas d'oracle (`log2`, `asinh`, `acosh`, `atanh` scalaires sur des plages dans
-le domaine, plus `atanh(flip(v))` élément par élément). **Oracle 118/118** (200 essais
-chacun) ; **89 tests unitaires** (1 nouveau).
-*Non-vacuité* : router `atanh` vers la méthode `asinh` fait diverger les deux cas
-`atanh` (scalaire ET élément par élément) tandis que `log2`/`asinh`/`acosh` restent
-verts — le mappage nom→méthode est bien portant.
-
-### Ajouté — transpileur : **MATLAB `tan` / `asin` / `acos`** — trigonométrie élémentaire et inverse, prouvées contre Octave réel (Phase 2, incrément 40)
-Complète le vocabulaire trigonométrique : la **tangente** `tan` et les inverses
-**arc-sinus** `asin` / **arc-cosinus** `acos`, chacune une fonction unaire qui
-s'applique en scalaire **ou** élément par élément (même mécanisme éprouvé que
-`sin`/`cos`/`atan`), mappée 1:1 sur la méthode `f64` correspondante.
-
-- `tan(x)`, `asin(x)`, `acos(x)` : scalaire ou vecteur (élément par élément).
-- Domaines : `asin`/`acos` sur `[-1, 1]` ; `tan` fini hors des pôles `±π/2`.
-
-Quatre cas d'oracle (`tan`, `asin`, `acos` scalaires sur des plages dans le
-domaine, plus `asin(flip(v))` élément par élément). **Oracle 113/113** (200 essais
-chacun) ; **88 tests unitaires** (1 nouveau).
-*Non-vacuité* : router `asin` vers la méthode `acos` fait diverger les deux cas
-`asin` (scalaire ET élément par élément) tandis que `acos` et `tan` restent verts —
-le mappage nom→méthode est bien portant.
-
-### Ajouté — transpileur : **MATLAB `norm(v, p)`** — p-norme vectorielle finie générale, prouvée contre Octave réel (Phase 2, incrément 39)
-`norm` accepte désormais une **seconde forme** `norm(v, p)` calculant la p-norme
-vectorielle `(Σ |vᵢ|^p)^{1/p}` pour un `p` **fini** quelconque (`norm(v, 1)` = somme
-des valeurs absolues, `norm(v, 2)` = norme euclidienne, etc.). Composée depuis des
-nœuds déjà vérifiés : `abs` élément par élément, `.^ p` par diffusion, somme à ordre
-fixe, puis puissance scalaire `^(1/p)`. La forme à un argument `norm(v)` (2-norme)
-est inchangée.
-
-- `norm(v, p)` : `v` vecteur, `p` scalaire fini → p-norme.
-- L'inférence de type reconnaît le premier argument de `norm(v, p)` comme un
-  vecteur (comme `polyval`), `p` restant scalaire.
-
-*Frontière (honnête)* : les normes `p = Inf`/`-Inf` et la norme matricielle
-(spectrale) sont des quantités distinctes et restent **refusées**.
-
-Deux cas d'oracle (`norm(v, 1)` littéral, `norm(v, p)` avec `p` fuzzé dans `[1, 5]`).
-**Oracle 109/109** (200 essais chacun) ; **87 tests unitaires** (1 nouveau).
-*Non-vacuité* : remplacer l'exposant `1/p` par `2/p` (numérateur `1`→`2`) fait
-diverger les deux cas p-norme tandis que la 2-norme `norm(v)` (chemin séparé) reste
-verte — l'exposant réciproque est bien portant.
-
-### Ajouté — transpileur : **MATLAB `logspace(a, b, n)`** — constructeur de vecteur logarithmique, prouvé contre Octave réel (Phase 2, incrément 38)
-Frère de `linspace` : `logspace(a, b, n)` produit `n` points espacés
-logarithmiquement, `10^a .. 10^b`. Défini exactement comme `10 .^ linspace(a, b, n)`,
-il hérite donc des **extrémités exactes** de `linspace` (`y(end) = 10^b`) et du
-cas `logspace(a, b, 1) = [10^b]`. Nouveau nœud SIR `Logspace { a, b, n }` (mêmes
-règles de type/scan que `Linspace`) et helper de prélude déterministe `np::logspace`
-bâti sur `np::linspace`.
-
-- `logspace(a, b, n)` : `a`, `b` scalaires, `n` compte entier (littéral ou
-  `length(x)`) → vecteur de `n` valeurs `10^a..10^b`.
-
-*Frontière (honnête)* : le cas particulier MATLAB « si `b == pi`, points entre
-`10^a` et `pi` » n'est **pas** répliqué — la définition simple `10.^linspace` est
-utilisée (l'oracle tire des bornes aléatoires qui ne valent jamais `pi`).
-
-Un cas d'oracle (`logspace(a, b, 6)`). **Oracle 107/107** (200 essais chacun) ;
-**86 tests unitaires** (1 nouveau). *Non-vacuité* : remplacer la base `10` par `2`
-dans `np::logspace` fait diverger le cas `logspace` seul (base erronée) tandis que
-tous les autres restent verts — la base 10 est donc bien portante.
-
-### Ajouté — transpileur : **MATLAB `mod` / `rem` élément par élément sur tableaux** prouvés contre Octave réel (Phase 2, incrément 37)
-`mod` et `rem` deviennent **vectoriels**. Le nouveau helper `lower_modrem`
-assemble `a − b·floor(a/b)` (resp. `a − b·fix(a/b)`) en déléguant chaque étape
-arithmétique à `ew_or_broadcast`, de sorte que la même logique couvre scalaires,
-deux vecteurs, ou une diffusion scalaire↔vecteur (avec `floor`/`fix` appliqué
-élément par élément quand le quotient est un tableau).
-
-- `mod(a, b)` / `rem(a, b)` acceptent désormais des **vecteurs** (élément par
-  élément) et des mélanges scalaire↔vecteur (diffusion), en plus des scalaires.
-
-Deux cas d'oracle (`mod(cumsum(v), 3)`, `rem(cumsum(v), 3)` en diffusion).
-**Oracle 106/106** (200 essais chacun) ; **85 tests unitaires** (1 nouveau).
-*Non-vacuité* : faire utiliser `floor` à `rem` (au lieu de `fix`) fait diverger
-les cas `rem` à dividende négatif (scalaire ET élément par élément) tandis que
-`mod` reste vert — la distinction `floor`/`fix` est donc bien portante.
-
-### Ajouté — transpileur : **MATLAB `deg2rad` / `rad2deg` + `sign` élément par élément** prouvés contre Octave réel (Phase 2, incrément 36)
-Conversions d'angle et `sign` vectoriel :
-
-- **`deg2rad(x)`** / **`rad2deg(x)`** — conversion degré↔radian (multiplication par
-  `π/180` resp. `180/π`), scalaire ou par diffusion sur un vecteur (réutilise
-  `ScalarBin`/`ScalarBroadcast`, aucune nouvelle primitive).
-- **`sign(v)`** — forme **élément par élément** de `sign` (nouveau nœud
-  `ArraySign`, `-1/0/+1` par élément) ; `sign(x)` scalaire reste le nœud `Sign`.
-  Dispatch non ambigu sur le type de l'argument (unaire).
-
-Trois cas d'oracle : `deg2rad(x)` (scalaire), `rad2deg(cumsum(v))` (diffusion),
-`sign(cumsum(v))` (élément par élément). **Oracle 104/104** (200 essais chacun) ;
-**84 tests unitaires** (1 nouveau ; un ancien test mis à jour car `sign` accepte
-désormais un vecteur). *Non-vacuité* : inverser les branches `>`/`<` de
-`ArraySign` fait diverger le cas (|Δ|=2, ROUGE).
-
-### Ajouté — transpileur : **MATLAB `atan2` / `hypot` / `max` / `min` élément par élément sur tableaux** prouvés contre Octave réel (Phase 2, incrément 35)
-Les fonctions math à deux arguments deviennent **vectorielles** : elles se
-dispatchent désormais sur le type des opérandes (scalaire∘scalaire → scalaire,
-tableau∘tableau → élément par élément, mélange scalaire↔tableau → diffusion),
-réutilisant les nœuds `EwBinFn`/`BroadcastFn` (créés pour `.^`). Le nouveau
-helper `lower_math2` centralise cette logique pour `atan2`/`hypot`/`max`/`min`.
-
-- `atan2(y, x)`, `hypot(a, b)`, `max(a, b)`, `min(a, b)` acceptent maintenant des
-  **vecteurs** (élément par élément) et des mélanges scalaire↔vecteur (diffusion),
-  en plus des scalaires ; l'ordre des opérandes est préservé pour `atan2`.
-
-Trois cas d'oracle : `atan2(cumsum(v), flip(v))` (élément par élément),
-`hypot(cumsum(v), 2)` (diffusion), `max(…)−min(…)` sur tableaux — les opérandes
-étant construits par des builtins renvoyant des tableaux, l'inférence coule
-naturellement (sans code mort). **Oracle 101/101** (200 essais chacun) ; **83
-tests unitaires** (1 nouveau ; un ancien test mis à jour car `hypot` accepte
-désormais un vecteur). *Non-vacuité* : inverser l'ordre des opérandes élément par
-élément fait diverger `atan2` (ROUGE) tandis que `max`/`min`, commutatifs,
-restent verts.
-
-### Ajouté — transpileur : **MATLAB `expm1` / `log1p`** prouvés contre Octave réel (Phase 2, incrément 34)
-Deux fonctions math **précises près de zéro**, mappées sur les méthodes IEEE
-exactes `f64::exp_m1` / `f64::ln_1p` et intégrées au motif `MATH_FNS`
-(scalaire *et* élément par élément) :
-
-- **`expm1(x)`** = `exp(x) − 1` sans perte de précision pour `x` proche de 0.
-- **`log1p(x)`** = `ln(1 + x)` sans perte de précision pour `x` proche de 0.
-
-Deux cas d'oracle (`expm1` scalaire ; `log1p` élément par élément). **Oracle
-98/98** (200 essais chacun) ; **82 tests unitaires** (1 nouveau). *Non-vacuité* :
-mapper `expm1` sur `exp` au lieu de `exp_m1` décale le résultat de 1 et passe
-l'oracle au ROUGE.
-
-### Ajouté — transpileur : **MATLAB `conv` + `polyval`** prouvés contre Octave réel (Phase 2, incrément 33)
-Deux classiques du traitement du signal / numérique, câblés via des helpers
-déterministes du prélude :
-
-- **`conv(a, b)`** — convolution linéaire complète (longueur `len(a)+len(b)−1`,
-  ordre d'accumulation fixe donc bit-reproductible) ; les **deux** opérandes sont
-  inférés vecteurs.
-- **`polyval(p, x)`** — évaluation de Horner du polynôme de coefficients `p`
-  (degré décroissant) au point scalaire `x` ; `p` est inféré vecteur, `x` reste
-  scalaire.
-
-Deux cas d'oracle. **Oracle 96/96** (200 essais chacun) ; **81 tests unitaires**
-(1 nouveau). *Non-vacuité* : remplacer la récurrence de Horner `acc·x + p[i]` par
-`acc + x·p[i]` fait diverger `polyval` et passe l'oracle au ROUGE.
-
-### Ajouté — transpileur : **MATLAB `kron` + `cumtrapz`** prouvés contre Octave réel (Phase 2, incrément 32)
-Deux opérations vectorielles supplémentaires, câblées via des helpers
-déterministes du prélude :
-
-- **`kron(a, b)`** — produit de Kronecker de deux vecteurs (`out[i·n+j] =
-  a[i]·b[j]`, longueur `len(a)·len(b)`) ; les **deux** opérandes sont inférés
-  vecteurs.
-- **`cumtrapz(v)`** — intégrale trapézoïdale **cumulée** à pas unité (premier
-  élément `0`, même longueur).
-
-Deux cas d'oracle. **Oracle 94/94** (200 essais chacun) ; **80 tests unitaires**
-(1 nouveau). *Non-vacuité* : échanger l'ordre d'imbrication des boucles de `kron`
-réordonne la sortie et passe l'oracle au ROUGE.
-
-### Ajouté — transpileur : **MATLAB `diag` (surchargé) + `trapz`** prouvés contre Octave réel (Phase 2, incrément 31)
-Deux ajouts, dont la **surcharge `diag`** de MATLAB, désambiguïsée par le **type
-de l'opérande** (jamais deviné) :
-
-- **`diag(A)`** où `A` est une matrice → **extraction** de la diagonale (vecteur ;
-  nouveau nœud `DiagExtract`).
-- **`diag(v)`** où `v` est un vecteur → **construction** d'une matrice diagonale
-  (réutilise le nœud `Diag` existant, déjà prouvé côté Python via `np.diag`).
-- **`trapz(v)`** — intégration trapézoïdale à pas unité (`Σ ½·(v[i−1]+v[i])`).
-
-Trois cas d'oracle, exerçant les deux voies de `diag` naturellement :
-`diag(A' * A)` (extraction — diagonale de la matrice de Gram) et
-`diag(cumsum(v))` (construction), plus `trapz(v)`. **Oracle 92/92** (200 essais
-chacun) ; **79 tests unitaires** (2 nouveaux). *Non-vacuité* : retirer le facteur
-`½` de `trapz` double le résultat et passe l'oracle au ROUGE.
-
-### Ajouté — transpileur : **MATLAB `trace(A)` + `cross(a, b)`** prouvés contre Octave réel (Phase 2, incrément 30)
-Deux opérations classiques, câblées via des helpers déterministes du prélude :
-
-- **`trace(A)`** — somme de la diagonale d'une matrice (scalaire) ; `A` inférée
-  matrice depuis l'intrinsèque.
-- **`cross(a, b)`** — produit vectoriel de deux vecteurs 3D ; les **deux**
-  opérandes sont inférés vecteurs.
-
-Deux cas d'oracle. **Oracle 89/89** (200 essais chacun) ; **77 tests unitaires**
-(1 nouveau). *Non-vacuité* : inverser un signe dans une composante de `cross`
-fait diverger le cas (|Δ|≈1) et passe l'oracle au ROUGE.
-
-### Ajouté — transpileur : **MATLAB opérateur de transposition `A'` / `A.'`** prouvé contre Octave réel (Phase 2, incrément 29)
-Ajoute l'opérateur postfixe de **transposition** — omniprésent en MATLAB — routé
-vers le nœud `Transpose` de la SIR (déjà prouvé côté Python via `A.T`).
-
-- **`A'`** (transposée conjuguée) et **`A.'`** (transposée simple) — identiques
-  pour les matrices réelles. Le lexer reconnaît `'` (postfixe, jamais une chaîne
-  puisque le sous-ensemble n'a pas de chaînes de caractères), le parser
-  l'applique en postfixe (liant plus fort que `^`), le lowering exige une matrice.
-- `A'` **prouve** que son opérande est une matrice (nouvelle preuve-matrice),
-  d'où l'inférence sans indice.
-
-Deux cas d'oracle : `B = A'` (transposition simple) et `C = A' * A` (matrice de
-Gram, composant transposition et produit matriciel). **Oracle 87/87** (200 essais
-chacun) ; **76 tests unitaires** (1 nouveau). *Non-vacuité* : parser `A'` comme
-l'identité (sans transposer) fait perdre à `A` son type matrice et casse les deux
-cas (ROUGE).
-
-### Ajouté — transpileur : **MATLAB produit matriciel `A*b` / `A*B`** routé vers `scirust-solvers`, prouvé contre Octave réel (Phase 2, incrément 28)
-Complète l'algèbre linéaire MATLAB : l'opérateur `*` (multiplication **matricielle**
-en MATLAB, distincte de l'élément-par-élément `.*`) se route vers les kernels
-vérifiés `matvec` / `matmul` de `scirust-solvers` quand l'opérande de gauche est
-une **matrice** (inférée depuis `det`/`inv`/`eig`/`\`).
-
-- **`A * x`** (matrice × vecteur) → `matvec`.
-- **`A * B`** (matrice × matrice) → `matmul` (sortie matrice).
-- Sinon, `*` reste la multiplication scalaire ou la diffusion scalaire↔tableau ;
-  `A * b` avec deux tableaux reste refusé (pointant vers `.*`), et les formes
-  matricielles non gérées (scalaire×matrice, `matrice/`) sont refusées clairement.
-
-Désambiguïsation **sûre** : le routage n'a lieu que si l'opérande matrice est
-déjà typé matrice par une autre opération (jamais deviné). Les cas d'oracle
-l'exercent naturellement, sans code mort : **résidu `r = A*(A\b) ≈ b`** (matvec)
-et **`C = A*inv(A) ≈ I`** (matmul). **Oracle 85/85** (200 essais chacun) ; **75
-tests unitaires** (1 nouveau). *Non-vacuité* : transposer la matrice dans
-`matvec` fait diverger à la fois le résidu MATLAB et le cas `A @ b` Python
-(émetteur partagé) et passe l'oracle au ROUGE.
-
-### Ajouté — transpileur : **MATLAB `linspace(a, b, n)`** — constructeur de vecteur, prouvé contre Octave réel (Phase 2, incrément 27)
-Première **construction de tableau** du front-end MATLAB (jusqu'ici les tableaux
-venaient des paramètres ou de transformations). `linspace(a, b, n)` produit `n`
-points régulièrement espacés de `a` à `b` inclus, avec **extrémités exactes**
-(comme MATLAB, qui force `y(end) = b`) et le cas `linspace(a, b, 1) = [b]`.
-
-- `a`, `b` sont des scalaires ; `n` est un **entier** (littéral ou expression
-  entière comme `length(x)`), abaissé via le chemin d'index entier existant.
-- Câblé via un helper déterministe du prélude.
-
-Un cas d'oracle (longueur fixe 6, `a`/`b` tirés au sort). **Oracle 83/83** (200
-essais chacun) ; **74 tests unitaires** (1 nouveau). *Non-vacuité* : utiliser le
-pas `(b−a)/n` au lieu de `(b−a)/(n−1)` fait diverger les points intérieurs et
-passe l'oracle au ROUGE (200/200, |Δ|≈0,13).
-
-### Ajouté — transpileur : **MATLAB `var` / `std` / `median`** — statistiques de réduction, prouvées contre Octave réel (Phase 2, incrément 26)
-Trois réductions statistiques (vecteur → scalaire), alignées exactement sur la
-convention d'Octave (vérifiée empiriquement avant câblage) :
-
-- **`var(v)`** — variance **d'échantillon**, normalisée par **`N−1`** (comme la
-  valeur par défaut de MATLAB, pas `N`) ; `0` pour `N < 2`.
-- **`std(v)`** — écart-type d'échantillon (`√var`).
-- **`median(v)`** — médiane (valeur du milieu ; moyenne des deux valeurs
-  centrales pour une longueur paire).
-
-Câblées via des helpers déterministes du prélude ; l'argument est inféré vecteur
-(ajoutées à `is_reduction`). Trois cas d'oracle (var+std, médiane paire, médiane
-impaire). **Oracle 82/82** (200 essais chacun) ; **73 tests unitaires** (1
-nouveau). *Non-vacuité* : normaliser `var` par `N` au lieu de `N−1` fait diverger
-le cas (200/200, |Δ|≈0,89) et passe l'oracle au ROUGE.
-
-### Ajouté — transpileur : **MATLAB `cumprod` / `cummax` / `cummin` / `flip`** — fonctions vecteur → vecteur, prouvées contre Octave réel (Phase 2, incrément 25)
-Quatre fonctions natives supplémentaires (un vecteur en entrée, un vecteur en
-sortie), sur le même modèle que `cumsum`/`diff`/`sort` (helpers déterministes du
-prélude, argument inféré vecteur) :
-
-- **`cumprod(v)`** — produit cumulé en ordre gauche→droite fixe.
-- **`cummax(v)`** / **`cummin(v)`** — maximum / minimum courant.
-- **`flip(v)`** — vecteur inversé.
-
-Quatre cas d'oracle. **Oracle 79/79** (200 essais chacun) ; **72 tests
-unitaires** (le test des builtins vectoriels couvre désormais les sept fonctions).
-*Non-vacuité* : remplacer `>` par `<` dans `cummax` fait diverger le cas
-(200/200, |Δ|=∞) et passe l'oracle au ROUGE.
-
-### Ajouté — transpileur : **MATLAB `cumsum` / `diff` / `sort`** — fonctions vecteur → vecteur, prouvées contre Octave réel (Phase 2, incrément 24)
-Trois fonctions natives non ambiguës (un vecteur en entrée, un vecteur en
-sortie), câblées via de nouveaux helpers déterministes du prélude :
-
-- **`cumsum(v)`** — somme cumulée en ordre **gauche→droite fixe** (donc
-  bit-reproductible), même longueur.
-- **`diff(v)`** — différences consécutives `v[i+1] − v[i]` (longueur `n−1`).
-- **`sort(v)`** — tri **croissant** (`sort` de MATLAB).
-
-L'argument est inféré comme un vecteur à partir de l'intrinsèque. Trois cas
-d'oracle. **Oracle 76/76** (200 essais chacun) ; **72 tests unitaires** (1
-nouveau ; le helper `sig_of` des tests cible désormais le `pub fn` de premier
-niveau pour ne pas confondre une fonction utilisateur avec un homonyme du
-prélude, p. ex. `np::cumsum`). *Non-vacuité* : inverser l'ordre de soustraction
-de `diff` (`v[i−1] − v[i]`) nie chaque élément et passe l'oracle au ROUGE
-(200/200, |Δ|≈2,4).
-
-### Ajouté — transpileur : **MATLAB puissance élément par élément `.^` sur tableaux** prouvée contre Octave réel (Phase 2, incrément 23)
-Première opération **vectorielle** à deux arguments — l'idiome au cœur de MATLAB.
-Ajoute une infrastructure réutilisable (`SirExpr::EwBinFn` pour tableau∘tableau,
-`SirExpr::BroadcastFn` pour scalaire↔tableau, variante `MathFn2::Powf`) qui
-resservira aux formes élément-par-élément de `max`/`min`/`atan2`/`hypot`.
-
-- **`v .^ w`** (deux tableaux) → `np::ew2(v, w, |x, y| x.powf(y))`.
-- **`v .^ 2`** (base tableau, exposant scalaire) → `np::map1(v, |x| x.powf(2))`.
-- **`2 .^ v`** (base scalaire, exposant tableau) → `np::map1(v, |x| (2).powf(x))`
-  — l'ordre des opérandes est préservé (`.^` n'est pas commutatif).
-- **`^` sur un tableau** (puissance matricielle `mpower`) reste **refusé** avec un
-  diagnostic pointant vers `.^`.
-
-`f64::powf` reproduit `.^` d'Octave (vérifié, y compris exposant entier). Trois
-cas d'oracle. **Oracle 73/73** (200 essais chacun) ; **71 tests unitaires** (2
-nouveaux). *Non-vacuité* : inverser l'ordre de diffusion de `2 .^ v` (calculer
-`v .^ 2`) fait diverger le cas (200/200, |Δ|≈0,83) et passe l'oracle au ROUGE.
-
-### Ajouté — transpileur : **MATLAB `max(a,b)` / `min(a,b)` (2-arg) + `power(a,b)`** prouvés contre Octave réel (Phase 2, incrément 22)
-Réutilise le nœud math binaire (`MathFn2`) pour les formes à deux arguments de
-`max`/`min`, distinguées de la **réduction** à un argument par le **nombre
-d'arguments** :
-
-- **`max(a, b)`** / **`min(a, b)`** (deux scalaires) → `f64::max` / `f64::min`.
-  La forme à un argument reste la réduction sur un vecteur ; l'inférence de type
-  ne marque plus les opérandes de la forme à deux arguments comme des tableaux
-  (garde `args.len() == 1` sur la preuve de réduction).
-- **`power(a, b)`** → forme fonctionnelle de `a ^ b` (partage l'abaissement de
-  `^` : un exposant entier se replie sur `powi`).
-
-Opérandes scalaires. Deux cas d'oracle. **Oracle 70/70** (200 essais chacun) ;
-**69 tests unitaires** (2 nouveaux). *Non-vacuité* : échanger `max`/`min` dans la
-forme à deux arguments inverse le signe de l'étendue `max−min` et passe l'oracle
-au ROUGE (200/200, |Δ|≈6,2).
-
-### Ajouté — transpileur : **MATLAB `atan2` / `hypot`** — fonctions math à deux arguments, prouvées contre Octave réel (Phase 2, incrément 21)
-Ajoute à la SIR un **nœud math scalaire binaire** réutilisable
-(`SirExpr::ScalarBinFn` + `MathFn2`), émis en `(l).méthode(r)`, et câble les deux
-premières fonctions à deux arguments côté MATLAB :
-
-- **`atan2(y, x)`** — arctangente à quatre quadrants (`f64::atan2`), l'ordre des
-  arguments est significatif.
-- **`hypot(a, b)`** — longueur euclidienne `√(a²+b²)` sans dépassement
+`tolerance_capability_ci`). Global fuzz: **98,858 checks / 0 errors**.
+
+### Added — transpiler: **MATLAB `range(v)`** — statistical range, proven against real Octave (Phase 2, increment 49)
+`range(v) = max(v) − min(v)` (sample range), composed from the already-verified
+reduction `Max`/`Min` nodes — no new SIR node, std-only. Type
+inference recognizes `range` as a reduction (vector argument).
+
+- `range(v)`: vector → scalar (max−min difference).
+
+One oracle case (`range(v)` on a 7-element vector). **Oracle 140/140** (200
+trials each); **97 unit tests** (1 new).
+*Non-vacuity*: replacing the subtraction with an addition (`max+min` instead of
+`max−min`) makes the `range` case diverge — the composition is indeed load-bearing.
+
+### Added — transpiler: **MATLAB `fftshift` / `ifftshift`** — spectrum centering, proven against real Octave (Phase 2, increment 48)
+FFT companions: `fftshift(v)` brings the zero-frequency component to the
+center (swapping the two halves = `circshift` by `⌊n/2⌋`) and `ifftshift(v)` does the inverse
+(`circshift` by `⌈n/2⌉`) — **exact** inverses for even **and
+odd** lengths. New SIR nodes `Fftshift`/`Ifftshift` (vector→vector) and deterministic
+preamble helpers built on `np::circshift`, reusing the already-proven modular
+reindexing.
+
+- `fftshift(v)`, `ifftshift(v)`: real vector → vector (same length).
+- Apply naturally to a real magnitude spectrum: `fftshift(abs(fft(x)))`.
+
+Three oracle cases (`fftshift`/`ifftshift` in **odd** length to distinguish
+`⌊·⌋`/`⌈·⌉`, plus `fftshift(abs(fft(x)))` — routed FFT + complex abs + shift).
+**Oracle 139/139** (200 trials each); **96 unit tests** (1 new).
+*Non-vacuity*: making `ifftshift` use `⌊n/2⌋` (instead of `⌈n/2⌉`) makes
+the odd-length `ifftshift` case diverge while `fftshift` stays green — the
+floor/ceiling distinction is indeed load-bearing.
+
+### Added — transpiler: **MATLAB `fft` / `ifft`** routed to `scirust-signal`, proven against real Octave (Phase 2, increment 47)
+First **signal-processing routing** on the MATLAB side: `fft(x)` (complex DFT
+of a real vector), `ifft(c)` (inverse DFT) and `abs(fft(x))` (magnitude spectrum)
+emit the verified FFT kernel of `scirust-signal` rather than re-deriving it —
+reusing exactly the complex machinery (`Fft`/`Ifft`/`ComplexArray`/`ComplexAbs`)
+already proven on the Python side.
+
+- `fft(x)`: real vector → complex vector (full N-point spectrum).
+- `ifft(c)`: complex vector → complex vector (inverse DFT, `1/N`).
+- `abs(z)` on a complex spectrum → real array of magnitudes (routed
+  separately from the element-wise real `abs`).
+
+The oracle harness now serializes Octave's complex results as
+interleaved `(re, im)` to align with the Rust `ComplexArray` output (an
+`ifft(fft(x))` that Octave reduces to real is padded with zero imaginary
+parts). Three oracle cases proven against real Octave (compiled via cargo with
+`scirust-signal`). **Oracle 136/136** (200 trials each); **95 unit tests**
+(1 new).
+*Non-vacuity*: routing `fft` to `rfft` (half-spectrum) makes the three FFT
+cases diverge (lengths 10/16 and 5/8, round-trip crash) — the `fft` routing is
+indeed load-bearing.
+
+### Added — transpiler: **MATLAB `sec` / `csc` / `cot`** — reciprocal trigonometry, proven against real Octave (Phase 2, increment 46)
+Completes the trigonometry: the reciprocal functions `sec = 1/cos`, `csc = 1/sin`,
+`cot = 1/tan`, each applying the base trig function (scalar or element by
+element) then taking the inverse via the new `reciprocal` helper (`1.0 / e`,
+scalar or broadcast).
+
+- `sec(x)`, `csc(x)`, `cot(x)`: scalar or vector (element-wise).
+
+Four oracle cases (scalar `sec`/`csc`/`cot` on ranges away from poles, plus
+element-wise `sec(flip(v))`). **Oracle 133/133** (200 trials each);
+**94 unit tests** (1 new).
+*Non-vacuity*: routing `sec` to `sin` (instead of `cos`) makes the two `sec`
+cases diverge while `csc`/`cot` stay green — the reciprocal mapping is indeed
+load-bearing.
+
+### Added — transpiler: **MATLAB `asind` / `acosd` / `atand`** — inverse trigonometry in degrees, proven against real Octave (Phase 2, increment 45)
+Completes the degree-based trig family: `asind`/`acosd`/`atand` apply
+the inverse `asin`/`acos`/`atan` (result in radians, scalar or element-wise)
+then convert the angle to **degrees** (`× 180/π`, via the `scale_by_const`
+helper shared with `rad2deg`).
+
+- `asind(x)`, `acosd(x)`, `atand(x)`: scalar or vector (element-wise).
+- Domains: `asind`/`acosd` on `[-1, 1]`; `atand` on all reals.
+
+Four oracle cases (scalar `asind`/`acosd`/`atand`, plus element-wise
+`atand(flip(v))`). **Oracle 129/129** (200 trials each); **93 unit tests** (1 new).
+*Non-vacuity*: replacing the `180/π` factor by `90/π` for the inverse degree
+trig makes the four cases diverge while `rad2deg` (proper factor) stays green —
+the conversion factor is indeed load-bearing.
+
+### Added — transpiler: **MATLAB `sind` / `cosd` / `tand`** — degree-based trigonometry, proven against real Octave (Phase 2, increment 44)
+Trigonometry with a **degree** argument: `sind`/`cosd`/`tand` convert the argument
+to radians (`× π/180`, scalar or by broadcast) then apply `sin`/`cos`/`tan`
+(scalar or element-wise). The conversion logic is factored into a
+`scale_by_const` helper shared with `deg2rad`/`rad2deg`.
+
+- `sind(x)`, `cosd(x)`, `tand(x)`: scalar or vector (element-wise).
+
+*Honest boundary*: the MATLAB special cases (exact zero / exact `Inf` at
+multiples of 90°) are **not** replicated — the simple definition `f(x·π/180)` is
+used (the oracle draws random angles that never reach those points).
+
+Four oracle cases (scalar `sind`/`cosd`/`tand`, plus element-wise `cosd(flip(v))`).
+**Oracle 125/125** (200 trials each); **92 unit tests** (1 new).
+*Non-vacuity*: replacing the `π/180` factor by `π/90` for degree trig makes
+the four `sind`/`cosd`/`tand` cases diverge while `deg2rad` (proper factor)
+stays green — the conversion factor is indeed load-bearing.
+
+### Added — transpiler: **MATLAB `circshift(v, k)`** — circular shift, proven against real Octave (Phase 2, increment 43)
+Modular reindexing: `circshift(v, k)` circularly shifts the vector by `k`
+positions (`result[i] = v[(i−k) mod n]`, length unchanged), with `k` rounded to
+the nearest integer and reduced modulo `n` — so **any sign / any magnitude**
+is valid. New SIR node `Circshift { arr, k }` and deterministic preamble helper
+`np::circshift` (arithmetic via `rem_euclid`, safe for negative shifts).
+
+- `circshift(v, k)`: `v` vector, `k` integer scalar (literal or variable) →
+  shifted vector (same length).
+
+Two oracle cases (positive `circshift(v, 2)`, negative `circshift(v, -3)`). **Oracle
+121/121** (200 trials each); **91 unit tests** (1 new).
+*Non-vacuity*: reversing the shift direction (`i + k` instead of `i − k`) makes
+the two `circshift` cases diverge (positive AND negative) — the reindexing
+direction is indeed load-bearing.
+
+### Added — transpiler: **MATLAB `gradient(v)`** — numerical gradient with unit spacing, proven against real Octave (Phase 2, increment 42)
+Numerical differentiation: `gradient(v)` returns a vector of **the same length**
+as the input, by **centered** differences in the interior `(v[i+1] − v[i−1])/2`
+and **one-sided** differences at the two ends (`v[1] − v[0]`, `v[n−1] − v[n−2]`),
+with unit spacing — exactly MATLAB/Octave's `gradient`. New SIR node `Gradient`
+(vector→vector, like `diff`) and deterministic preamble helper `np::gradient`.
+
+- `gradient(v)`: `v` vector → vector of numerical derivatives (same length).
+- Edge cases: `gradient([x]) = [0]`; `gradient([]) = []`.
+
+One oracle case (`gradient(v)` on a 7-element vector). **Oracle 119/119**
+(200 trials each); **90 unit tests** (2 new — routing + structure of the
+centered/one-sided formula).
+*Non-vacuity*: dividing the centered difference by `3` instead of `2` makes
+the `gradient` case diverge (from the first interior index) while `diff` stays
+green — the central factor is indeed load-bearing.
+
+### Added — transpiler: **MATLAB `log2` / `asinh` / `acosh` / `atanh`** — base-2 log and inverse hyperbolic trigonometry, proven against real Octave (Phase 2, increment 41)
+Completes the elementary vocabulary: the **base-2 logarithm** `log2` and the
+three hyperbolic inverses **arc-sine** `asinh` / **arc-cosine** `acosh` /
+**arc-tangent** `atanh`, each a unary function applying in scalar **or**
+element-wise form (same proven mechanism as `sin`/`asin`), mapped 1:1 onto the
+corresponding `f64` method.
+
+- `log2(x)`, `asinh(x)`, `acosh(x)`, `atanh(x)`: scalar or vector (element-wise).
+- Domains: `log2` on `(0, ∞)`; `asinh` on all reals; `acosh` on `[1, ∞)`;
+  `atanh` on `(-1, 1)`.
+
+Five oracle cases (scalar `log2`, `asinh`, `acosh`, `atanh` on ranges within
+the domain, plus element-wise `atanh(flip(v))`). **Oracle 118/118** (200 trials
+each); **89 unit tests** (1 new).
+*Non-vacuity*: routing `atanh` to the `asinh` method makes the two `atanh`
+cases diverge (scalar AND element-wise) while `log2`/`asinh`/`acosh` stay
+green — the name→method mapping is indeed load-bearing.
+
+### Added — transpiler: **MATLAB `tan` / `asin` / `acos`** — elementary and inverse trigonometry, proven against real Octave (Phase 2, increment 40)
+Completes the trig vocabulary: the **tangent** `tan` and the inverses
+**arc-sine** `asin` / **arc-cosine** `acos`, each a unary function that
+applies in scalar **or** element-wise form (same proven mechanism as
+`sin`/`cos`/`atan`), mapped 1:1 onto the corresponding `f64` method.
+
+- `tan(x)`, `asin(x)`, `acos(x)`: scalar or vector (element-wise).
+- Domains: `asin`/`acos` on `[-1, 1]`; `tan` finite away from the poles `±π/2`.
+
+Four oracle cases (scalar `tan`, `asin`, `acos` on ranges within the
+domain, plus element-wise `asin(flip(v))`). **Oracle 113/113** (200 trials
+each); **88 unit tests** (1 new).
+*Non-vacuity*: routing `asin` to the `acos` method makes the two `asin` cases
+diverge (scalar AND element-wise) while `acos` and `tan` stay green —
+the name→method mapping is indeed load-bearing.
+
+### Added — transpiler: **MATLAB `norm(v, p)`** — general finite vector p-norm, proven against real Octave (Phase 2, increment 39)
+`norm` now accepts a **second form** `norm(v, p)` computing the vector p-norm
+`(Σ |vᵢ|^p)^{1/p}` for any **finite** `p` (`norm(v, 1)` = sum of absolute
+values, `norm(v, 2)` = Euclidean norm, etc.). Composed from already-verified
+nodes: element-wise `abs`, broadcast `.^ p`, fixed-order sum, then scalar power
+`^(1/p)`. The one-argument form `norm(v)` (2-norm) is unchanged.
+
+- `norm(v, p)`: `v` vector, `p` finite scalar → p-norm.
+- Type inference recognizes the first argument of `norm(v, p)` as a
+  vector (like `polyval`), with `p` remaining scalar.
+
+*Honest boundary*: the norms `p = Inf`/`-Inf` and the matrix (spectral) norm
+are distinct quantities and remain **rejected**.
+
+Two oracle cases (literal `norm(v, 1)`, `norm(v, p)` with `p` fuzzed in `[1, 5]`).
+**Oracle 109/109** (200 trials each); **87 unit tests** (1 new).
+*Non-vacuity*: replacing the exponent `1/p` by `2/p` (numerator `1`→`2`) makes
+the two p-norm cases diverge while the 2-norm `norm(v)` (separate path) stays
+green — the reciprocal exponent is indeed load-bearing.
+
+### Added — transpiler: **MATLAB `logspace(a, b, n)`** — logarithmic vector constructor, proven against real Octave (Phase 2, increment 38)
+Sibling of `linspace`: `logspace(a, b, n)` produces `n` logarithmically spaced
+points, `10^a .. 10^b`. Defined exactly as `10 .^ linspace(a, b, n)`,
+it thus inherits `linspace`'s **exact endpoints** (`y(end) = 10^b`) and the
+`logspace(a, b, 1) = [10^b]` case. New SIR node `Logspace { a, b, n }` (same
+type/scan rules as `Linspace`) and deterministic preamble helper `np::logspace`
+built on `np::linspace`.
+
+- `logspace(a, b, n)`: `a`, `b` scalars, `n` integer count (literal or
+  `length(x)`) → vector of `n` values `10^a..10^b`.
+
+*Honest boundary*: the MATLAB special case "if `b == pi`, points between
+`10^a` and `pi`" is **not** replicated — the simple `10.^linspace` definition
+is used (the oracle draws random bounds that never equal `pi`).
+
+One oracle case (`logspace(a, b, 6)`). **Oracle 107/107** (200 trials each);
+**86 unit tests** (1 new). *Non-vacuity*: replacing the base `10` by `2`
+in `np::logspace` makes the `logspace` case diverge alone (wrong base) while
+all the others stay green — base 10 is therefore indeed load-bearing.
+
+### Added — transpiler: **MATLAB `mod` / `rem` element-wise on arrays** proven against real Octave (Phase 2, increment 37)
+`mod` and `rem` become **vectorized**. The new `lower_modrem` helper
+assembles `a − b·floor(a/b)` (resp. `a − b·fix(a/b)`) by delegating each
+arithmetic step to `ew_or_broadcast`, so that the same logic covers scalars,
+two vectors, or a scalar↔vector broadcast (with `floor`/`fix` applied
+element-wise when the quotient is an array).
+
+- `mod(a, b)` / `rem(a, b)` now accept **vectors** (element-wise)
+  and scalar↔vector mixtures (broadcast), in addition to scalars.
+
+Two oracle cases (`mod(cumsum(v), 3)`, `rem(cumsum(v), 3)` in broadcast).
+**Oracle 106/106** (200 trials each); **85 unit tests** (1 new).
+*Non-vacuity*: making `rem` use `floor` (instead of `fix`) makes
+the `rem` cases with negative dividend diverge (scalar AND element-wise) while
+`mod` stays green — the `floor`/`fix` distinction is therefore indeed
+load-bearing.
+
+### Added — transpiler: **MATLAB `deg2rad` / `rad2deg` + element-wise `sign`** proven against real Octave (Phase 2, increment 36)
+Angle conversions and vector `sign`:
+
+- **`deg2rad(x)`** / **`rad2deg(x)`** — degree↔radian conversion (multiplication
+  by `π/180` resp. `180/π`), scalar or broadcast over a vector (reuses
+  `ScalarBin`/`ScalarBroadcast`, no new primitive).
+- **`sign(v)`** — **element-wise** form of `sign` (new `ArraySign` node,
+  `-1/0/+1` per element); scalar `sign(x)` remains the `Sign` node.
+  Unambiguous dispatch on the argument type (unary).
+
+Three oracle cases: `deg2rad(x)` (scalar), `rad2deg(cumsum(v))` (broadcast),
+`sign(cumsum(v))` (element-wise). **Oracle 104/104** (200 trials each);
+**84 unit tests** (1 new; an old test updated because `sign` now accepts
+a vector). *Non-vacuity*: swapping the `>`/`<` branches of `ArraySign` makes
+the case diverge (|Δ|=2, RED).
+
+### Added — transpiler: **MATLAB `atan2` / `hypot` / `max` / `min` element-wise on arrays** proven against real Octave (Phase 2, increment 35)
+The two-argument math functions become **vectorized**: they now dispatch on
+the operand types (scalar∘scalar → scalar, array∘array → element-wise,
+scalar↔array mixture → broadcast), reusing the `EwBinFn`/`BroadcastFn` nodes
+(created for `.^`). The new helper `lower_math2` centralizes this logic for
+`atan2`/`hypot`/`max`/`min`.
+
+- `atan2(y, x)`, `hypot(a, b)`, `max(a, b)`, `min(a, b)` now accept
+  **vectors** (element-wise) and scalar↔vector mixtures (broadcast),
+  in addition to scalars; the operand order is preserved for `atan2`.
+
+Three oracle cases: `atan2(cumsum(v), flip(v))` (element-wise),
+`hypot(cumsum(v), 2)` (broadcast), `max(…)−min(…)` on arrays — since the
+operands are built by builtins returning arrays, inference flows naturally
+(no dead code). **Oracle 101/101** (200 trials each); **83 unit tests**
+(1 new; an old test updated because `hypot` now accepts a vector).
+*Non-vacuity*: swapping the element-wise operand order makes `atan2` diverge
+(RED) while `max`/`min`, being commutative, stay green.
+
+### Added — transpiler: **MATLAB `expm1` / `log1p`** proven against real Octave (Phase 2, increment 34)
+Two math functions **accurate near zero**, mapped onto the exact IEEE methods
+`f64::exp_m1` / `f64::ln_1p` and integrated into the `MATH_FNS` pattern
+(scalar *and* element-wise):
+
+- **`expm1(x)`** = `exp(x) − 1` without loss of precision for `x` near 0.
+- **`log1p(x)`** = `ln(1 + x)` without loss of precision for `x` near 0.
+
+Two oracle cases (scalar `expm1`; element-wise `log1p`). **Oracle
+98/98** (200 trials each); **82 unit tests** (1 new). *Non-vacuity*:
+mapping `expm1` to `exp` instead of `exp_m1` shifts the result by 1 and turns
+the oracle RED.
+
+### Added — transpiler: **MATLAB `conv` + `polyval`** proven against real Octave (Phase 2, increment 33)
+Two signal-processing / numerical classics, wired via deterministic preamble
+helpers:
+
+- **`conv(a, b)`** — full linear convolution (length `len(a)+len(b)−1`,
+  fixed accumulation order hence bit-reproducible); **both** operands are
+  inferred as vectors.
+- **`polyval(p, x)`** — Horner evaluation of the polynomial with coefficients
+  `p` (descending degree) at the scalar point `x`; `p` is inferred as a vector,
+  `x` remains scalar.
+
+Two oracle cases. **Oracle 96/96** (200 trials each); **81 unit tests**
+(1 new). *Non-vacuity*: replacing the Horner recurrence `acc·x + p[i]` by
+`acc + x·p[i]` makes `polyval` diverge and turns the oracle RED.
+
+### Added — transpiler: **MATLAB `kron` + `cumtrapz`** proven against real Octave (Phase 2, increment 32)
+Two additional vector operations, wired via deterministic preamble helpers:
+
+- **`kron(a, b)`** — Kronecker product of two vectors (`out[i·n+j] =
+  a[i]·b[j]`, length `len(a)·len(b)`); **both** operands are inferred
+  as vectors.
+- **`cumtrapz(v)`** — **cumulative** trapezoidal integral with unit spacing
+  (first element `0`, same length).
+
+Two oracle cases. **Oracle 94/94** (200 trials each); **80 unit tests**
+(1 new). *Non-vacuity*: swapping the nesting order of `kron`'s loops
+reorders the output and turns the oracle RED.
+
+### Added — transpiler: **MATLAB `diag` (overloaded) + `trapz`** proven against real Octave (Phase 2, increment 31)
+Two additions, including MATLAB's **`diag` overload**, disambiguated by the
+**operand type** (never guessed):
+
+- **`diag(A)`** where `A` is a matrix → **extraction** of the diagonal (vector;
+  new `DiagExtract` node).
+- **`diag(v)`** where `v` is a vector → **construction** of a diagonal matrix
+  (reuses the existing `Diag` node, already proven on the Python side via
+  `np.diag`).
+- **`trapz(v)`** — trapezoidal integration with unit spacing (`Σ ½·(v[i−1]+v[i])`).
+
+Three oracle cases, exercising both `diag` paths naturally:
+`diag(A' * A)` (extraction — diagonal of the Gram matrix) and
+`diag(cumsum(v))` (construction), plus `trapz(v)`. **Oracle 92/92** (200 trials
+each); **79 unit tests** (2 new). *Non-vacuity*: removing the `½` factor
+from `trapz` doubles the result and turns the oracle RED.
+
+### Added — transpiler: **MATLAB `trace(A)` + `cross(a, b)`** proven against real Octave (Phase 2, increment 30)
+Two classic operations, wired via deterministic preamble helpers:
+
+- **`trace(A)`** — sum of a matrix's diagonal (scalar); `A` inferred
+  as a matrix from the intrinsic.
+- **`cross(a, b)`** — cross product of two 3D vectors; **both**
+  operands are inferred as vectors.
+
+Two oracle cases. **Oracle 89/89** (200 trials each); **77 unit tests**
+(1 new). *Non-vacuity*: flipping a sign in one component of `cross`
+makes the case diverge (|Δ|≈1) and turns the oracle RED.
+
+### Added — transpiler: **MATLAB transposition operator `A'` / `A.'`** proven against real Octave (Phase 2, increment 29)
+Adds the postfix **transposition** operator — ubiquitous in MATLAB — routed
+to the SIR `Transpose` node (already proven on the Python side via `A.T`).
+
+- **`A'`** (conjugate transpose) and **`A.'`** (plain transpose) — identical
+  for real matrices. The lexer recognizes `'` (postfix, never a string
+  since the subset has no character strings), the parser applies it postfix
+  (binding tighter than `^`), the lowering requires a matrix.
+- `A'` **proves** that its operand is a matrix (new matrix-proof),
+  hence the hint-free inference.
+
+Two oracle cases: `B = A'` (plain transposition) and `C = A' * A` (Gram
+matrix, composing transposition and matrix product). **Oracle 87/87** (200
+trials each); **76 unit tests** (1 new). *Non-vacuity*: parsing `A'` as
+the identity (without transposing) makes `A` lose its matrix type and breaks
+both cases (RED).
+
+### Added — transpiler: **MATLAB matrix product `A*b` / `A*B`** routed to `scirust-solvers`, proven against real Octave (Phase 2, increment 28)
+Completes MATLAB linear algebra: the `*` operator (**matrix** multiplication
+in MATLAB, distinct from the element-wise `.*`) routes to the verified
+`matvec` / `matmul` kernels of `scirust-solvers` when the left operand is
+a **matrix** (inferred from `det`/`inv`/`eig`/`\`).
+
+- **`A * x`** (matrix × vector) → `matvec`.
+- **`A * B`** (matrix × matrix) → `matmul` (matrix output).
+- Otherwise, `*` remains scalar multiplication or scalar↔array broadcast;
+  `A * b` with two arrays remains rejected (pointing to `.*`), and the
+  unsupported matrix forms (scalar×matrix, `matrix/`) are clearly rejected.
+
+**Safe** disambiguation: routing only happens if the matrix operand is
+already typed as a matrix by another operation (never guessed). The oracle
+cases exercise it naturally, without dead code: **residual `r = A*(A\b) ≈ b`**
+(matvec) and **`C = A*inv(A) ≈ I`** (matmul). **Oracle 85/85** (200 trials
+each); **75 unit tests** (1 new). *Non-vacuity*: transposing the matrix in
+`matvec` makes both the MATLAB residual and the Python `A @ b` case (shared
+emitter) diverge and turns the oracle RED.
+
+### Added — transpiler: **MATLAB `linspace(a, b, n)`** — vector constructor, proven against real Octave (Phase 2, increment 27)
+First **array construction** of the MATLAB front-end (until now arrays
+came from parameters or transformations). `linspace(a, b, n)` produces `n`
+regularly spaced points from `a` to `b` inclusive, with **exact endpoints**
+(like MATLAB, which forces `y(end) = b`) and the `linspace(a, b, 1) = [b]`
+case.
+
+- `a`, `b` are scalars; `n` is an **integer** (literal or integer expression
+  like `length(x)`), lowered via the existing integer-index path.
+- Wired via a deterministic preamble helper.
+
+One oracle case (fixed length 6, `a`/`b` drawn at random). **Oracle 83/83**
+(200 trials each); **74 unit tests** (1 new). *Non-vacuity*: using the step
+`(b−a)/n` instead of `(b−a)/(n−1)` makes the interior points diverge and
+turns the oracle RED (200/200, |Δ|≈0.13).
+
+### Added — transpiler: **MATLAB `var` / `std` / `median`** — reduction statistics, proven against real Octave (Phase 2, increment 26)
+Three statistical reductions (vector → scalar), aligned exactly with
+Octave's convention (verified empirically before wiring):
+
+- **`var(v)`** — **sample** variance, normalized by **`N−1`** (like MATLAB's
+  default, not `N`); `0` for `N < 2`.
+- **`std(v)`** — sample standard deviation (`√var`).
+- **`median(v)`** — median (middle value; average of the two central values
+  for even length).
+
+Wired via deterministic preamble helpers; the argument is inferred as a vector
+(added to `is_reduction`). Three oracle cases (var+std, even median, odd
+median). **Oracle 82/82** (200 trials each); **73 unit tests** (1 new).
+*Non-vacuity*: normalizing `var` by `N` instead of `N−1` makes the case
+diverge (200/200, |Δ|≈0.89) and turns the oracle RED.
+
+### Added — transpiler: **MATLAB `cumprod` / `cummax` / `cummin` / `flip`** — vector → vector functions, proven against real Octave (Phase 2, increment 25)
+Four additional native functions (a vector in, a vector out), on the same
+model as `cumsum`/`diff`/`sort` (deterministic preamble helpers, argument
+inferred as vector):
+
+- **`cumprod(v)`** — cumulative product in fixed left→right order.
+- **`cummax(v)`** / **`cummin(v)`** — running maximum / minimum.
+- **`flip(v)`** — reversed vector.
+
+Four oracle cases. **Oracle 79/79** (200 trials each); **72 unit tests**
+(the vector-builtins test now covers all seven functions).
+*Non-vacuity*: replacing `>` by `<` in `cummax` makes the case diverge
+(200/200, |Δ|=∞) and turns the oracle RED.
+
+### Added — transpiler: **MATLAB `cumsum` / `diff` / `sort`** — vector → vector functions, proven against real Octave (Phase 2, increment 24)
+Three unambiguous native functions (a vector in, a vector out), wired via new
+deterministic preamble helpers:
+
+- **`cumsum(v)`** — cumulative sum in **fixed left→right order** (hence
+  bit-reproducible), same length.
+- **`diff(v)`** — consecutive differences `v[i+1] − v[i]` (length `n−1`).
+- **`sort(v)`** — **ascending** sort (MATLAB's `sort`).
+
+The argument is inferred as a vector from the intrinsic. Three oracle cases.
+**Oracle 76/76** (200 trials each); **72 unit tests** (1 new; the tests'
+`sig_of` helper now targets the top-level `pub fn` so as not to confuse a user
+function with a same-named preamble helper, e.g. `np::cumsum`). *Non-vacuity*:
+reversing the subtraction order of `diff` (`v[i−1] − v[i]`) negates each
+element and turns the oracle RED (200/200, |Δ|≈2.4).
+
+### Added — transpiler: **MATLAB element-wise power `.^` on arrays** proven against real Octave (Phase 2, increment 23)
+First **vectorized** two-argument operation — the idiom at the heart of MATLAB.
+Adds reusable infrastructure (`SirExpr::EwBinFn` for array∘array,
+`SirExpr::BroadcastFn` for scalar↔array, `MathFn2::Powf` variant) that will
+serve again for the element-wise forms of `max`/`min`/`atan2`/`hypot`.
+
+- **`v .^ w`** (two arrays) → `np::ew2(v, w, |x, y| x.powf(y))`.
+- **`v .^ 2`** (array base, scalar exponent) → `np::map1(v, |x| x.powf(2))`.
+- **`2 .^ v`** (scalar base, array exponent) → `np::map1(v, |x| (2).powf(x))`
+  — operand order is preserved (`.^` is not commutative).
+- **`^` on an array** (matrix power `mpower`) remains **refused** with a
+  diagnostic pointing to `.^`.
+
+`f64::powf` reproduces Octave's `.^` (verified, including integer exponents). Three
+oracle cases. **Oracle 73/73** (200 trials each); **71 unit tests** (2
+new). *Non-vacuity*: reversing the broadcast order of `2 .^ v` (computing
+`v .^ 2`) makes the case diverge (200/200, |Δ|≈0.83) and turns the oracle RED.
+
+### Added — transpiler: **MATLAB `max(a,b)` / `min(a,b)` (2-arg) + `power(a,b)`** proven against real Octave (Phase 2, increment 22)
+Reuses the binary math node (`MathFn2`) for the two-argument forms of
+`max`/`min`, distinguished from the one-argument **reduction** by the **number
+of arguments**:
+
+- **`max(a, b)`** / **`min(a, b)`** (two scalars) → `f64::max` / `f64::min`.
+  The one-argument form remains the reduction over a vector; type inference
+  no longer marks the operands of the two-argument form as arrays
+  (guard `args.len() == 1` on the reduction proof).
+- **`power(a, b)`** → functional form of `a ^ b` (shares the lowering of
+  `^`: an integer exponent folds onto `powi`).
+
+Scalar operands. Two oracle cases. **Oracle 70/70** (200 trials each);
+**69 unit tests** (2 new). *Non-vacuity*: swapping `max`/`min` in the
+two-argument form reverses the sign of the range `max−min` and turns the oracle
+RED (200/200, |Δ|≈6.2).
+
+### Added — transpiler: **MATLAB `atan2` / `hypot`** — two-argument math functions, proven against real Octave (Phase 2, increment 21)
+Adds to the SIR a reusable **binary scalar math node**
+(`SirExpr::ScalarBinFn` + `MathFn2`), emitted as `(l).method(r)`, and wires the
+first two two-argument functions on the MATLAB side:
+
+- **`atan2(y, x)`** — four-quadrant arctangent (`f64::atan2`), the argument
+  order is significant.
+- **`hypot(a, b)`** — Euclidean length `√(a²+b²)` without overflow
   (`f64::hypot`).
 
-Opérandes scalaires dans ce sous-ensemble. Vérifiées empiriquement contre Octave
-(cas des quatre quadrants inclus) avant câblage. Deux cas d'oracle. **Oracle
-68/68** (200 essais chacun) ; **67 tests unitaires** (1 nouveau). *Non-vacuité* :
-inverser l'ordre des arguments d'`atan2` fait diverger le cas (200/200,
-|Δ|≈0,22) et passe l'oracle au ROUGE — tandis que `hypot`, symétrique, reste
-vert (le test prouve donc la position, pas seulement la présence).
+Scalar operands in this subset. Verified empirically against Octave
+(four-quadrant cases included) before wiring. Two oracle cases. **Oracle
+68/68** (200 trials each); **67 unit tests** (1 new). *Non-vacuity*:
+reversing the argument order of `atan2` makes the case diverge (200/200,
+|Δ|≈0.22) and turns the oracle RED — while `hypot`, being symmetric, stays
+green (the test therefore proves the position, not just the presence).
 
-### Ajouté — transpileur : **MATLAB `round` / `fix` / `mod` / `rem` / `sign`** — arrondi et arithmétique modulaire, prouvés contre Octave réel (Phase 2, incrément 20)
-Élargissement du vocabulaire scalaire MATLAB, chaque fonction alignée exactement
-sur la sémantique d'Octave (vérifié empiriquement avant câblage) :
+### Added — transpiler: **MATLAB `round` / `fix` / `mod` / `rem` / `sign`** — rounding and modular arithmetic, proven against real Octave (Phase 2, increment 20)
+Widening of the MATLAB scalar vocabulary, each function aligned exactly
+with Octave's semantics (verified empirically before wiring):
 
-- **`round(x)`** — arrondi au plus proche, **départager en s'éloignant de zéro**
-  (`f64::round`). C'est *volontairement* différent de l'arrondi bancaire de NumPy
-  (`round half to even`), donc `round` n'est câblé que sur le chemin MATLAB.
-- **`fix(x)`** — troncature **vers zéro** (`f64::trunc`).
-- **`mod(a, b)`** — modulo, résultat du **signe du diviseur** ;
-  abaissé en `a - b·floor(a/b)`.
-- **`rem(a, b)`** — reste, résultat du **signe du dividende** ;
-  abaissé en `a - b·fix(a/b)`.
-- **`sign(x)`** — `-1 / 0 / +1` avec **`sign(0) = 0`** (sémantique MATLAB,
-  distincte de `f64::signum`) ; nouveau nœud `SirExpr::Sign` émis en `if/else`
-  lié (l'argument n'est évalué qu'une fois).
+- **`round(x)`** — round to nearest, **ties away from zero**
+  (`f64::round`). This is *deliberately* different from NumPy's banker's rounding
+  (`round half to even`), so `round` is wired only on the MATLAB path.
+- **`fix(x)`** — truncation **toward zero** (`f64::trunc`).
+- **`mod(a, b)`** — modulo, result with the **sign of the divisor**;
+  lowered as `a - b·floor(a/b)`.
+- **`rem(a, b)`** — remainder, result with the **sign of the dividend**;
+  lowered as `a - b·fix(a/b)`.
+- **`sign(x)`** — `-1 / 0 / +1` with **`sign(0) = 0`** (MATLAB semantics,
+  distinct from `f64::signum`); new node `SirExpr::Sign` emitted as a bound
+  `if/else` (the argument is evaluated only once).
 
-`round`/`fix` fonctionnent aussi élément par élément (comme les autres
-intrinsèques math) ; `mod`/`rem`/`sign` sont scalaires dans ce sous-ensemble.
-Quatre cas d'oracle. **Oracle 66/66** (200 essais chacun) ; **66 tests
-unitaires** (3 nouveaux). *Non-vacuité* : inverser les branches `+1`/`-1` de
-`sign` fait diverger le cas (200/200, |Δ|=2) et passe l'oracle au ROUGE.
+`round`/`fix` also work element-wise (like the other math intrinsics);
+`mod`/`rem`/`sign` are scalar in this subset.
+Four oracle cases. **Oracle 66/66** (200 trials each); **66 unit
+tests** (3 new). *Non-vacuity*: swapping the `+1`/`-1` branches of
+`sign` makes the case diverge (200/200, |Δ|=2) and turns the oracle RED.
 
-### Ajouté — transpileur : **MATLAB `norm` / `dot` / `eig`** — normes, produit scalaire et valeurs propres, prouvés contre Octave réel (Phase 2, incrément 19)
-Poursuite de la couverture MATLAB large et sûre, en réutilisant des kernels déjà
-vérifiés (aucune nouvelle primitive à prouver depuis zéro). Trois intrinsèques,
-tous non ambigus :
+### Added — transpiler: **MATLAB `norm` / `dot` / `eig`** — norms, dot product and eigenvalues, proven against real Octave (Phase 2, increment 19)
+Continuing broad and safe MATLAB coverage, reusing already
+verified kernels (no new primitive to prove from scratch). Three intrinsics,
+all unambiguous:
 
-- **`norm(v)`** — norme euclidienne (2-norme) d'un **vecteur**, abaissée en
-  `sqrt(sum(v .* v))` à partir des nœuds SIR existants (restreinte à un vecteur ;
-  la `norm` d'une matrice est la norme spectrale, une quantité différente —
-  refusée avec un diagnostic).
-- **`dot(a, b)`** — produit scalaire, routé vers la réduction `np::dot` à **ordre
-  fixe** (bit-reproductible). L'inférence de type marque désormais les **deux**
-  opérandes comme vecteurs.
-- **`eig(A)`** — valeurs propres (ordre croissant) d'une matrice **symétrique**,
-  routées vers `scirust_solvers::eigen_symmetric`. `eig` d'Octave renvoie des
-  valeurs propres réelles croissantes pour une entrée symétrique, donc cette
-  route est prouvée sur entrées symétriques (via `SymMatrix` dans l'oracle) ;
-  `A` est inférée matrice à partir de l'intrinsèque.
+- **`norm(v)`** — Euclidean norm (2-norm) of a **vector**, lowered as
+  `sqrt(sum(v .* v))` from existing SIR nodes (restricted to a vector;
+  the `norm` of a matrix is the spectral norm, a different quantity —
+  refused with a diagnostic).
+- **`dot(a, b)`** — dot product, routed to the `np::dot` reduction at **fixed
+  order** (bit-reproducible). Type inference now marks **both**
+  operands as vectors.
+- **`eig(A)`** — eigenvalues (ascending order) of a **symmetric** matrix,
+  routed to `scirust_solvers::eigen_symmetric`. Octave's `eig` returns
+  increasing real eigenvalues for a symmetric input, so this
+  route is proven on symmetric inputs (via `SymMatrix` in the oracle);
+  `A` is inferred as a matrix from the intrinsic.
 
-Trois cas d'oracle : `norm(v)`, `dot(a,b)`, `eig(A)`. **Oracle 62/62** (200
-essais chacun) ; **63 tests unitaires** (3 nouveaux). *Non-vacuité* : remplacer
-`v .* v` par `v + v` dans `norm` fait diverger le cas (99/200, |Δ|≈1,4) et passe
-l'oracle au ROUGE.
+Three oracle cases: `norm(v)`, `dot(a,b)`, `eig(A)`. **Oracle 62/62** (200
+trials each); **63 unit tests** (3 new). *Non-vacuity*: replacing
+`v .* v` by `v + v` in `norm` makes the case diverge (99/200, |Δ|≈1.4) and turns
+the oracle RED.
 
-### Ajouté — transpileur : **MATLAB algèbre linéaire — `det` / `inv` / `\` (résolution)** routés vers `scirust-solvers`, prouvés contre Octave réel (Phase 2, incrément 18)
-La couverture MATLAB gagne l'algèbre linéaire du cœur numérique, réutilisant les
-kernels vérifiés de `scirust-solvers` déjà branchés côté Python. (1) **`det(A)`**
-et **`inv(A)`** deviennent des intrinsèques MATLAB (déterminant scalaire,
-inverse matrice 2-D). (2) **`A \ b`** — l'opérateur de division à gauche, la
-manière idiomatique de résoudre `Ax = b` en MATLAB — se lexe (`\`), se parse
-(`MBinOp::LDiv`) et se lowerise en `LinSolve` (factorisation LU). (3) **Inférence
-de paramètre matrice** : les arguments de `det`/`inv` et la gauche de `\`
-prouvent qu'un paramètre est une **matrice** (`infer_param_ty` teste désormais
-la preuve-matrice avant la preuve-tableau) ; `\` exige une matrice à gauche et un
-vecteur à droite (diagnostic clair sinon). L'oracle Octave sérialise désormais
-les sorties matricielles en **ordre ligne-major** (`r.'`) et les vecteurs en
-**colonne** pour aligner la sémantique `A \ b`. Trois cas d'oracle : `det(A)`,
-`inv(A)` (sortie matrice), `A \ b` (résolution). **Oracle 59/59** (200 essais
-chacun) ; **60 tests unitaires** (3 nouveaux). *Non-vacuité* : sérialiser `inv`
-en colonne-major fait diverger le cas non symétrique et passe l'oracle au ROUGE.
+### Added — transpiler: **MATLAB linear algebra — `det` / `inv` / `\` (solve)** routed to `scirust-solvers`, proven against real Octave (Phase 2, increment 18)
+MATLAB coverage gains the linear algebra of the numerical core, reusing the
+verified kernels of `scirust-solvers` already wired on the Python side. (1) **`det(A)`**
+and **`inv(A)`** become MATLAB intrinsics (scalar determinant,
+2-D matrix inverse). (2) **`A \ b`** — the left-division operator, the
+idiomatic way of solving `Ax = b` in MATLAB — is lexed (`\`), parsed
+(`MBinOp::LDiv`) and lowered into `LinSolve` (LU factorization). (3) **Matrix
+parameter inference**: the arguments of `det`/`inv` and the left side of `\`
+prove that a parameter is a **matrix** (`infer_param_ty` now tests
+the matrix-proof before the array-proof); `\` requires a matrix on the left and a
+vector on the right (clear diagnostic otherwise). The Octave oracle now serializes
+matrix outputs in **row-major** order (`r.'`) and vectors in **column**
+order to align with the `A \ b` semantics. Three oracle cases: `det(A)`,
+`inv(A)` (matrix output), `A \ b` (solve). **Oracle 59/59** (200 trials
+each); **60 unit tests** (3 new). *Non-vacuity*: serializing `inv`
+column-major makes the non-symmetric case diverge and turns the oracle RED.
 
-### Ajouté — transpileur : **MATLAB multi-sorties `[a,b] = f(…)` + vocabulaire MATLAB élargi** prouvés contre Octave réel (Phase 2, incrément 17)
-Vers une couverture MATLAB large et sûre. (1) **Fonctions multi-sorties** :
-`function [o1, o2, …] = f(x) … end` transpile vers un `pub fn … -> (T0, T1, …)`
-(retour tuple), réutilisant la machinerie `RetTy::Tuple`/`ReturnTuple` du côté
-Python (incrément 16). Lexer étendu (`[`/`]` avec suivi de profondeur), parser
-(liste de sorties entre crochets), lowering (`ReturnTuple` des variables de
-sortie). (2) **Intrinsèques MATLAB alignés sur Python** : nouvelles fonctions
-math `log`/`log10`/`floor`/`ceil`/`sinh`/`cosh`/`atan` et réductions
-`prod`/`mean`/`max`/`min` (les réductions comptent aussi comme preuve de tableau
-pour l'inférence des paramètres). L'oracle Octave capture désormais plusieurs
-sorties (`[o1,…] = f(args)`). Quatre cas d'oracle : `[s,d]=sumdiff`,
+### Added — transpiler: **MATLAB multi-output `[a,b] = f(…)` + widened MATLAB vocabulary** proven against real Octave (Phase 2, increment 17)
+Toward broad and safe MATLAB coverage. (1) **Multi-output functions**:
+`function [o1, o2, …] = f(x) … end` transpiles to a `pub fn … -> (T0, T1, …)`
+(tuple return), reusing the `RetTy::Tuple`/`ReturnTuple` machinery from the
+Python side (increment 16). Lexer extended (`[`/`]` with depth tracking), parser
+(output list between brackets), lowering (`ReturnTuple` of the output
+variables). (2) **MATLAB intrinsics aligned with Python**: new math
+functions `log`/`log10`/`floor`/`ceil`/`sinh`/`cosh`/`atan` and reductions
+`prod`/`mean`/`max`/`min` (reductions also count as array proof
+for parameter inference). The Octave oracle now captures multiple
+outputs (`[o1,…] = f(args)`). Four oracle cases: `[s,d]=sumdiff`,
 `[n,ss]=normstats`, `[lo,mu,hi]=stats3` (min/mean/max), `mathx` (log/floor/atan).
-**Oracle 56/56** (200 essais chacun) ; **57 tests unitaires** (4 nouveaux).
-Non-vacuité re-vérifiée : inverser l'ordre des sorties fait diverger les cas
-multi-sorties et passe l'oracle au ROUGE.
+**Oracle 56/56** (200 trials each); **57 unit tests** (4 new).
+Non-vacuity re-verified: reversing the order of the outputs makes the
+multi-output cases diverge and turns the oracle RED.
 
-### Ajouté — transpileur : **retours de tuple généraux** (`return a, b`) prouvés contre NumPy réel (Phase 2, incrément 16)
-Complète l'histoire des tuples côté **production** : une fonction peut renvoyer
-plusieurs valeurs (`def minmax(x): return np.min(x), np.max(x)` → `-> (f64, f64)`).
-Nouveautés : `RetTy` (retour simple ou tuple, hors du treillis `Copy` `Ty`),
-`SirStmt::ReturnTuple`, parsing Python de `return e0, e1, …`, et sérialisation
-oracle des retours-tuple (impression champ par champ `r.0`, `r.1`, …). Les
-éléments de tuple sont restreints aux **scalaires** dans ce sous-ensemble ; un
-retour mixte simple/tuple est refusé, et une fonction renvoyant un tuple ne peut
-pas être appelée comme valeur (diagnostic clair). Trois cas d'oracle : `addsub`
+### Added — transpiler: **general tuple returns** (`return a, b`) proven against real NumPy (Phase 2, increment 16)
+Completes the tuple story on the **production** side: a function can return
+multiple values (`def minmax(x): return np.min(x), np.max(x)` → `-> (f64, f64)`).
+New features: `RetTy` (simple or tuple return, outside the `Copy` `Ty` lattice),
+`SirStmt::ReturnTuple`, Python parsing of `return e0, e1, …`, and oracle
+serialization of tuple returns (field-by-field printing `r.0`, `r.1`, …). The
+tuple elements are restricted to **scalars** in this subset; a
+mixed simple/tuple return is refused, and a function returning a tuple cannot
+be called as a value (clear diagnostic). Three oracle cases: `addsub`
 (a+b, a-b), `minmax` (min, max), `stats3` (min, mean, max). **Oracle 52/52**
-(200 essais chacun) ; **53 tests unitaires**. Non-vacuité re-vérifiée : inverser
-l'ordre des éléments du tuple à l'émission fait diverger les trois cas (|Δ|≈5)
-et passe l'oracle au ROUGE.
+(200 trials each); **53 unit tests**. Non-vacuity re-verified: reversing
+the order of the tuple elements at emission makes the three cases diverge (|Δ|≈5)
+and turns the oracle RED.
 
-### Ajouté — transpileur : **vocabulaire numérique élargi** (log/floor/ceil/sinh/…, prod/mean/max/min) prouvé contre NumPy réel (Phase 2, incrément 15)
-Sept nouvelles fonctions math élémentaires (scalaire ou tableau) — `np.log`
+### Added — transpiler: **widened numeric vocabulary** (log/floor/ceil/sinh/…, prod/mean/max/min) proven against real NumPy (Phase 2, increment 15)
+Seven new elementary math functions (scalar or array) — `np.log`
 (→ `ln`), `np.log10`, `np.floor`, `np.ceil`, `np.sinh`, `np.cosh`, `np.arctan`
-(→ `atan`) — et quatre réductions — `np.prod`, `np.mean` (désucrée en
-`sum(a)/len(a)`, sans nouveau nœud), `np.max`, `np.min`. Nouveaux `MathFn`
-(Ln/Log10/Floor/Ceil/Sinh/Cosh/Atan) et `SirExpr::Prod`/`Max`/`Min` avec
-helpers de prélude à ordre pinné (`prod` ascendant reproductible). Les
-réductions comptent aussi comme preuve de tableau pour l'inférence de type des
-paramètres. Cinq cas d'oracle (log+log10, floor+ceil, sinh/cosh/arctan,
-max−min+mean, prod). **Oracle 49/49** (200 essais chacun) ; **48 tests
-unitaires**. Non-vacuité re-vérifiée : mapper `np.log` sur `log10` fait diverger
-le cas (|Δ|≈0,9) et passe l'oracle au ROUGE.
+(→ `atan`) — and four reductions — `np.prod`, `np.mean` (desugared as
+`sum(a)/len(a)`, without a new node), `np.max`, `np.min`. New `MathFn`
+(Ln/Log10/Floor/Ceil/Sinh/Cosh/Atan) and `SirExpr::Prod`/`Max`/`Min` with
+pinned-order prelude helpers (reproducible ascending `prod`). The
+reductions also count as array proof for the type inference of
+parameters. Five oracle cases (log+log10, floor+ceil, sinh/cosh/arctan,
+max−min+mean, prod). **Oracle 49/49** (200 trials each); **48 unit
+tests**. Non-vacuity re-verified: mapping `np.log` onto `log10` makes the
+case diverge (|Δ|≈0.9) and turns the oracle RED.
 
-### Ajouté — transpileur : **`np.linalg.qr`** (déstructuration `Q, R = …`) prouvé contre NumPy réel (Phase 2, incrément 14)
-Deuxième noyau multi-sorties, sur le même point d'extension `TupleExpr` que la
-SVD. `Q, R = np.linalg.qr(A)` transpile vers la QR de Householder vérifiée
-`scirust_solvers::linalg::qr_decompose` (`Q` orthogonale via `.q()`, `R`
-triangulaire sup via `.r()`). Sur une matrice **carrée**, `q()` (m×m) coïncide
-avec la Q réduite de numpy, donc les formes collent. Comme les signes de Q/R
-dépendent de la jauge, la preuve porte sur la **reconstruction invariante**
-`Q @ R ≈ A`. **Oracle 44/44** (200 essais chacun) ; **45 tests unitaires**.
-Non-vacuité re-vérifiée : intervertir `q()`/`r()` (émettre `(R, Q)`) fait
-diverger la reconstruction (|Δ|≈0,48) et passe l'oracle au ROUGE.
+### Added — transpiler: **`np.linalg.qr`** (destructuring `Q, R = …`) proven against real NumPy (Phase 2, increment 14)
+Second multi-output kernel, on the same `TupleExpr` extension point as the
+SVD. `Q, R = np.linalg.qr(A)` transpiles to the verified Householder QR
+`scirust_solvers::linalg::qr_decompose` (`Q` orthogonal via `.q()`, `R`
+upper triangular via `.r()`). On a **square** matrix, `q()` (m×m) coincides
+with numpy's reduced Q, so the shapes match. As the signs of Q/R
+depend on the gauge, the proof bears on the **invariant reconstruction**
+`Q @ R ≈ A`. **Oracle 44/44** (200 trials each); **45 unit tests**.
+Non-vacuity re-verified: swapping `q()`/`r()` (emitting `(R, Q)`) makes
+the reconstruction diverge (|Δ|≈0.48) and turns the oracle RED.
 
-### Ajouté — transpileur : **Python élargi** (appels de fonctions utilisateur + listes) prouvés contre NumPy réel (Phase 2, incrément 13)
-Le transpileur compose désormais **plusieurs fonctions** : une `def` transpilée
-peut en appeler une autre définie **plus tôt** dans le module (define-before-use),
-et les **listes littérales** `[a, b, c]` deviennent des `Vec<f64>`. Nouveautés :
-carte de signatures `FuncSig`/`Sigs` tissée à travers le lowering (chaque
-fonction voit les signatures des précédentes), `SirExpr::UserCall`
-(appel direct type-checké) et `SirExpr::ArrayLit`, plus le parsing Python des
-listes. **Inférence de type sans annotation à travers les appels** : un paramètre
-passé à une fonction utilisateur hérite du type du paramètre correspondant du
-callee — d'où `sumdbl(x)` où `x` est inféré `&[f64]` uniquement parce que `dbl`
-attend un tableau. Les paramètres des fonctions appelées sont restreints à
-scalaire/tableau (coercition d'argument non ambiguë à l'émission). Quatre cas
-d'oracle : composition scalaire (`sumsq`→`sq`), composition tableau sans
-annotation (`sumdbl`→`dbl`), chaîne à 3 niveaux (`chain`→`twice`→`inc`), et liste
-littérale comme vecteur de poids (`wavg` via `np.dot`). **Oracle 43/43**
-(200 essais chacun) ; **43 tests unitaires** (7 nouveaux). Non-vacuité
-re-vérifiée : injecter un décalage `+ 1.0` dans l'émission d'appel fait diverger
-les trois cas de composition (ROUGE) tandis que la liste littérale reste verte.
+### Added — transpiler: **widened Python** (user function calls + lists) proven against real NumPy (Phase 2, increment 13)
+The transpiler now composes **several functions**: a transpiled `def`
+can call another defined **earlier** in the module (define-before-use),
+and **literal lists** `[a, b, c]` become `Vec<f64>`. New features:
+a `FuncSig`/`Sigs` signature map threaded through lowering (each
+function sees the signatures of the previous ones), `SirExpr::UserCall`
+(direct type-checked call) and `SirExpr::ArrayLit`, plus Python parsing of
+lists. **Annotation-free type inference across calls**: a parameter
+passed to a user function inherits the type of the corresponding parameter of
+the callee — hence `sumdbl(x)` where `x` is inferred `&[f64]` only because `dbl`
+expects an array. The parameters of called functions are restricted to
+scalar/array (unambiguous argument coercion at emission). Four oracle
+cases: scalar composition (`sumsq`→`sq`), annotation-free array
+composition (`sumdbl`→`dbl`), a 3-level chain (`chain`→`twice`→`inc`), and a
+literal list as a weight vector (`wavg` via `np.dot`). **Oracle 43/43**
+(200 trials each); **43 unit tests** (7 new). Non-vacuity
+re-verified: injecting a `+ 1.0` shift in the call emission makes
+the three composition cases diverge (RED) while the literal list stays green.
 
-### Ajouté — transpileur : **tuples + `np.linalg.svd`** prouvés contre NumPy réel (Phase 2, incrément 12)
-Premier **noyau multi-sorties** et première **déstructuration de tuple**.
-`U, S, Vh = np.linalg.svd(A)` transpile vers la SVD fine vérifiée
-`scirust_solvers::linalg::svd`, avec `Vh = Vᵀ` pour coller au troisième retour
-de `numpy.linalg.svd`. Nouveautés : `TupleExpr` (enum des appels producteurs de
-tuple, hors du treillis `Copy` `Ty`), `SirStmt::LetTuple` (bind déstructurant
-`let (n0, n1, …): (T0, T1, …) = …`), `SirExpr::Diag` (`np.diag(v)` → matrice
-diagonale carrée), et le parsing Python de la cible-tuple `a, b, c = …`. Sur une
-matrice **carrée**, la SVD fine == SVD complète, donc les formes collent à
-numpy. Deux cas d'oracle prouvent la route de deux manières complémentaires :
-(a) **valeurs singulières** `S` (uniques, décroissantes) comparées directement à
-numpy ; (b) **reconstruction** `U @ diag(S) @ Vh ≈ A` (invariante de jauge, donc
-robuste aux ambiguïtés de signe de U/V — et exerçant réellement U et V).
-**Oracle 39/39** (200 essais chacun) ; **36 tests unitaires** (5 nouveaux).
-Non-vacuité re-vérifiée : retirer la transposée de `Vh` fait diverger la
-reconstruction (|Δ|≈1,3) et passe l'oracle au ROUGE, tandis que le cas
-« valeurs singulières » reste vert — preuve que la reconstruction exerce U et V.
+### Added — transpiler: **tuples + `np.linalg.svd`** proven against real NumPy (Phase 2, increment 12)
+First **multi-output kernel** and first **tuple destructuring**.
+`U, S, Vh = np.linalg.svd(A)` transpiles to the verified thin SVD
+`scirust_solvers::linalg::svd`, with `Vh = Vᵀ` to match the third return
+of `numpy.linalg.svd`. New features: `TupleExpr` (enum of tuple-producing
+calls, outside the `Copy` `Ty` lattice), `SirStmt::LetTuple` (destructuring
+bind `let (n0, n1, …): (T0, T1, …) = …`), `SirExpr::Diag` (`np.diag(v)` → square
+diagonal matrix), and Python parsing of the tuple target `a, b, c = …`. On a
+**square** matrix, the thin SVD == full SVD, so the shapes match
+numpy. Two oracle cases prove the route in two complementary ways:
+(a) **singular values** `S` (unique, decreasing) compared directly to
+numpy; (b) **reconstruction** `U @ diag(S) @ Vh ≈ A` (gauge-invariant, hence
+robust to sign ambiguities of U/V — and actually exercising U and V).
+**Oracle 39/39** (200 trials each); **36 unit tests** (5 new).
+Non-vacuity re-verified: removing the transpose from `Vh` makes the
+reconstruction diverge (|Δ|≈1.3) and turns the oracle RED, while the
+"singular values" case stays green — proof that the reconstruction exercises U and V.
 
-### Ajouté — transpileur : **front-end MATLAB/Octave** prouvé contre Octave réel (Phase 2, incrément 11)
-Deuxième langue source, sur la **même** SIR + émetteur que Python — donc même
-déterminisme et mêmes noyaux `scirust-*` vérifiés. Front-end dédié
+### Added — transpiler: **MATLAB/Octave front-end** proven against real Octave (Phase 2, increment 11)
+Second source language, on the **same** SIR + emitter as Python — hence the same
+determinism and the same verified `scirust-*` kernels. Dedicated front-end
 (`src/front_matlab/{lexer,parser,ast,mod}.rs`) + lowering `src/lower_matlab.rs`,
-et API publique `transpile_matlab` / `transpile_matlab_to_sir`. Sémantique MATLAB
-gérée : indexation **1-based** (`a(i)` → `a[i-1]`), plages `for` **inclusives**
-(`1:n` → `1..n+1`), opérateurs **élémentaires** `.*`/`./`/`.^` (opérandes
-inférés tableaux) vs scalaires `* / ^`, comparaisons dont `~=`, `if`/`elseif`/
-`else` + `while`, et **retour par variable de sortie**. Nouveau
-`SirStmt::Declare` (déclaration hoistée sans initialiseur, validée par
-l'analyse d'assignation-définie de Rust) pour les locales/sorties d'abord
-assignées en branche. L'oracle exécute les cas MATLAB contre **Octave réel**
-(9 cas × 200 essais) en plus des cas Python contre NumPy. Non-vacuité MATLAB :
-casser l'indexation 1-based (`i-1` → `i-2`) fait planter `mysum` et passe
-l'oracle au ROUGE.
+and public API `transpile_matlab` / `transpile_matlab_to_sir`. MATLAB semantics
+handled: **1-based** indexing (`a(i)` → `a[i-1]`), **inclusive** `for` ranges
+(`1:n` → `1..n+1`), **element-wise** operators `.*`/`./`/`.^` (operands
+inferred as arrays) vs scalar `* / ^`, comparisons including `~=`, `if`/`elseif`/
+`else` + `while`, and **return by output variable**. New
+`SirStmt::Declare` (hoisted declaration without initializer, validated by
+Rust's definite-assignment analysis) for locals/outputs first
+assigned in a branch. The oracle runs the MATLAB cases against **real Octave**
+(9 cases × 200 trials) in addition to the Python cases against NumPy. MATLAB non-vacuity:
+breaking the 1-based indexing (`i-1` → `i-2`) makes `mysum` crash and turns
+the oracle RED.
 
-### Ajouté — transpileur : matrice-matrice `A @ B` + transpose `A.T` (Phase 1, incrément 10)
-Complète l'algèbre linéaire dense. `A.T` (transpose) et `A @ B` (produit
-matrice-matrice) → `scirust_solvers::Matrix::transpose`/`matmul`. Nouveautés :
-`SirExpr::Matmul`/`Transpose` ; helper d'émission `as_matrix` qui accepte
-indifféremment une matrice-paramètre plate ou une valeur `Matrix` produite,
-d'où le **chaînage** (`A @ A.T`, et les opérations matricielles acceptant un
-`MatrixVal`). Cas d'oracle : `A.T` et `A @ A.T` (matrice de Gram) vs numpy.
-**Oracle 28/28** (200 essais chacun) ; 24 tests unitaires.
+### Added — transpiler: matrix-matrix `A @ B` + transpose `A.T` (Phase 1, increment 10)
+Completes dense linear algebra. `A.T` (transpose) and `A @ B` (matrix-matrix
+product) → `scirust_solvers::Matrix::transpose`/`matmul`. New features:
+`SirExpr::Matmul`/`Transpose`; an `as_matrix` emission helper that accepts
+indifferently a flat matrix-parameter or a produced `Matrix` value,
+hence **chaining** (`A @ A.T`, and matrix operations accepting a
+`MatrixVal`). Oracle cases: `A.T` and `A @ A.T` (Gram matrix) vs numpy.
+**Oracle 28/28** (200 trials each); 24 unit tests.
 
-### Ajouté — transpileur : `np.linalg.inv` (retour matrice 2-D) (Phase 1, incrément 9)
-Premier **retour de matrice 2-D** : `np.linalg.inv(A)` transpile vers
-`scirust_solvers::Matrix::inverse` et renvoie une valeur `scirust_solvers::Matrix`
-(qui porte sa forme). Nouveau `Ty::MatrixVal`, `SirExpr::Inv` ; l'oracle
-sérialise un retour matriciel en aplatissant row-major (via `rows()`/`row()`),
-comparé à `numpy.linalg.inv`. **Oracle 26/26** (200 essais chacun) ; 23 tests
-unitaires.
+### Added — transpiler: `np.linalg.inv` (2-D matrix return) (Phase 1, increment 9)
+First **2-D matrix return**: `np.linalg.inv(A)` transpiles to
+`scirust_solvers::Matrix::inverse` and returns a `scirust_solvers::Matrix` value
+(which carries its shape). New `Ty::MatrixVal`, `SirExpr::Inv`; the oracle
+serializes a matrix return by flattening row-major (via `rows()`/`row()`),
+compared against `numpy.linalg.inv`. **Oracle 26/26** (200 trials each); 23 unit
+tests.
 
-### Ajouté — six extensions du tolérancement inertiel (`scirust-tolerance`)
-Six nouveaux modules qui étendent la crate au-delà de la chaîne linéaire
-indépendante et de la seule cotation de position, chacun vérifié par
-cross-check de fuzzing contre une **référence indépendante** :
+### Added — six extensions of inertial tolerancing (`scirust-tolerance`)
+Six new modules that extend the crate beyond the independent linear chain
+and position-only dimensioning, each verified by
+fuzzing cross-check against an **independent reference**:
 
-- **`montecarlo`** : simulation Monte-Carlo de tolérances. Lois composant
-  (normale, uniforme, triangulaire, moments exacts), RNG déterministe graine
-  (xorshift64\* + Box–Muller), et `simulate` qui pousse `n` tirages à travers
-  une fonction de transfert quelconque `Y = f(X₁…Xₙ)` → moyenne, dispersion,
-  **inertie à la cible**, ppm, rendement, percentiles `0,135/50/99,865 %`.
-  *Cross-check* : une combinaison linéaire de normales reproduit `Σαμ`, `Σα²σ²`.
-- **`correlated`** : chaînes **corrélées** et **non-linéaires**. Forme
-  quadratique `I_Y² = (α∘I)ᵀ R (α∘I)` (se réduit au `√(Σα²I²)` de `chain` pour
-  `R=𝕀`), linéarisation par différences finies (`gradient`), variance
-  `gᵀΣg` (`correlated_variance`), et correction du second ordre de la moyenne
-  `f(μ)+½ Σ Hᵢᵢσᵢ²`. *Cross-check* : gradient vs dérivée analytique ; moyenne
-  du second ordre vs le moment exact d'une quadratique ; vs Monte-Carlo.
-- **`geometry`** : le reste des caractéristiques **ISO 1101** — rectitude,
-  planéité, circularité, cylindricité (forme, par moindres carrés), parallélisme
-  / perpendicularité / angularité (orientation, zone `L·sin Δθ`), profil et
-  battement — chacune avec sa lecture **inertielle** (RMS des écarts).
-  *Cross-check* : orthogonalité des résidus du plan des moindres carrés ; forme
-  parfaite → 0 ; orientation vs produits vectoriel/scalaire.
-- **`sensitivity`** : analyse de contribution — part de chaque composant dans
-  l'inertie d'assemblage `cᵢ = αᵢ²Iᵢ²/I_Y²` (et version corrélée), triée. Pointe
-  les cotes à resserrer. *Cross-check* : les parts somment à 1 et égalent le
-  recalcul direct.
-- **`process`** : allocation à **procédés discrets** — sac-à-dos à choix
-  multiple résolu **exactement** par frontière de Pareto des états
-  `(poids, coût)` non dominés : choisir un procédé `{inertie, coût}` par
-  composant minimisant le coût sous budget d'inertie (statistique ou pire cas).
-  *Cross-check* : vs énumération exhaustive.
-- **`drift`** : capabilité court terme vs long terme — variance de dérive
-  uniforme `σ_lt = √(σ_st² + d²/3)`, décalage Motorola `1,5σ`
-  (`Cpk↔Ppk`), et ppm long terme. *Cross-check* : `σ_lt` vs un Monte-Carlo d'une
-  moyenne qui dérive plus le bruit intra-lot.
-- **`scirust-mcp`** : six nouveaux outils — `tolerance_monte_carlo`,
+- **`montecarlo`**: Monte-Carlo simulation of tolerances. Component
+  distributions (normal, uniform, triangular, exact moments), deterministic seeded RNG
+  (xorshift64\* + Box–Muller), and `simulate` which pushes `n` draws through
+  an arbitrary transfer function `Y = f(X₁…Xₙ)` → mean, dispersion,
+  **inertia at target**, ppm, yield, percentiles `0.135/50/99.865 %`.
+  *Cross-check*: a linear combination of normals reproduces `Σαμ`, `Σα²σ²`.
+- **`correlated`**: **correlated** and **non-linear** chains. Quadratic
+  form `I_Y² = (α∘I)ᵀ R (α∘I)` (reduces to the `√(Σα²I²)` of `chain` for
+  `R=𝕀`), linearization by finite differences (`gradient`), variance
+  `gᵀΣg` (`correlated_variance`), and second-order mean correction
+  `f(μ)+½ Σ Hᵢᵢσᵢ²`. *Cross-check*: gradient vs analytic derivative; second-order
+  mean vs the exact moment of a quadratic; vs Monte-Carlo.
+- **`geometry`**: the rest of the **ISO 1101** characteristics — straightness,
+  flatness, circularity, cylindricity (form, by least squares), parallelism
+  / perpendicularity / angularity (orientation, zone `L·sin Δθ`), profile and
+  runout — each with its **inertial** reading (RMS of deviations).
+  *Cross-check*: orthogonality of the least-squares plane residuals; perfect
+  form → 0; orientation vs vector/cross products.
+- **`sensitivity`**: contribution analysis — each component's share of
+  the assembly inertia `cᵢ = αᵢ²Iᵢ²/I_Y²` (and correlated version), sorted. Points
+  out the dimensions to tighten. *Cross-check*: the shares sum to 1 and equal the
+  direct recomputation.
+- **`process`**: allocation to **discrete processes** — multiple-choice
+  knapsack solved **exactly** by the Pareto frontier of non-dominated
+  `(weight, cost)` states: choosing one process `{inertia, cost}` per
+  component minimizing the cost under an inertia budget (statistical or worst case).
+  *Cross-check*: vs exhaustive enumeration.
+- **`drift`**: short-term vs long-term capability — uniform drift
+  variance `σ_lt = √(σ_st² + d²/3)`, Motorola `1.5σ` shift
+  (`Cpk↔Ppk`), and long-term ppm. *Cross-check*: `σ_lt` vs a Monte-Carlo of a
+  drifting mean plus within-lot noise.
+- **`scirust-mcp`**: six new tools — `tolerance_monte_carlo`,
   `tolerance_geometry`, `tolerance_sensitivity`, `tolerance_discrete_allocate`,
   `tolerance_drift`, `tolerance_correlated`.
 
-Le harnais `fuzz_crosscheck` couvre désormais **14 modules** — **76 534
-vérifications, 0 erreur** à 1500 instances.
+The `fuzz_crosscheck` harness now covers **14 modules** — **76,534
+checks, 0 errors** at 1500 instances.
 
-### Ajouté — tolérancement non-normal + position GD&T (`scirust-tolerance`)
-Deux modules qui étendent le tolérancement inertiel au-delà de l'hypothèse
-normale et à la cotation de position :
+### Added — non-normal tolerancing + GD&T position (`scirust-tolerance`)
+Two modules that extend inertial tolerancing beyond the normal
+assumption and to position dimensioning:
 
-- **`nonnormal`** (nouveau module) : tolérancement statistique **non-normal**
-  à partir des quatre premiers moments (moyenne, écart-type, asymétrie `S`,
-  aplatissement d'excès `K`). L'inertie `I = √(δ²+σ²)` étant *sans hypothèse
-  de distribution* (c'est la RMS d'écart à la cible), c'est la **conformité**
-  qui dépend de la forme. `cornish_fisher_quantile` donne le `p`-quantile par
-  l'expansion de Cornish–Fisher `x_p = μ + σ·w(Φ⁻¹(p))` ; `nonnormal_ppm`
-  inverse l'expansion à chaque limite pour la non-conformité en ppm ;
-  `clements_capability` fournit le `Cp`/`Cpk` percentile de Clements (1989)
-  sur données asymétriques. Les trois **se réduisent exactement** aux résultats
-  normaux classiques quand `S = K = 0`. L'inversion `w(z)=t` d'un cubique n'est
-  bien posée que sur la **branche monotone** autour de `z=0` : le solveur
-  localise cette branche (marche + bornage), rabat une cible extérieure sur son
-  extrémité (une limite loin en queue ⇒ contribution ≈ 0, pas de racine
-  parasite) et bissecte à l'intérieur — valide pour une non-normalité modérée
-  et des limites dans le corps de la distribution (régime usuel de capabilité).
-- **`position`** (nouveau module) : cotation de **position GD&T / ISO GPS** et
-  sa forme inertielle. `true_position = 2·√(Δx²+Δy²)` (écart diamétral),
-  `mmc_bonus`/`total_position_tolerance` (bonus au maximum de matière selon
+- **`nonnormal`** (new module): **non-normal** statistical tolerancing
+  from the first four moments (mean, standard deviation, skewness `S`,
+  excess kurtosis `K`). Since the inertia `I = √(δ²+σ²)` is *distribution-free*
+  (it is the RMS of deviation from target), it is **conformance**
+  that depends on the shape. `cornish_fisher_quantile` gives the `p`-quantile via
+  the Cornish–Fisher expansion `x_p = μ + σ·w(Φ⁻¹(p))`; `nonnormal_ppm`
+  inverts the expansion at each limit for the non-conformance in ppm;
+  `clements_capability` provides Clements' (1989) percentile `Cp`/`Cpk`
+  on skewed data. All three **reduce exactly** to the classical normal
+  results when `S = K = 0`. The inversion `w(z)=t` of a cubic is
+  well-posed only on the **monotone branch** around `z=0`: the solver
+  locates that branch (walk + bounding), snaps an outside target to its
+  endpoint (a limit far in the tail ⇒ contribution ≈ 0, no spurious
+  root) and bisects inside — valid for moderate non-normality
+  and limits in the body of the distribution (usual capability regime).
+- **`position`** (new module): **GD&T / ISO GPS position** dimensioning and
+  its inertial form. `true_position = 2·√(Δx²+Δy²)` (diametral deviation),
+  `mmc_bonus`/`total_position_tolerance` (maximum material condition bonus according to
   `FeatureType::Internal`/`External`), `coord_to_position`/`position_to_coord`
-  (conversion zone `±` ↔ zone diamétrale `Ø`), et l'**inertie de position**
-  `√(Iₓ²+I_y²)` — puisque `E[Δx²+Δy²] = Iₓ²+I_y²`, exactement la
-  `vector_inertia` des deux axes, ce qui rattache la position au cadre inertiel.
-- **`scirust-mcp`** : nouveaux outils `tolerance_nonnormal_capability`
-  (ppm non-normal + capabilité de Clements) et `tolerance_position`
-  (position vraie + bonus MMC + inertie de position).
-- **Cross-check par fuzzing** (`fuzz_crosscheck`) étendu à ces deux modules :
-  réduction exacte au normal, cohérence aller-retour de l'inversion
-  Cornish–Fisher sur son domaine valide, monotonie de la queue vs asymétrie,
-  et identités radiales de la position — **0 erreur** sur 10 000 instances. Le
-  fuzzing a révélé et corrigé une racine parasite de l'inversion pour une cible
-  sous le minimum de la branche monotone (queue basse gonflée) ; d'où le
-  solveur robuste marche-bornage-bissection.
-- **Visualisation** (`scirust-tolerance/viz/inertia_cone.html`) : page HTML
-  autonome et interactive du **cône d'inertie** — la carte d'acceptation
-  `(δ, σ)` (demi-disque inertiel vs triangle Cpk), le cône 3D `z = √(δ²+σ²)`
-  coupé par le plan `I_max`, la distribution du lot, et la lecture en direct de
-  `I`/`Cpi`/`Cpm`/`Cp`/`Cpk`/ppm en glissant le point de lot ou les curseurs.
-  Sans dépendance réseau, thème clair/sombre.
+  (± zone ↔ diametral `Ø` zone conversion), and the **position inertia**
+  `√(Iₓ²+I_y²)` — since `E[Δx²+Δy²] = Iₓ²+I_y²`, exactly the
+  `vector_inertia` of the two axes, which ties position to the inertial framework.
+- **`scirust-mcp`**: new tools `tolerance_nonnormal_capability`
+  (non-normal ppm + Clements capability) and `tolerance_position`
+  (true position + MMC bonus + position inertia).
+- **Fuzzing cross-check** (`fuzz_crosscheck`) extended to these two modules:
+  exact reduction to the normal case, round-trip consistency of the
+  Cornish–Fisher inversion over its valid domain, tail monotonicity vs skewness,
+  and radial position identities — **0 errors** over 10,000 instances. The
+  fuzzing revealed and fixed a spurious root of the inversion for a target
+  below the minimum of the monotone branch (inflated low tail); hence the
+  robust walk-bound-bisect solver.
+- **Visualization** (`scirust-tolerance/viz/inertia_cone.html`): standalone
+  interactive HTML page of the **inertia cone** — the `(δ, σ)` acceptance map
+  (inertial half-disc vs Cpk triangle), the 3D cone `z = √(δ²+σ²)`
+  cut by the `I_max` plane, the batch distribution, and live reading of
+  `I`/`Cpi`/`Cpm`/`Cp`/`Cpk`/ppm by dragging the batch point or the sliders.
+  No network dependency, light/dark theme.
 
-### Ajouté — transpileur : couverture de test exhaustive + script global
-Objectif « tester **toutes** les fonctions codées » : l'oracle différentiel
-couvre désormais **chaque** intrinsèque et opérateur supporté. Nouveaux cas —
-`np.sin`/`np.cos`/`np.abs` (scalaire), `np.exp` (scalaire **et** élémentaire
-sur tableau), l'opérateur `**`, et `np.ones` + `len` (tableau en sortie) —
-portant l'oracle à **19/19** (200 essais chacun vs NumPy réel). Ajout du script
-`scripts/test_transpiler.sh` qui lance en un point la suite complète (17 tests
-unitaires + oracle) avec rapport clair et code de sortie non nul si une seule
-fonction transpilée diverge de NumPy.
+### Added — transpiler: exhaustive test coverage + global script
+Goal "test **all** coded functions": the differential oracle
+now covers **every** supported intrinsic and operator. New cases —
+`np.sin`/`np.cos`/`np.abs` (scalar), `np.exp` (scalar **and** element-wise
+on arrays), the `**` operator, and `np.ones` + `len` (array output) —
+bringing the oracle to **19/19** (200 trials each vs real NumPy). Added the
+`scripts/test_transpiler.sh` script which runs in one point the complete suite (17 unit
+tests + oracle) with a clear report and a non-zero exit code if a single
+transpiled function diverges from NumPy.
 
-### Ajouté — transpileur : routage `np.linalg.det` (Phase 1, incrément 4)
-Deuxième noyau routé vers `scirust-solvers` : `np.linalg.det(A)` transpile vers
-`scirust_solvers::Matrix::from_row_major(...).determinant()` (déterminant par LU
-prouvé). Réutilise l'infrastructure `Ty::Matrix` + oracle bi-mode (compilation
-cargo). `SirExpr::Det` ajouté ; inférence de paramètre matrice étendue à l'arg 0
-de `np.linalg.det`. Nouveau cas d'oracle sur des matrices 4×4 comparé à
-`numpy.linalg.det`. **Oracle 14/14** (200 essais chacun) ; 17 tests unitaires.
+### Added — transpiler: `np.linalg.det` routing (Phase 1, increment 4)
+Second kernel routed to `scirust-solvers`: `np.linalg.det(A)` transpiles to
+`scirust_solvers::Matrix::from_row_major(...).determinant()` (proven LU
+determinant). Reuses the `Ty::Matrix` infrastructure + bi-mode oracle (cargo
+compilation). `SirExpr::Det` added; matrix parameter inference extended to arg 0
+of `np.linalg.det`. New oracle case on 4×4 matrices compared to
+`numpy.linalg.det`. **Oracle 14/14** (200 trials each); 17 unit tests.
 
-### Ajouté — transpileur : routage vers les noyaux vérifiés (Phase 1, incrément 3)
-Premier **routage vers un noyau `scirust-*` vérifié** : `np.linalg.solve(A, b)`
-est transpilé vers `scirust_solvers::linalg::solve` (résolution LU prouvée) au
-lieu d'être re-dérivé en Rust std. C'est le différenciateur central de la
-conception — on ne ré-implémente pas la numérique, on route vers des noyaux
-oracle-validés.
-- SIR : `Ty::Matrix` (matrice 2-D plate row-major), `SirExpr::LinSolve`,
-  fonction `required_crates(&SirModule)` qui déclare les crates `scirust-*`
-  nécessaires ; inférence des paramètres matrice (arg 0 de `np.linalg.solve`).
-- **Oracle bi-mode** : les cas std-only compilent toujours avec `rustc` seul ;
-  les cas routés compilent en projet cargo autonome dépendant (par chemin) de
-  `scirust-solvers`, avec un target partagé (l'arbre de deps se compile une
-  fois). Nouveau cas : `np.linalg.solve` sur des systèmes 5×5 à diagonale
-  dominante, comparé à `numpy.linalg.solve`. **Oracle 13/13** (200 essais
-  chacun). 16 tests unitaires.
+### Added — transpiler: routing to the verified kernels (Phase 1, increment 3)
+First **routing to a verified `scirust-*` kernel**: `np.linalg.solve(A, b)`
+is transpiled to `scirust_solvers::linalg::solve` (proven LU solve) instead
+of being re-derived in Rust std. This is the central differentiator of the
+design — one does not re-implement the numerics, one routes to
+oracle-validated kernels.
+- SIR: `Ty::Matrix` (flat row-major 2-D matrix), `SirExpr::LinSolve`,
+  `required_crates(&SirModule)` function which declares the `scirust-*` crates
+  needed; matrix parameter inference (arg 0 of `np.linalg.solve`).
+- **Bi-mode oracle**: std-only cases still compile with `rustc` alone;
+  routed cases compile in a standalone cargo project depending (by path) on
+  `scirust-solvers`, with a shared target (the deps tree compiles
+  once). New case: `np.linalg.solve` on 5×5 diagonally
+  dominant systems, compared to `numpy.linalg.solve`. **Oracle 13/13** (200 trials
+  each). 16 unit tests.
 
-### Ajouté — transpileur : boucles `while` (Phase 1, incrément 2)
-Le sous-ensemble Python du transpileur entrant supporte désormais les **boucles
-`while`** (condition = comparaison scalaire), débloquant les algorithmes
-itératifs (Newton, point fixe, bisection). Prouvé par le même oracle
-différentiel contre NumPy réel avec deux cas de **méthode de Newton** — à
-nombre d'itérations fixe et à condition de convergence (le nombre d'itérations
-dépend des données mais reste identique côté Rust et NumPy, les opérations
-flottantes étant bit-identiques). **Oracle 12/12** (200 essais chacun) ; 14
-tests unitaires. `SirStmt::While` ajouté ; émetteur, parseur et inférence de
-paramètres étendus.
+### Added — transpiler: `while` loops (Phase 1, increment 2)
+The input Python subset of the transpiler now supports **`while` loops**
+(condition = scalar comparison), unlocking iterative
+algorithms (Newton, fixed point, bisection). Proven by the same differential
+oracle against real NumPy with two **Newton's method** cases — at
+fixed iteration count and with a convergence condition (the iteration count
+depends on the data but stays identical on the Rust and NumPy sides, the
+floating-point operations being bit-identical). **Oracle 12/12** (200 trials each); 14
+unit tests. `SirStmt::While` added; emitter, parser and parameter
+inference extended.
 
-### Ajouté — transpileur : contrôle de flux `if`/`elif`/`else` (Phase 1, incrément 1)
-Extension du sous-ensemble Python avec le **contrôle de flux scalaire**, prouvée
-par le même oracle différentiel contre NumPy réel :
-- front-end : instructions `if`/`elif`/`else` (`elif` désucré en `if` imbriqué
-  dans la branche `else`) ; opérateurs de comparaison `< <= > >= == !=` comme
-  conditions booléennes (une comparaison n'est valide qu'en condition, jamais
-  comme valeur — sinon refusée).
-- SIR : `Ty::Bool`, `SirStmt::If`, `SirExpr::Cmp` ; inférence de paramètres et
-  émetteur étendus ; les branches suivent la même règle « initialiser avant »
-  que les boucles.
-- oracle : 3 nouveaux cas (relu, clamp, sign) → **10/10 cas conformes**
-  (200 essais chacun) ; 13 tests unitaires.
+### Added — transpiler: `if`/`elif`/`else` control flow (Phase 1, increment 1)
+Extension of the Python subset with **scalar control flow**, proven
+by the same differential oracle against real NumPy:
+- front-end: `if`/`elif`/`else` statements (`elif` desugared into a nested `if`
+  in the `else` branch); comparison operators `< <= > >= == !=` as
+  boolean conditions (a comparison is only valid as a condition, never
+  as a value — otherwise refused).
+- SIR: `Ty::Bool`, `SirStmt::If`, `SirExpr::Cmp`; parameter inference and
+  emitter extended; branches follow the same "initialize before"
+  rule as loops.
+- oracle: 3 new cases (relu, clamp, sign) → **10/10 conforming cases**
+  (200 trials each); 13 unit tests.
 
-### Ajouté — synthèse de tolérances à coût minimal (`scirust-tolerance`)
-Le « calcul optimal » du tolérancement inertiel : nouveau module `optimize`
-qui minimise le coût total de fabrication `Σᵢ bᵢ·Iᵢ^(−rᵢ)` (modèle
-coût-tolérance en puissance inverse, Chase & Greenwood) sous **plusieurs
-exigences fonctionnelles simultanées** `√(Σᵢ αₖᵢ² Iᵢ²) ≤ I_max,ₖ`. En
-variables `vᵢ=Iᵢ²` le coût est convexe et les contraintes linéaires, donc
-programme convexe à dualité forte : le lagrangien se sépare par composant
-(`Iᵢ = ((rᵢ/2)bᵢ/sᵢ)^{1/(rᵢ+2)}`, `sᵢ=Σₖ μₖ αₖᵢ²`) et le dual est
-maximisé par une mise à jour multiplicative invariante d'échelle
-`μₖ ← μₖ·(atteintₖ²/I_max,ₖ²)^γ` dont le point fixe est exactement le point
-KKT (contrainte active ⇒ atteint=budget, contrainte lâche ⇒ μₖ→0). Pour une
-exigence unique, reproduit exactement la forme close `Allocation::CostOptimal`.
-Fournit `Component`, `Requirement`, `optimize`/`optimize_with`,
-`OptimizeResult` (inerties, coût total, multiplicateurs/prix duaux, exigences
-actives), et la **frontière de Pareto coût-qualité** `cost_quality_frontier`.
-Vérifié par : égalité à la forme close mono-exigence, satisfaction des
-conditions KKT à deux exigences, coût ≤ allocation naïve par-exigence, et
-monotonie de la frontière. **Cross-check par fuzzing** (exemple
-`fuzz_optimize`) sur 1500+ instances aléatoires contre un certificat
-d'optimalité indépendant purement primal (faisabilité + « chaque composant
-épinglé » : aucune inertie ne peut croître sans violer une contrainte, ce
-qui est nécessaire à l'optimalité puisque le coût décroît strictement en I).
-Le fuzzing a révélé qu'une exécution ayant atteint `max_iters` sur des
-contraintes quasi-parallèles pouvait laisser une contrainte marginalement
-dépassée (~4 ppm) ; corrigé par un **garde-fou de faisabilité** (resserrement
-uniforme final `f = 1/maxₖ(atteintₖ/I_max,ₖ)`) qui **garantit** désormais que
-l'allocation retournée respecte toujours chaque budget — préférable, pour du
-tolérancement, à une solution légèrement infaisable. Nouvel outil MCP
+### Added — minimal-cost tolerance synthesis (`scirust-tolerance`)
+The "optimal computation" of inertial tolerancing: new module `optimize`
+which minimizes the total manufacturing cost `Σᵢ bᵢ·Iᵢ^(−rᵢ)` (inverse-power
+cost-tolerance model, Chase & Greenwood) under **several simultaneous
+functional requirements** `√(Σᵢ αₖᵢ² Iᵢ²) ≤ I_max,ₖ`. In
+variables `vᵢ=Iᵢ²` the cost is convex and the constraints linear, hence a
+convex program with strong duality: the Lagrangian separates per component
+(`Iᵢ = ((rᵢ/2)bᵢ/sᵢ)^{1/(rᵢ+2)}`, `sᵢ=Σₖ μₖ αₖᵢ²`) and the dual is
+maximized by a scale-invariant multiplicative update
+`μₖ ← μₖ·(reachedₖ²/I_max,ₖ²)^γ` whose fixed point is exactly the
+KKT point (active constraint ⇒ reached=budget, slack constraint ⇒ μₖ→0). For a
+single requirement, exactly reproduces the closed form `Allocation::CostOptimal`.
+Provides `Component`, `Requirement`, `optimize`/`optimize_with`,
+`OptimizeResult` (inertias, total cost, dual multipliers/prices, active
+requirements), and the **cost-quality Pareto frontier** `cost_quality_frontier`.
+Verified by: equality to the single-requirement closed form, satisfaction of
+the KKT conditions with two requirements, cost ≤ naive per-requirement allocation, and
+frontier monotonicity. **Fuzzing cross-check** (example
+`fuzz_optimize`) over 1500+ random instances against an independent
+purely-primal optimality certificate (feasibility + "every component
+pinned": no inertia can grow without violating a constraint,
+which is necessary for optimality since the cost strictly decreases in I).
+The fuzzing revealed that a run that had reached `max_iters` on
+nearly-parallel constraints could leave a constraint marginally
+exceeded (~4 ppm); fixed by a **feasibility guard-rail** (final uniform
+tightening `f = 1/maxₖ(reachedₖ/I_max,ₖ)`) which now **guarantees** that
+the returned allocation always respects every budget — preferable, for
+tolerancing, to a slightly infeasible solution. New MCP tool
 `tolerance_optimize_cost`.
 
-### Ajouté — tolérancement de forme et modal (`scirust-tolerance`)
-Complément « surface + modal » de la thèse d'Adragna (*Tolérancement des
+### Added — form and modal tolerancing (`scirust-tolerance`)
+"Surface + modal" complement to Adragna's thesis (*Tolérancement des
 Systèmes Assemblés, une approche par le Tolérancement Inertiel et Modal*,
-tel-00403876 ; arXiv:1002.0251) qui étend le tolérancement inertiel d'une
-caractéristique scalaire à une surface mesurée entière :
+tel-00403876; arXiv:1002.0251) which extends inertial tolerancing from a
+single scalar characteristic to an entire measured surface:
 
-- **`form`** (nouveau module) : `FormBatch` sur une matrice de mesures
-  (parts × points, écart au nominal). L'**inertie de surface**
-  `I_S = √((1/m) Σⱼ Iⱼ²)` est la moyenne quadratique des inerties de points,
-  égale à la RMS de tous les écarts au nominal — vérifié par l'identité
-  `I_S² = (1/(m·n)) Σᵢⱼ xᵢⱼ²`. Fournit aussi les inerties par point, le point
-  le pire, et la signature de forme moyenne.
-- **`modal`** (nouveau module) : décomposition modale des défauts de forme
-  « à la manière des séries de Fourier ». `ModalBasis` (base DCT-II
-  exactement orthonormée, base utilisateur, ou orthonormalisation de
-  Gram-Schmidt d'une base FEM), `decompose`/`reconstruct`/`residual_norm`
-  (Parseval `Σ λₖ² = ‖d‖²`), et `modal_inertias` dont l'identité de
-  partition **`Σₖ Iₖ² = m·I_S²`** rend le tolérancement des modes (petit
-  jeu de budgets physiques : mode 0 = taille, 1 = inclinaison, 2 = ovalité…)
-  équivalent au tolérancement de toute la surface.
-- **`spatial`** (nouveau module) : **tolérancement inertiel 3D par
-  torseurs de petits déplacements** (SDT, d'après Bourdet & Clément ;
-  Adragna/Samper/Pillet, arXiv:1002.0253). L'écart d'un point vaut
-  `d(M) = T + R × OM`, et l'écart normal `e(M) = d(M)·n = T·n + R·(OM×n)
-  = g(M)·θ` avec le vecteur d'influence `g = [n ; OM×n]`. `Torsor`,
-  `Feature` (échantillon points+normales), `fit_torsor` (association aux
-  moindres carrés `θ=(GᵀG)⁻¹Gᵀe` par élimination de Gauss avec pivot,
-  renvoie `None` si la surface est sous-contrainte — un plan seul
-  n'observe que 3 DDL), `form_residual` (défaut de forme résiduel, à
-  passer à `modal`), et l'**inertie de surface** `I_S² = θ̄ᵀHθ̄ + tr(HΣ_θ)`
-  avec `H=(1/m)Σ g gᵀ` — la combinaison statistique exacte du défaut de
-  **localisation** (T) et d'**orientation** (R), avec sa décomposition
-  location/orientation/couplage. La forme analytique est vérifiée égale à
-  l'empirique (via `FormBatch`) et l'association vérifiée par
-  aller-retour sur une pièce datum 3-2-1 pleine échelle. Ceci **remplace**
-  l'ancienne limite « non livré » : la géométrie 3D par torseurs est
-  maintenant fournie et vérifiée.
-- **`scirust-mcp`** : nouveaux outils `tolerance_form_modal` (inertie de
-  surface + décomposition modale) et `tolerance_3d_surface_inertia`
-  (inertie de surface 3D + décomposition localisation/orientation).
+- **`form`** (new module): `FormBatch` on a measurement matrix
+  (parts × points, deviation from nominal). The **surface inertia**
+  `I_S = √((1/m) Σⱼ Iⱼ²)` is the quadratic mean of the point inertias,
+  equal to the RMS of all deviations from nominal — verified by the identity
+  `I_S² = (1/(m·n)) Σᵢⱼ xᵢⱼ²`. Also provides per-point inertias, the worst
+  point, and the mean form signature.
+- **`modal`** (new module): modal decomposition of form defects
+  "in the manner of Fourier series". `ModalBasis` (exactly orthonormal
+  DCT-II basis, user basis, or Gram-Schmidt orthonormalization of
+  a FEM basis), `decompose`/`reconstruct`/`residual_norm`
+  (Parseval `Σ λₖ² = ‖d‖²`), and `modal_inertias` whose partition
+  identity **`Σₖ Iₖ² = m·I_S²`** makes the tolerancing of modes (small
+  set of physical budgets: mode 0 = size, 1 = tilt, 2 = ovality…)
+  equivalent to tolerancing the whole surface.
+- **`spatial`** (new module): **3D inertial tolerancing by small-displacement
+  torsors** (SDT, after Bourdet & Clément;
+  Adragna/Samper/Pillet, arXiv:1002.0253). The deviation of a point is
+  `d(M) = T + R × OM`, and the normal deviation `e(M) = d(M)·n = T·n + R·(OM×n)
+  = g(M)·θ` with the influence vector `g = [n ; OM×n]`. `Torsor`,
+  `Feature` (sample of points+normals), `fit_torsor` (least-squares
+  association `θ=(GᵀG)⁻¹Gᵀe` by Gaussian elimination with pivoting,
+  returns `None` if the surface is under-constrained — a single plane
+  only observes 3 DOF), `form_residual` (residual form defect, to be
+  passed to `modal`), and the **surface inertia** `I_S² = θ̄ᵀHθ̄ + tr(HΣ_θ)`
+  with `H=(1/m)Σ g gᵀ` — the exact statistical combination of the
+  **location** (T) and **orientation** (R) defects, with its
+  location/orientation/coupling decomposition. The analytical form is verified equal to
+  the empirical one (via `FormBatch`) and the association verified by
+  round-trip on a full-scale 3-2-1 datum part. This **replaces**
+  the former "not delivered" limitation: 3D geometry by torsors is
+  now provided and verified.
+- **`scirust-mcp`**: new tools `tolerance_form_modal` (surface
+  inertia + modal decomposition) and `tolerance_3d_surface_inertia`
+  (3D surface inertia + location/orientation decomposition).
+### Added — agentic crypto trading platform (`scirust-trader` + `scirust-mcp`)
+Major extension of the MVP `scirust-trader` (market→indicators→model→
+certification→risk→LLM→proof) into a pro-level trading toolkit, **fully
+drivable by an agentic LLM via MCP** and **simulation/paper-trading first** (no
+real order execution exposed; live Binance market data remains read-only behind
+`--features live`). Everything is pure Rust, deterministic (same input ⇒ same
+output and same proof fingerprints), with no new dependency.
 
-### Ajouté — plateforme de trading crypto agentique (`scirust-trader` + `scirust-mcp`)
-Extension majeure du MVP `scirust-trader` (marché→indicateurs→modèle→
-certification→risque→LLM→preuve) en une boîte à outils de trading niveau
-plateforme pro, **entièrement pilotable par un LLM agentic via MCP** et
-**simulation/paper-trading d'abord** (aucune exécution d'ordre réel exposée ;
-les données de marché live Binance restent en lecture derrière `--features
-live`). Tout est en Rust pur, déterministe (même entrée ⇒ même sortie et mêmes
-empreintes de preuve), sans nouvelle dépendance.
-
-- **Indicateurs (`indicators.rs`)** — +12 indicateurs pro au-delà de
-  RSI/MACD/ATR/Bollinger/SMA/EMA : Stochastic (%K/%D), ADX/DMI (+DI/−DI,
-  lissage de Wilder correct, amorce ADX à `2·période−1`), OBV, VWAP glissant,
-  Williams %R, CCI (déviation absolue moyenne), MFI, ROC, momentum, Z-score,
-  Chaikin Money Flow, Supertrend (bandes ATR + logique de report/retournement),
-  canaux Donchian et Keltner, extrema glissants.
-- **Figures chartistes (`patterns.rs`)** — détection déterministe de doji,
-  marteau/pendu, marteau inversé/étoile filante, marubozu, engulfing, piercing
-  line/dark cloud, étoiles du matin/soir, trois soldats/corbeaux.
-- **Carnet d'ordres (`orderbook.rs`)** — microstructure : mid, micro-price
-  pondéré par la taille, spread (bps), profondeur, imbalance, **VWAP
-  d'exécution en marchant le carnet**, slippage et liquidité dans X bps.
-- **Ordres & moteur d'appariement (`orders.rs`)** — types Market/Limit/
-  Stop/StopLimit/TakeProfit, TIF (GTC/IOC/FOK), post-only/reduce-only, frais
-  maker/taker, modèle de slippage, arrondi tick/lot, et une logique de fill
-  *paper* déterministe sur chandelier (sémantique de backtest standard).
-- **Portefeuille (`portfolio.rs`)** — comptes multi-actifs, positions nettées
-  long/short (coût moyen, PnL réalisé/latent, retournement à travers zéro),
-  équité mark-to-market, exposition brute/nette, rééquilibrage vers des poids
-  cibles, prix de liquidation isolé (levier).
-- **Métriques (`metrics.rs`)** — Sharpe, Sortino, Calmar, CAGR, volatilité
-  annualisée, max drawdown, Ulcer Index, VaR/CVaR historiques, Kelly
-  (discret & continu), win-rate, profit factor, expectancy, corrélation, bêta.
-- **Stratégies (`strategy.rs`)** — trait `Strategy` + archétypes : croisement
-  SMA/EMA, RSI mean-reversion, MACD, breakout Bollinger/Donchian, Supertrend,
-  momentum ; fabrique par nom + paramètres (pilotable en langage naturel).
-- **Backtest événementiel (`backtest.rs`)** — décision à la clôture,
-  exécution à l'ouverture suivante (**pas de look-ahead**), frais/slippage
-  réels, journal de trades round-trip, rapport de performance complet,
-  comparaison buy-and-hold.
-- **Découverte d'opportunités (`scanner.rs`)** — le cœur du « trouve-moi des
-  trades qui respectent ces conditions, avec un objectif de profit de X » :
-  backteste chaque stratégie × symbole, lit le signal courant, filtre sur les
-  contraintes (retour, drawdown, Sharpe, win-rate, profit factor, direction),
-  dimensionne un plan entrée/stop/take-profit/taille basé ATR, classe, et
-  **scelle chaque opportunité + le rapport avec une preuve SHA-256** vérifiable.
-- **Exécution de micro-ordres (`execution.rs`)** — découpe d'un ordre parent
-  en ordres enfants rapides : TWAP, VWAP (profil de volume), POV, Iceberg,
-  micro-burst, et trajectoire optimale **Almgren-Chriss**
-  (`x_j=X·sinh(κ(T−t_j))/sinh(κT)`, `η̃=η−½γτ`), plus simulation de qualité
-  d'exécution (VWAP réalisé, slippage vs prix d'arrivée).
-- **Market making (`marketmaking.rs`)** — quotes optimales **Avellaneda-
-  Stoikov** : prix de réservation `r=s−q·γ·σ²·(T−t)`, spread optimal
-  `γ·σ²·(T−t)+(2/γ)·ln(1+γ/κ)`, skew d'inventaire, approximation GLFT.
-- **Signaux microstructure (`microstructure.rs`)** — Order-Flow Imbalance
-  (Cont-Kukanov-Stoikov), imbalance de flux de trades, VPIN (toxicité de flux,
-  classification bulk-volume), lambda de Kyle (impact prix).
-- **Graphes SVG (`chart.rs`)** — chandeliers + overlays d'indicateurs +
-  marqueurs d'entrée/sortie et courbes d'équité, en SVG autonome que le LLM
-  affiche directement (« fournir des graphes »).
-- **Outils MCP (`scirust-mcp/src/tools/trader.rs`)** — 26 outils exposant tout
-  le pipeline à n'importe quel agent MCP : `trader_market_data`,
+- **Indicators (`indicators.rs`)** — +12 pro indicators beyond
+  RSI/MACD/ATR/Bollinger/SMA/EMA: Stochastic (%K/%D), ADX/DMI (+DI/−DI,
+  correct Wilder smoothing, ADX priming at `2·period−1`), OBV, rolling VWAP,
+  Williams %R, CCI (mean absolute deviation), MFI, ROC, momentum, Z-score,
+  Chaikin Money Flow, Supertrend (ATR bands + flip/reversal logic),
+  Donchian and Keltner channels, rolling extrema.
+- **Chart patterns (`patterns.rs`)** — deterministic detection of doji,
+  hammer/hanging man, inverted hammer/shooting star, marubozu, engulfing, piercing
+  line/dark cloud, morning/evening stars, three soldiers/crows.
+- **Order book (`orderbook.rs`)** — microstructure: mid, size-weighted micro-price,
+  spread (bps), depth, imbalance, **execution VWAP by walking the book**,
+  slippage and liquidity within X bps.
+- **Orders & matching engine (`orders.rs`)** — Market/Limit/
+  Stop/StopLimit/TakeProfit order types, TIF (GTC/IOC/FOK), post-only/reduce-only, maker/taker
+  fees, slippage model, tick/lot rounding, and deterministic *paper* fill
+  logic on candlesticks (standard backtest semantics).
+- **Portfolio (`portfolio.rs`)** — multi-asset accounts, netted long/short
+  positions (average cost, realized/unrealized PnL, reversal through zero),
+  mark-to-market equity, gross/net exposure, rebalancing toward target
+  weights, isolated liquidation price (leverage).
+- **Metrics (`metrics.rs`)** — Sharpe, Sortino, Calmar, CAGR, annualized
+  volatility, max drawdown, Ulcer Index, historical VaR/CVaR, Kelly
+  (discrete & continuous), win-rate, profit factor, expectancy, correlation, beta.
+- **Strategies (`strategy.rs`)** — `Strategy` trait + archetypes: SMA/EMA
+  crossover, RSI mean-reversion, MACD, Bollinger/Donchian breakout, Supertrend,
+  momentum; factory by name + parameters (drivable in natural language).
+- **Event-driven backtest (`backtest.rs`)** — decision at the close,
+  execution at the next open (**no look-ahead**), real fees/slippage,
+  round-trip trade journal, complete performance report,
+  buy-and-hold comparison.
+- **Opportunity discovery (`scanner.rs`)** — the core of "find me
+  trades that respect these conditions, with a profit target of X":
+  backtests every strategy × symbol, reads the current signal, filters on
+  constraints (return, drawdown, Sharpe, win-rate, profit factor, direction),
+  sizes an ATR-based entry/stop/take-profit/position plan, ranks, and
+  **seals each opportunity + the report with a verifiable SHA-256 proof**.
+- **Micro-order execution (`execution.rs`)** — splitting a parent order
+  into fast child orders: TWAP, VWAP (volume profile), POV, Iceberg,
+  micro-burst, and the **Almgren-Chriss** optimal trajectory
+  (`x_j=X·sinh(κ(T−t_j))/sinh(κT)`, `η̃=η−½γτ`), plus execution-quality
+  simulation (realized VWAP, slippage vs arrival price).
+- **Market making (`marketmaking.rs`)** — optimal **Avellaneda-
+  Stoikov** quotes: reservation price `r=s−q·γ·σ²·(T−t)`, optimal spread
+  `γ·σ²·(T−t)+(2/γ)·ln(1+γ/κ)`, inventory skew, GLFT approximation.
+- **Microstructure signals (`microstructure.rs`)** — Order-Flow Imbalance
+  (Cont-Kukanov-Stoikov), trade-flow imbalance, VPIN (flow toxicity,
+  bulk-volume classification), Kyle's lambda (price impact).
+- **SVG charts (`chart.rs`)** — candlesticks + indicator overlays +
+  entry/exit markers and equity curves, in standalone SVG that the LLM
+  displays directly ("provide charts").
+- **MCP tools (`scirust-mcp/src/tools/trader.rs`)** — 26 tools exposing the whole
+  pipeline to any MCP agent: `trader_market_data`,
   `trader_indicators`, `trader_patterns`, `trader_signal`, `trader_backtest`,
   `trader_scan_opportunities`, `trader_orderbook`, `trader_size_position`,
   `trader_execution_plan`, `trader_market_making_quotes`,
   `trader_microstructure`, `trader_metrics`, `trader_chart`,
-  `trader_certified_predict` (prédiction ML bornée par IBP), `trader_portfolio`
-  (état du portefeuille : PnL réalisé/latent, équité mark-to-market, exposition
-  brute/nette, prix de liquidation avec levier), `trader_rebalance`
-  (ordres pour atteindre des poids cibles) et `trader_dashboard` (rapport HTML
-  autonome : opportunités + preuves + cartes de métriques + courbe d'équité) —
-  le portefeuille et le reporting se pilotent au chat.
-- **Tableau de bord (`dashboard.rs`)** — génération d'une page HTML autonome
-  (CSS inline, SVG embarqué, thème clair/sombre) réunissant le scan
-  d'opportunités et un backtest ; « montre-moi » devient un rapport visuel
-  partageable plutôt qu'un mur de JSON.
-- **Robustesse anti-surapprentissage (`robustness.rs` + 2 outils MCP)** — un
-  scanner qui garde la meilleure de nombreuses stratégies trouve forcément des
-  flukes ; deux garde-fous : `walk_forward` (backtest sur segments séquentiels
-  indépendants → **consistance out-of-sample** = fraction de fenêtres
-  gagnantes, pour distinguer un edge durable d'un ajustement de courbe) et
-  `monte_carlo` (ré-échantillonnage bootstrap **déterministe** du journal de
-  trades → bandes de percentiles d'équité, distribution du max drawdown,
-  probabilité de perte et de **ruine**). Outils MCP `trader_walkforward` et
+  `trader_certified_predict` (ML prediction bounded by IBP), `trader_portfolio`
+  (portfolio state: realized/unrealized PnL, mark-to-market equity, gross/net
+  exposure, liquidation price with leverage), `trader_rebalance`
+  (orders to reach target weights) and `trader_dashboard` (standalone HTML
+  report: opportunities + proofs + metrics cards + equity curve) —
+  portfolio and reporting are driven from the chat.
+- **Dashboard (`dashboard.rs`)** — generation of a standalone HTML page
+  (inline CSS, embedded SVG, light/dark theme) bringing together the opportunity
+  scan and a backtest; "show me" becomes a shareable visual report
+  rather than a wall of JSON.
+- **Anti-overfitting robustness (`robustness.rs` + 2 MCP tools)** — a
+  scanner that keeps the best of many strategies inevitably finds
+  flukes; two guardrails: `walk_forward` (backtest on sequential independent
+  segments → **out-of-sample consistency** = fraction of winning windows,
+  to distinguish a durable edge from curve fitting) and
+  `monte_carlo` (**deterministic** bootstrap resampling of the trade
+  journal → equity percentile bands, max drawdown distribution,
+  probability of loss and of **ruin**). MCP tools `trader_walkforward` and
   `trader_monte_carlo`.
-- **Construction de portefeuille (`portfolio_opt.rs` + 1 outil MCP)** — passer
-  d'un signal par actif à une **allocation multi-actifs** : matrice de
-  covariance et de corrélation des rendements, volatilités annualisées, et
-  quatre méthodes de pondération — poids égaux, **inverse-vol**,
-  **inverse-variance** et **variance minimale** (inversion Gauss-Jordan
-  régularisée par crête, repli sur inverse-variance si singulière),
-  long-only en option. Diagnostics de risque : contributions au risque par
-  actif, **ratio de diversification** et variance de portefeuille. L'outil
-  MCP `trader_portfolio_construct` prend des rendements (ou des séries OHLCV
-  alignées), renvoie des poids cibles + la matrice de corrélation, et se
-  branche sur `trader_rebalance` pour émettre les ordres — « construis-moi un
-  portefeuille » se pilote au chat.
-- **Détection de régime de marché (`regime.rs` + 1 outil MCP)** — lire *l'état
-  du marché* avant de choisir comment y trader. Trois lectures orthogonales
-  fusionnées en une taxonomie de six régimes (haussier/baissier × calme/volatil,
-  plus range et crise) : **volatilité réalisée glissante** classée par
-  percentile (calme / élevé / crise, la volatilité étant auto-corrélée —
-  Mandelbrot 1963), **force de tendance** = pente OLS du log-prix normalisée par
-  la volatilité (un t-stat signal/bruit), et **exposant de Hurst** par analyse
-  R/S (Hurst 1951, Mandelbrot & Wallis 1969 ; `H>0.5` tendanciel/momentum,
-  `H<0.5` retour à la moyenne). Les labels par barre alimentent une **matrice de
-  transition de Markov** empirique → durées de régime attendues et occupation
-  stationnaire (long terme). L'outil MCP `trader_regime` renvoie le régime
-  courant, une **posture recommandée** (famille de stratégie + levier à adapter
-  aux conditions), et toute la dynamique de transition — déterministe.
-- **Optimisation de paramètres anti-surapprentissage (`optimize.rs` + 1 outil
-  MCP)** — répondre honnêtement à « quels paramètres utiliser ? ». Un balayage
-  naïf qui garde le meilleur backtest ne fait que sur-ajuster le passé ; ce
-  module reproduit la validation d'un desk systématique : (1) **découpe**
-  l'historique en une portion *train* et un *holdout* jamais vu par la
-  recherche ; (2) **explore** la grille sur le train uniquement, en classant les
-  candidats non par leur meilleur ajustement plein-échantillon mais par leur
-  **consistance walk-forward hors-échantillon** (via `robustness`) — un jeu de
-  paramètres qui ne marche que sur une fenêtre chanceuse est mal classé même
-  in-sample ; (3) **confirme** les finalistes sur le holdout, la dégradation de
-  Sharpe train→holdout (`overfit_gap`) trahissant le surapprentissage ; (4) rend
-  un **verdict** en clair (robuste / partiel / surappris). L'outil MCP
-  `trader_optimize` accepte une grille explicite `{param:[valeurs]}` ou des
-  grilles par défaut par stratégie, cinq objectifs de classement, et borne le
-  balayage (`max_combos`, échantillonnage régulier) — déterministe.
-- **Arbitrage statistique / pairs trading (`pairs.rs` + 2 outils MCP)** — trader
-  la *relation* entre deux actifs plutôt que la direction de l'un : marché-neutre
-  (long une jambe, short l'autre), rentable même dans un marché plat ou baissier.
-  Boîte à outils quant standard : **ratio de couverture** par MCO (β tel que
-  `A−βB` soit stationnaire), test de **cointégration** d'Engle-Granger (t-stat de
-  Dickey-Fuller sur le coefficient AR(1) de retour à la moyenne du spread),
-  **demi-vie** de retour à la moyenne (Ornstein-Uhlenbeck), exposant de Hurst du
-  spread (confirmation indépendante `H<0.5`), et **z-score** du spread pour le
-  signal (short le spread quand il est riche, long quand il est bon marché).
-  `trader_pair_analyze` analyse une paire (cointégration + couverture + signal +
-  verdict) ; `trader_pair_scan` teste toutes les paires d'un panier et classe les
-  plus tradables (spread le plus stationnaire en tête) — déterministe.
-- **Options / dérivés (`options.rs` + 2 outils MCP)** — une nouvelle classe
-  d'instruments : une créance à effet de levier, convexe, sensible à la
-  **volatilité**. Boîte à outils du desk d'options : **pricing Black-Scholes-
-  Merton** de calls/puts européens (avec rendement de portage/dividende continu),
-  les **Grecs** en conventions de marché (delta, gamma, véga par point de vol,
-  thêta par jour, rhô par point de taux), la **volatilité implicite** par
-  bissection robuste bornée (bornes de non-arbitrage vérifiées), et l'analyse
-  (moneyness, valeur intrinsèque/temps, point mort, probabilité risque-neutre de
-  finir dans la monnaie). Agrégation de **livre d'options** : Grecs nets d'un
-  portefeuille de jambes + la quantité de spot qui **neutralise le delta**
-  (couverture). `trader_option_price` price une option (+ Grecs + VI) ;
-  `trader_option_book` agrège un livre et calcule la couverture delta —
-  déterministe (validé : parité call-put, aller-retour de VI, valeurs de
-  référence Black-Scholes).
-- **CLI (`scirust trader …`)** — nouvelles sous-commandes `strategies`,
-  `scan` (scan d'opportunités sur données mock, preuve vérifiée), `chart`
-  (écrit un SVG de courbe d'équité) et `dashboard` (écrit un rapport HTML).
-- **Connexion aux portefeuilles (`wallet.rs` + 7 outils MCP)** — plomberie
-  conforme aux protocoles reconnus, **watch-only / dry-run par défaut** :
-  Keccak-256 et HMAC-SHA256 en Rust pur (vérifiés contre les vecteurs
-  Ethereum et RFC 4231), adresses EVM avec checksum **EIP-55** (vérifié
-  contre les 4 exemples canoniques), parsing d'URI de pairing **WalletConnect
-  v2** + namespaces `eip155`/CAIP-2, construction de transactions **EIP-1559**
-  avec hash de signature (RLP + keccak, non signé), séparateur de domaine et
-  digest **EIP-712**, signature de requêtes REST d'exchange (Binance/Coinbase,
-  HMAC), et un connecteur watch-only + lecture de solde JSON-RPC (derrière
-  `live`). **Sécurité** : toute action qui signe ou déplace des fonds est
-  verrouillée derrière une `WalletAuthorization` signée hors-bande avec une
-  clé côté serveur (`SCIRUST_WALLET_KEY`) que le LLM ne peut pas fabriquer ;
-  les secrets d'exchange proviennent d'une variable d'environnement
-  (`SCIRUST_EXCHANGE_SECRET`) et ne transitent jamais par la conversation.
-  Outils MCP : `wallet_validate_address`, `wallet_parse_walletconnect_uri`,
+- **Portfolio construction (`portfolio_opt.rs` + 1 MCP tool)** — going
+  from a per-asset signal to a **multi-asset allocation**: return covariance
+  and correlation matrix, annualized volatilities, and
+  four weighting methods — equal weights, **inverse-vol**,
+  **inverse-variance** and **minimum variance** (ridge-regularized Gauss-Jordan
+  inversion, falling back to inverse-variance if singular),
+  long-only optional. Risk diagnostics: per-asset risk contributions,
+  **diversification ratio** and portfolio variance. The
+  MCP tool `trader_portfolio_construct` takes returns (or aligned OHLCV
+  series), returns target weights + the correlation matrix, and
+  hooks into `trader_rebalance` to issue the orders — "build me a
+  portfolio" is driven from the chat.
+- **Market regime detection (`regime.rs` + 1 MCP tool)** — reading *the state
+  of the market* before choosing how to trade it. Three orthogonal readings
+  merged into a taxonomy of six regimes (bullish/bearish × calm/volatile,
+  plus range and crisis): **rolling realized volatility** classified by
+  percentile (calm / high / crisis, volatility being autocorrelated —
+  Mandelbrot 1963), **trend strength** = OLS slope of the log-price normalized by
+  volatility (a signal/noise t-stat), and **Hurst exponent** via R/S
+  analysis (Hurst 1951, Mandelbrot & Wallis 1969; `H>0.5` trending/momentum,
+  `H<0.5` mean-reverting). The per-bar labels feed an empirical **Markov
+  transition matrix** → expected regime durations and stationary
+  (long-term) occupancy. The MCP tool `trader_regime` returns the current
+  regime, a **recommended posture** (strategy family + leverage to adapt
+  to conditions), and the full transition dynamics — deterministic.
+- **Anti-overfitting parameter optimization (`optimize.rs` + 1 MCP
+  tool)** — honestly answering "which parameters to use?". A naive
+  sweep that keeps the best backtest only overfits the past; this
+  module reproduces a systematic desk's validation: (1) **splits**
+  the history into a *train* portion and a *holdout* never seen by the
+  search; (2) **explores** the grid on the train only, ranking
+  candidates not by their best full-sample fit but by their
+  **out-of-sample walk-forward consistency** (via `robustness`) — a parameter
+  set that only works on a lucky window is poorly ranked even
+  in-sample; (3) **confirms** the finalists on the holdout, the Sharpe
+  train→holdout degradation (`overfit_gap`) betraying overfitting; (4) returns
+  a clear **verdict** (robust / partial / overfit). The MCP tool
+  `trader_optimize` accepts an explicit `{param:[values]}` grid or
+  per-strategy default grids, five ranking objectives, and bounds the
+  sweep (`max_combos`, regular sampling) — deterministic.
+- **Statistical arbitrage / pairs trading (`pairs.rs` + 2 MCP tools)** — trading
+  the *relationship* between two assets rather than the direction of one: market-neutral
+  (long one leg, short the other), profitable even in a flat or bearish market.
+  Standard quant toolkit: **hedge ratio** by OLS (β such that
+  `A−βB` is stationary), **Engle-Granger cointegration** test (Dickey-Fuller
+  t-stat on the AR(1) mean-reversion coefficient of the spread),
+  mean-reversion **half-life** (Ornstein-Uhlenbeck), Hurst exponent of the
+  spread (independent confirmation `H<0.5`), and **z-score** of the spread for the
+  signal (short the spread when it is rich, long when it is cheap).
+  `trader_pair_analyze` analyzes a pair (cointegration + hedge + signal +
+  verdict); `trader_pair_scan` tests all pairs of a basket and ranks the
+  most tradable ones (most stationary spread first) — deterministic.
+- **Options / derivatives (`options.rs` + 2 MCP tools)** — a new class
+  of instruments: a leveraged, convex claim sensitive to
+  **volatility**. The options desk toolkit: **Black-Scholes-Merton pricing**
+  of European calls/puts (with continuous carry/dividend yield),
+  the **Greeks** in market conventions (delta, gamma, vega per vol point,
+  theta per day, rho per rate point), **implied volatility** by robust bounded
+  bisection (non-arbitrage bounds checked), and analysis
+  (moneyness, intrinsic/time value, breakeven, risk-neutral probability of
+  finishing in the money). **Options book** aggregation: net Greeks of a
+  portfolio of legs + the amount of spot that **neutralizes the delta**
+  (hedging). `trader_option_price` prices an option (+ Greeks + IV);
+  `trader_option_book` aggregates a book and computes the delta hedge —
+  deterministic (validated: call-put parity, IV round-trip, Black-Scholes
+  reference values).
+- **CLI (`scirust trader …`)** — new subcommands `strategies`,
+  `scan` (opportunity scan on mock data, verified proof), `chart`
+  (writes an SVG equity curve) and `dashboard` (writes an HTML report).
+- **Wallet connectivity (`wallet.rs` + 7 MCP tools)** — plumbing
+  conforming to recognized protocols, **watch-only / dry-run by default**:
+  Keccak-256 and HMAC-SHA256 in pure Rust (verified against the Ethereum
+  and RFC 4231 vectors), EVM addresses with **EIP-55** checksum (verified
+  against the 4 canonical examples), **WalletConnect v2** pairing URI parsing
+  + `eip155`/CAIP-2 namespaces, **EIP-1559** transaction construction
+  with signature hash (RLP + keccak, unsigned), **EIP-712** domain separator and
+  digest, signing of exchange REST requests (Binance/Coinbase,
+  HMAC), and a watch-only connector + JSON-RPC balance reading (behind
+  `live`). **Security**: any action that signs or moves funds is
+  locked behind a `WalletAuthorization` signed out-of-band with a
+  server-side key (`SCIRUST_WALLET_KEY`) that the LLM cannot forge;
+  exchange secrets come from an environment variable
+  (`SCIRUST_EXCHANGE_SECRET`) and never transit through the conversation.
+  MCP tools: `wallet_validate_address`, `wallet_parse_walletconnect_uri`,
   `wallet_walletconnect_namespace`, `wallet_build_evm_transaction`,
   `wallet_eip712_hash`, `wallet_sign_exchange_request`,
   `wallet_authorization_status`.
-- **Durcissement de l'autorisation portefeuille (revue de sécurité, avant toute
-  exécution réelle)** — le modèle d'autorisation est renforcé pour éliminer les
-  contournements d'un simple plafond en valeur native, **sans activer la moindre
-  signature réelle** (aucune signature ECDSA n'existe ; l'autorisation reste un
-  jeton de capacité pur). `WalletAuthorization` est désormais lié au *contexte de
-  la transaction* — allowlist de destinataires (`allowed_to`) et de **sélecteurs
-  de calldata** (`allowed_selectors`, vide ⇒ transferts natifs uniquement, ce qui
-  bloque un `transfer` ERC-20 à `value=0` qui esquivait le plafond natif),
-  plafond par transaction **et budget cumulé** (`cumulative_budget_wei`), et un
-  mode **lié** (`bound_tx_hash`) à usage unique qui n'autorise qu'une transaction
-  au hash exact. Un `SpendLedger` applique l'usage unique et le budget cumulé
-  (anti-rejeu). L'encodage canonique signé est **préfixé en longueur** (plus
-  d'ambiguïté de délimiteur). Le contrôle de fenêtre de validité utilise
-  l'horloge **serveur**, jamais un temps fourni par le client. Côté exchange, la
-  signature REST refuse **toujours** les endpoints de retrait / transfert /
-  gestion de clés et respecte une allowlist opérateur optionnelle
-  (`SCIRUST_EXCHANGE_ALLOWED_PATHS`). Tout reste en simulation ; l'exécution
-  réelle derrière `live` reste non implémentée et exige une revue dédiée.
+- **Wallet authorization hardening (security review, before any real
+  execution)** — the authorization model is strengthened to eliminate
+  bypasses of a simple native-value cap, **without enabling any real
+  signature** (no ECDSA signature exists; the authorization remains a pure
+  capability token). `WalletAuthorization` is now bound to the *transaction
+  context* — allowlist of recipients (`allowed_to`) and of **calldata
+  selectors** (`allowed_selectors`, empty ⇒ native transfers only, which
+  blocks an ERC-20 `transfer` at `value=0` that dodged the native cap),
+  per-transaction cap **and cumulative budget** (`cumulative_budget_wei`), and a
+  **bound** mode (`bound_tx_hash`), single-use, that only authorizes a transaction
+  with the exact hash. A `SpendLedger` enforces single-use and the cumulative budget
+  (anti-replay). The signed canonical encoding is **length-prefixed** (no
+  more delimiter ambiguity). The validity-window check uses the **server**
+  clock, never a client-supplied time. On the exchange side, the REST
+  signature **always** refuses withdrawal/transfer/key-management
+  endpoints and honors an optional operator allowlist
+  (`SCIRUST_EXCHANGE_ALLOWED_PATHS`). Everything remains in simulation; real
+  execution behind `live` remains unimplemented and requires a dedicated review.
 
-### Ajouté — verticaux industriels D2-D8 de `docs/DOMAIN_ROADMAP.md`
-Chaque domaine documenté dans la feuille de route de marché reçoit maintenant
-une implémentation (ou, quand une pièce ne peut pas être vérifiée avec une
-confiance suffisante pour du code de sécurité, une limite honnête explicite
-plutôt qu'une formule devinée) :
+### Added — industrial verticals D2-D8 from `docs/DOMAIN_ROADMAP.md`
+Each domain documented in the market roadmap now receives
+an implementation (or, when a piece cannot be verified with sufficient
+confidence for safety code, an explicit honest limit
+rather than a guessed formula):
 
-- **`scirust-grid`** (existant, complété — D2 protection réseau) : nouveaux
-  modules `state_estimation` (estimation d'état par moindres carrés pondérés
-  `x̂=(HᵀWH)⁻¹HᵀWz`, détection de mauvaises données par test du χ² global et
-  test du plus grand résidu normalisé, Abur & Expósito — vérifié contre un
-  exemple 3-nœuds calculé indépendamment) et `distance_relay` (comparateur
-  mho multi-zones, IEEE C37.113 §5.2).
-- **`scirust-biomed`** (existant, complété — D3 dispositifs médicaux) :
-  nouveau module `control` (`pid`, `iob`, `insulin_safety`, `barrier`) — PID
-  à anti-windup conditionnel, suivi d'insuline active par décroissance
-  exponentielle, supervision par seuils (suspension sur glycémie basse,
-  sortie de mode automatique), et un filtre de sécurité **Control Barrier
-  Function** (Ames et al., IEEE TAC 2017) résolu en forme close. Chaque
-  module porte un avertissement de non-usage clinique explicite : ceci
-  démontre des techniques de contrôle certifiable, pas un algorithme de
-  dosage homologable.
-- **`scirust-maritime`** (nouvelle crate — D5 maritime autonome) :
-  `colregs` (classification de rencontre COLREG par relèvement relatif),
-  `cpa_tcpa` (évaluation du risque de collision, vérifié contre un exemple
-  travaillé à deux navires : TCPA≈54.5min, CPA≈3.41nm), `thrust_allocation`
-  (allocation de poussée DP par pseudo-inverse pondérée, Fossen 2011,
-  vérifiée contre la pseudo-inverse de Moore-Penrose numpy).
-- **`scirust-fab`** (nouvelle crate — D6 semi-conducteurs) : `r2r`
-  (contrôleur EWMA run-to-run, Sachs, Hu & Ingolfsson 1995, vérifié contre
-  un exemple travaillé et une preuve de convergence géométrique) et `pca`
-  (FDC multivarié T²/SPE, Kourti & MacGregor 1995, sur la SVD générale de
-  `scirust-solvers`) — construit par-dessus `scirust-spc` (`EwmaChart`,
-  `HotellingT2`) déjà présent, sans le dupliquer.
-- **`scirust-agtech`** (nouvelle crate — D7 agriculture de précision) :
-  pipeline de nettoyage de carte de rendement déterministe et auditable
-  (`outlier_filter` : filtres global + local, Sudduth & Drummond 2007 ;
-  `idw` : interpolation par pondération inverse à la distance) répondant à
-  la divergence documentée entre QGIS/Agro-Map/Farm Works (Walczykova et
-  al. 2018). `agpl` expose le modèle des trois paramètres de risque
-  ISO 25119-2 (Sévérité/Exposition/Contrôlabilité, vérifié contre le texte
-  normatif) mais **n'implémente délibérément pas** la fonction de décision
-  `S×E×C→AgPL` : le graphe de risque complet (Figure 1, §6.3.7) n'apparaît
-  dans aucune source ouverte vérifiable trouvée.
-- **`scirust-fatigue`** (nouvelle crate — D4 fatigue structurelle) :
-  `rainflow` (comptage de cycles ASTM E1049-85 §5.4.4, port de l'algorithme
-  à pile vérifié valeur par valeur contre la bibliothèque de référence PyPI
-  `rainflow` sur deux séquences indépendantes) et `miner` (règle de
-  Palmgren-Miner de cumul de dommage, courbe S-N en loi de puissance
-  générique — aucune courbe de matériau réel n'est prétendue).
-- **`scirust-sis`** (complété — D8 nucléaire) : nouveau module
+- **`scirust-grid`** (existing, completed — D2 network protection): new
+  modules `state_estimation` (weighted-least-squares state estimation
+  `x̂=(HᵀWH)⁻¹HᵀWz`, bad-data detection via the global χ² test and
+  the largest normalized residual test, Abur & Expósito — verified against an
+  independently computed 3-node example) and `distance_relay` (multi-zone mho
+  comparator, IEEE C37.113 §5.2).
+- **`scirust-biomed`** (existing, completed — D3 medical devices):
+  new module `control` (`pid`, `iob`, `insulin_safety`, `barrier`) — PID
+  with conditional anti-windup, active-insulin tracking via exponential
+  decay, threshold-based supervision (suspension on low glucose,
+  exit from automatic mode), and a **Control Barrier Function** safety
+  filter (Ames et al., IEEE TAC 2017) solved in closed form. Each
+  module carries an explicit non-clinical-use warning: this
+  demonstrates certifiable control techniques, not an approvable
+  dosing algorithm.
+- **`scirust-maritime`** (new crate — D5 autonomous maritime):
+  `colregs` (COLREG encounter classification by relative bearing),
+  `cpa_tcpa` (collision risk assessment, verified against a worked
+  two-vessel example: TCPA≈54.5min, CPA≈3.41nm), `thrust_allocation`
+  (DP thrust allocation via weighted pseudo-inverse, Fossen 2011,
+  verified against the numpy Moore-Penrose pseudo-inverse).
+- **`scirust-fab`** (new crate — D6 semiconductors): `r2r`
+  (EWMA run-to-run controller, Sachs, Hu & Ingolfsson 1995, verified against
+  a worked example and a geometric-convergence proof) and `pca`
+  (multivariate FDC T²/SPE, Kourti & MacGregor 1995, on the general SVD of
+  `scirust-solvers`) — built on top of the already-present `scirust-spc` (`EwmaChart`,
+  `HotellingT2`), without duplicating it.
+- **`scirust-agtech`** (new crate — D7 precision agriculture):
+  deterministic and auditable yield-map cleaning pipeline
+  (`outlier_filter`: global + local filters, Sudduth & Drummond 2007;
+  `idw`: inverse-distance-weighting interpolation) addressing
+  the documented divergence between QGIS/Agro-Map/Farm Works (Walczykova et
+  al. 2018). `agpl` exposes the three risk parameters of
+  ISO 25119-2 (Severity/Exposure/Controllability, verified against the
+  normative text) but **deliberately does not implement** the decision
+  function `S×E×C→AgPL`: the complete risk graph (Figure 1, §6.3.7) does not appear
+  in any verifiable open source found.
+- **`scirust-fatigue`** (new crate — D4 structural fatigue):
+  `rainflow` (cycle counting per ASTM E1049-85 §5.4.4, port of the
+  stack-based algorithm verified value by value against the PyPI reference
+  library `rainflow` on two independent sequences) and `miner` (the
+  Palmgren-Miner damage accumulation rule, power-law generic S-N curve —
+  no real material curve is claimed).
+- **`scirust-sis`** (completed — D8 nuclear): new module
   `reactor_trip` (`architecture_with_bypass`, `pfd_avg_during_bypass`) —
-  reconfiguration du vote MooN quand un canal est en dérivation pour
-  maintenance (IEC 61513 §6.2.3.5, réduit `N` sans changer `M`), construit
-  entièrement sur les primitives déjà vérifiées de `Architecture` et
-  `pfd_moon`. La méthodologie de seuil ISA-67.04 reste documentée mais non
-  implémentée (limite honnête, pas un oubli).
-- **`scirust-tolerance`** (nouvelle crate — tolérancement inertiel) : la
-  méthode de M. Pillet et du laboratoire SYMME (Adragna, Pillet, Formosa,
-  Samper — arXiv:1002.0270), qui tolérance l'**inertie**
-  `I = √(δ² + σ²)` (l'écart quadratique moyen à la cible, soit
-  `√(E[perte de Taguchi]/k)`) plutôt que la distance à un intervalle. Cinq
-  modules : `inertia` (type `Inertia`, estimation d'échantillon avec `Î²`
-  estimateur non biaisé de `I²`, perte de Taguchi, budget `I_max`, cône
-  d'inertie), `capability` (`Cp`/`Cpk`/`Cpm`/`Cpmk`/`Pp`/`Ppk`, l'indice
-  inertiel `Cpi = I_max/I` — égal à `Cpm` au budget `Cp=1` —, non-conformité
-  en ppm avec une queue `erfc` fiable jusqu'à 6σ), `chain` (analyse et
-  répartition de chaînes de cotes 1D : pire cas / statistique / pondérée /
-  garantie d'un `Cpk` par le coefficient `ICC = √(Cpk²+n/9)`, **vérifié
-  contre le tableau 2 de arXiv:1002.0270** : `0.033`/`0.075`/`0.060`),
-  `chart` (carte de pilotage inertiel avec limite `UPL(α) = I_max·√(χ²_{n;1−α}/n)`
-  et recommandation recentrer / réduire la dispersion), `sampling`
-  (échantillonnage d'acceptation par inertie, Pillet & Maire — loi du χ²
-  **non-centré** `n·Î²/σ² ~ χ'²(n, λ=n·δ²/σ²)`, courbe d'efficacité et
-  synthèse d'un plan `(n, k)` satisfaisant risques fournisseur α et
-  client β), et `special` (`erf`/`erfc`/CDF normale/quantile χ² et **CDF
-  du χ² non-centré**, validés contre valeurs de référence — dont des
-  ancres Monte-Carlo indépendantes pour le χ² non-centré). Le module
-  `inertia` couvre aussi le **mélange de lots** (`I_c² = Σ pᵢ Iᵢ²`, un
-  avantage clé du tolérancement inertiel), la combinaison multi-DOF/3D
-  (`vector_inertia`), la correction de l'inertie observée pour l'incertitude
-  de mesure, et une répartition **à coût minimal** (`CostOptimal`, minimum
-  lagrangien en forme close, vérifié par les conditions KKT). Pur Rust,
-  dépendance unique `serde`. Découvert et corrigé par une passe de
-  vérification adverse : saturation de `erf` à `|x|≥6` (débordement→NaN
-  pour grand `x`).
-- **`scirust-mcp`** : un outil par domaine ci-dessus
+  reconfiguration of the MooN voting when a channel is bypassed for
+  maintenance (IEC 61513 §6.2.3.5, reducing `N` without changing `M`), built
+  entirely on the already-verified primitives of `Architecture` and
+  `pfd_moon`. The ISA-67.04 threshold methodology remains documented but
+  unimplemented (an honest limit, not an omission).
+- **`scirust-tolerance`** (new crate — inertial tolerancing): the
+  method of M. Pillet and the SYMME laboratory (Adragna, Pillet, Formosa,
+  Samper — arXiv:1002.0270), which tolerances the **inertia**
+  `I = √(δ² + σ²)` (the quadratic mean deviation from target, i.e.
+  `√(E[Taguchi loss]/k)`) rather than the distance to an interval. Five
+  modules: `inertia` (`Inertia` type, sample estimation with the `Î²`
+  unbiased estimator of `I²`, Taguchi loss, `I_max` budget, inertia
+  cone), `capability` (`Cp`/`Cpk`/`Cpm`/`Cpmk`/`Pp`/`Ppk`, the inertial
+  index `Cpi = I_max/I` — equal to `Cpm` at the `Cp=1` budget —, non-conformance
+  in ppm with an `erfc` tail reliable up to 6σ), `chain` (analysis and
+  allocation of 1D tolerance chains: worst-case / statistical / weighted /
+  guarantee of a `Cpk` via the coefficient `ICC = √(Cpk²+n/9)`, **verified
+  against table 2 of arXiv:1002.0270**: `0.033`/`0.075`/`0.060`),
+  `chart` (inertial control chart with limit `UPL(α) = I_max·√(χ²_{n;1−α}/n)`
+  and recenter/reduce-dispersion recommendation), `sampling`
+  (acceptance sampling by inertia, Pillet & Maire — **non-central** χ² law
+  `n·Î²/σ² ~ χ'²(n, λ=n·δ²/σ²)`, efficiency curve and
+  synthesis of a `(n, k)` plan satisfying supplier risk α and
+  customer risk β), and `special` (`erf`/`erfc`/normal CDF/χ² quantile and **CDF
+  of the non-central χ²**, validated against reference values — including
+  independent Monte-Carlo anchors for the non-central χ²). The
+  `inertia` module also covers **lot mixing** (`I_c² = Σ pᵢ Iᵢ²`, a
+  key advantage of inertial tolerancing), multi-DOF/3D combination
+  (`vector_inertia`), correction of the observed inertia for measurement
+  uncertainty, and a **minimal-cost** allocation (`CostOptimal`, closed-form
+  Lagrangian minimum, verified via the KKT conditions). Pure Rust,
+  single dependency `serde`. Discovered and fixed by an adversarial
+  verification pass: saturation of `erf` at `|x|≥6` (overflow→NaN
+  for large `x`).
+- **`scirust-mcp`**: one tool per domain above
   (`grid_state_estimate`, `biomed_cbf_safe_dose`, `maritime_collision_risk`,
   `fab_r2r_update`, `agtech_clean_yield_map`, `fatigue_rainflow_damage`,
   `sis_reactor_trip_bypass`, `tolerance_inertial_capability`,
-  `tolerance_chain_allocate`, `tolerance_acceptance_plan`) — chaque domaine
-  ajouté devient immédiatement pilotable par un agent, conformément à la
-  doctrine du connecteur unique de `docs/DOMAIN_ROADMAP.md`.
+  `tolerance_chain_allocate`, `tolerance_acceptance_plan`) — each added domain
+  immediately becomes drivable by an agent, in accordance with the
+  single-connector doctrine of `docs/DOMAIN_ROADMAP.md`.
 
-### Ajouté — algèbre linéaire et solveurs
-- **`scirust-solvers`** : **SVD aléatoire** (Halko, Martinsson & Tropp 2011 —
-  projection sur sous-espace aléatoire germé par un `SplitMix64` déterministe
-  maison, avec itérations de puissance optionnelles et ré-orthonormalisation
-  QR) pour approximer la SVD tronquée d'une matrice sans la décomposer en
-  entier ; **accélération d'Anderson** (Walker & Ni 2011) pour les
-  itérations à point fixe, réduite à des moindres carrés sans contrainte
-  résolus par la QR déjà présente. Même graine ⇒ sortie bit-identique.
-- **`scirust-reliability`** : nouvelle formule générale `pfd_moon(m, n, ...)`
-  généralisant PFDavg à toute architecture `M`-parmi-`N` au-delà des cinq
-  tabulées par IEC 61508-6 Annexe B (validée contre les cinq cas nommés et
-  contre 2oo4/3oo4 par dérivation indépendante — voir la doc du module pour
-  le near-miss de généralisation naïve qui a motivé cette vérification
-  poussée). `scirust-sis::voting::Architecture::pfd_avg` s'y replie
-  désormais au lieu de refuser les architectures non tabulées (2oo4, etc.).
-- **`scirust-sis`** : nouveau mode de panne « déclenchement intempestif »
-  (`fault_injection::simulate_demand_with_spurious`) — modélise un canal
-  bloqué en position déclenchée, indépendamment des pannes dangereuses non
-  détectées déjà modélisées.
-- **`scirust-discovery`** : trois nouveaux protocoles de découverte —
-  BACnet/IP (Who-Is/I-Am), SNMPv1 (GET sysDescr.0, encodeur/décodeur BER
-  minimal maison), EtherNet/IP (CIP ListIdentity — en-tête d'encapsulation à
-  confiance élevée, disposition interne de l'item Identity documentée comme
-  moins vérifiée faute de matériel réel pour confirmer).
+### Added — linear algebra and solvers
+- **`scirust-solvers`**: **randomized SVD** (Halko, Martinsson & Tropp 2011 —
+  projection onto a random subspace seeded by a homegrown deterministic
+  `SplitMix64`, with optional power iterations and QR
+  re-orthonormalization) to approximate the truncated SVD of a matrix without
+  decomposing it in full; **Anderson acceleration** (Walker & Ni 2011) for
+  fixed-point iterations, reduced to unconstrained least squares
+  solved by the already-present QR. Same seed ⇒ bit-identical output.
+- **`scirust-reliability`**: new general formula `pfd_moon(m, n, ...)`
+  generalizing PFDavg to any `M`-out-of-`N` architecture beyond the five
+  tabulated by IEC 61508-6 Annex B (validated against the five named cases and
+  against 2oo4/3oo4 by independent derivation — see the module doc for
+  the naive-generalization near-miss that motivated this thorough
+  verification). `scirust-sis::voting::Architecture::pfd_avg` now falls back
+  to it instead of refusing non-tabulated architectures (2oo4, etc.).
+- **`scirust-sis`**: new "spurious trip" failure mode
+  (`fault_injection::simulate_demand_with_spurious`) — models a channel
+  stuck in the tripped position, independently of the undetected dangerous
+  failures already modeled.
+- **`scirust-discovery`**: three new discovery protocols —
+  BACnet/IP (Who-Is/I-Am), SNMPv1 (GET sysDescr.0, minimal homegrown BER
+  encoder/decoder), EtherNet/IP (CIP ListIdentity — encapsulation header at
+  high confidence, internal layout of the Identity item documented as
+  less verified for lack of real hardware to confirm).
 
-### Ajouté — sûreté fonctionnelle des procédés (IEC 61511/61508 — SIS)
-- **`scirust-reliability`** (existant, complété) : ajout des architectures de
-  vote manquantes `pfd_2oo2` (`λDU·T1`, pas de terme β — un 2oo2 n'a aucune
-  redondance à vaincre pour une défaillance dangereuse) et `pfd_1oo3`
-  (`(1−β)³(λT1)³/4 + β·λT1/2`), complétant la famille MooN
-  1oo1/1oo2/2oo2/2oo3/1oo3. `Sil` dérive maintenant `Ord` (bande la plus
-  haute = garantie la plus forte). Nouveau test de validation contre un
-  exemple publié externe (Lundteigen & Rausand, NTNU, ch. 8, diapo 27/43 :
-  2oo3, λDU=1e-6/h, τ=8760h, β=10% → PFDavg≈5.00e-4), en plus des dérivations
-  à la main déjà présentes.
-- **`scirust-sis`** (nouvelle crate) : la couche systèmes/logique par-dessus
-  ces primitives — architectures de vote `M`-parmi-`N` (évaluation de votes
-  en décision de déclenchement), boucle SIF complète (capteurs → automate
-  logique → éléments finaux, PFDavg total = somme des sous-systèmes, pratique
-  ISA-TR84.00.02 standard), injection de pannes (démontre empiriquement
-  qu'un 2oo3 tolère un canal en panne mais qu'un 2oo2 non), matrices
-  cause-à-effet évaluées déterministiquement, dimensionnement d'intervalle
-  de test de preuve par inversion numérique de PFDavg (réutilise
-  `scirust-solvers::roots::bisection`), et un journal d'audit hash-chaîné
-  SHA-256 des décisions de déclenchement et des changements de matrice
-  cause-à-effet — motivé directement par l'attaque Triton/Trisis (2017)
-  contre des automates de sécurité Triconex Schneider. Exposé comme outils
-  MCP (`sis_verify_sif_loop`, `sis_size_proof_test_interval`). Marque le
-  domaine D1 de `docs/DOMAIN_ROADMAP.md` comme fait.
+### Added — process functional safety (IEC 61511/61508 — SIS)
+- **`scirust-reliability`** (existing, completed): addition of the missing
+  voting architectures `pfd_2oo2` (`λDU·T1`, no β term — a 2oo2 has no
+  redundancy to defeat for a dangerous failure) and `pfd_1oo3`
+  (`(1−β)³(λT1)³/4 + β·λT1/2`), completing the MooN family
+  1oo1/1oo2/2oo2/2oo3/1oo3. `Sil` now derives `Ord` (highest band =
+  strongest guarantee). New validation test against a published external
+  example (Lundteigen & Rausand, NTNU, ch. 8, slide 27/43:
+  2oo3, λDU=1e-6/h, τ=8760h, β=10% → PFDavg≈5.00e-4), in addition to the
+  hand derivations already present.
+- **`scirust-sis`** (new crate): the systems/logic layer on top of
+  these primitives — `M`-out-of-`N` voting architectures (evaluation of votes
+  in the trip decision), complete SIF loop (sensors → logic solver
+  → final elements, total PFDavg = sum of subsystems, standard
+  ISA-TR84.00.02 practice), fault injection (empirically demonstrates
+  that a 2oo3 tolerates a failed channel but a 2oo2 does not), cause-and-effect
+  matrices evaluated deterministically, proof-test-interval sizing by
+  numerical inversion of PFDavg (reuses
+  `scirust-solvers::roots::bisection`), and a SHA-256 hash-chained audit
+  log of trip decisions and cause-and-effect matrix changes — motivated
+  directly by the Triton/Trisis attack (2017)
+  against Schneider Triconex safety controllers. Exposed as MCP
+  tools (`sis_verify_sif_loop`, `sis_size_proof_test_interval`). Marks
+  domain D1 of `docs/DOMAIN_ROADMAP.md` as done.
 
-### Ajouté — connecteur d'agent (MCP) et découverte OT/IT sûre
-- **`scirust-mcp`** (nouvelle crate) : serveur [Model Context Protocol](https://modelcontextprotocol.io)
-  (JSON-RPC 2.0, transport stdio) exposant les capacités de SciRust — solveurs numériques, outils de
-  développement du SLM `scirust-sciagent`, découverte OT/IT — comme des **outils MCP standard**,
-  appelables par n'importe quel agent (le SLM embarqué, Claude, ChatGPT, un script) sans glue code
-  spécifique par intégration. Réutilise l'implémentation existante des outils de développement
-  (`scirust_sciagent::agentic::tools::Tool::builtins()`) plutôt que de la dupliquer. Chaque
-  `tools/call` — succès ou échec — est journalisé dans une chaîne hash SHA-256 (`AuditLog`), sur le
-  modèle de `scirust-func-safety::audit` mais avec un vrai SHA-256 plutôt qu'un hash maison. Outils
-  fournis par défaut : `dev_*` (hérités du SLM), `linalg_eigen_symmetric`, `linalg_svd`,
-  `linalg_gmres`, `discovery_scan`, et l'échappatoire générique `scirust_cli`.
-- **`scirust-discovery`** (nouvelle crate) : découverte d'actifs OT/IT **sûre, consentie et
-  auditée** — jamais un scanner de ports générique (dangereux sur des automates industriels : voir
-  l'incident SQL Slammer/Davis-Besse 2003 et l'étude Coffey et al. 2018 citées dans son `README.md`).
-  Sondes natives au protocole uniquement : handshake OPC-UA UACP `Hello`/`Acknowledge`, Modbus TCP
-  `Read Device Identification` (0x2B/0x0E), énumération de services mDNS/DNS-SD. Aucun paquet n'est
-  envoyé sans une `ScopeAuthorization` **signée HMAC-SHA256** validant la cible contre une liste
-  blanche de plages CIDR, une liste blanche de protocoles, une fenêtre de validité temporelle, et un
-  niveau de sécurité de zone IEC 62443 (zones SL3+ refusées par défaut). Chaque tentative — dans la
-  portée ou refusée — est journalisée dans une chaîne hash SHA-256. Exposé comme outil MCP
-  (`discovery_scan`) dont la clé d'autorisation vit côté serveur (`SCIRUST_DISCOVERY_KEY`), jamais
-  dans les arguments d'appel — un agent ne peut pas s'auto-autoriser.
-- **`docs/DOMAIN_ROADMAP.md`** (nouveau) : recherche de marché sur les secteurs régulés (sûreté
-  procédés IEC 61511, protection réseau électrique IEC 61850, dispositifs médicaux IEC 62304,
-  aéronautique DO-178C, maritime autonome DNV/IMO MASS, semi-conducteurs SEMI, agriculture de
-  précision ISO 25119, nucléaire IEC 61513) où le déterminisme et l'auditabilité de SciRust
-  apportent une valeur documentée et non déjà couverte par les crates existantes.
+### Added — agent connector (MCP) and safe OT/IT discovery
+- **`scirust-mcp`** (new crate): [Model Context Protocol](https://modelcontextprotocol.io)
+  server (JSON-RPC 2.0, stdio transport) exposing SciRust's capabilities — numerical solvers,
+  `scirust-sciagent` SLM development tools, OT/IT discovery — as **standard MCP tools**,
+  callable by any agent (the embedded SLM, Claude, ChatGPT, a script) without integration-specific
+  glue code. Reuses the existing development-tool implementation
+  (`scirust_sciagent::agentic::tools::Tool::builtins()`) rather than duplicating it. Every
+  `tools/call` — success or failure — is logged into a SHA-256 hash chain (`AuditLog`), modeled on
+  `scirust-func-safety::audit` but with a real SHA-256 rather than a homegrown hash. Tools
+  provided by default: `dev_*` (inherited from the SLM), `linalg_eigen_symmetric`, `linalg_svd`,
+  `linalg_gmres`, `discovery_scan`, and the generic escape hatch `scirust_cli`.
+- **`scirust-discovery`** (new crate): **safe, consented and audited** OT/IT asset discovery —
+  never a generic port scanner (dangerous on industrial controllers: see
+  the SQL Slammer/Davis-Besse 2003 incident and the Coffey et al. 2018 study cited in its `README.md`).
+  Protocol-native probes only: OPC-UA UACP `Hello`/`Acknowledge` handshake, Modbus TCP
+  `Read Device Identification` (0x2B/0x0E), mDNS/DNS-SD service enumeration. No packet is
+  sent without an **HMAC-SHA256-signed** `ScopeAuthorization` validating the target against a
+  whitelist of CIDR ranges, a protocol whitelist, a temporal validity window, and an
+  IEC 62443 zone security level (SL3+ zones refused by default). Every attempt — in
+  scope or refused — is logged into a SHA-256 hash chain. Exposed as MCP tool
+  (`discovery_scan`) whose authorization key lives server-side (`SCIRUST_DISCOVERY_KEY`), never
+  in the call arguments — an agent cannot self-authorize.
+- **`docs/DOMAIN_ROADMAP.md`** (new): market research on regulated sectors (process
+  safety IEC 61511, electric grid protection IEC 61850, medical devices IEC 62304,
+  aeronautics DO-178C, autonomous maritime DNV/IMO MASS, semiconductors SEMI, precision
+  agriculture ISO 25119, nuclear IEC 61513) where SciRust's determinism and auditability
+  bring documented value not already covered by the existing crates.
 
-### Ajouté — algèbre linéaire (`scirust-solvers`)
-- **Décomposition en valeurs propres symétrique** (`linalg::eigen_symmetric`) : tridiagonalisation
-  de Householder + algorithme QL implicite à décalage de Wilkinson (portage du couple `tred2`/`tql2`
-  d'EISPACK, domaine public). Primitive **publique et réutilisable**, contrairement à
-  l'implémentation Jacobi cyclique privée et dupliquée dans `scirust-multivariate` pour la seule PCA.
-- **SVD dense générale** (`linalg::svd`) : Jacobi à un côté (Hestenes 1958), pour n'importe quelle
-  matrice `(m, n)` — pseudo-inverse, moindres carrés de rang déficient — complémentaire de la SVD
-  tronquée basée `nalgebra` de `scirust-core::tn::ops` (pensée pour les réseaux de tenseurs).
-- **GMRES(m) redémarré et BiCGSTAB** (`linalg::gmres`, `linalg::bicgstab`) : solveurs itératifs
-  matrix-free pour systèmes `A·x=b` **non symétriques** (Saad & Schultz 1986 ; van der Vorst 1992),
-  jusqu'ici couverts uniquement par le gradient conjugué (SPD seulement). Orthogonalisation de
-  Arnoldi séquentielle (Gram-Schmidt modifié), déterministe.
-- **Préconditionneur de Jacobi** (`linalg::precond::JacobiPreconditioner`), utilisable avec
+### Added — linear algebra (`scirust-solvers`)
+- **Symmetric eigenvalue decomposition** (`linalg::eigen_symmetric`): Householder tridiagonalization
+  + implicit QL algorithm with Wilkinson shift (port of the `tred2`/`tql2`
+  pair from EISPACK, public domain). **Public and reusable** primitive, unlike
+  the private, duplicated cyclic-Jacobi implementation in `scirust-multivariate` used only for PCA.
+- **General dense SVD** (`linalg::svd`): one-sided Jacobi (Hestenes 1958), for any
+  `(m, n)` matrix — pseudo-inverse, rank-deficient least squares — complementary to the
+  truncated-SVD-based `nalgebra` approach of `scirust-core::tn::ops` (designed for tensor networks).
+- **Restarted GMRES(m) and BiCGSTAB** (`linalg::gmres`, `linalg::bicgstab`): matrix-free iterative
+  solvers for **non-symmetric** systems `A·x=b` (Saad & Schultz 1986; van der Vorst 1992),
+  until now covered only by conjugate gradient (SPD only). Sequential Arnoldi
+  orthogonalization (modified Gram-Schmidt), deterministic.
+- **Jacobi preconditioner** (`linalg::precond::JacobiPreconditioner`), usable with
   `gmres_preconditioned`/`bicgstab_preconditioned`.
-- **Gradient projeté spectral** (`optimize::spg`) : optimisation sous contraintes de boîte
-  (Birgin, Martínez & Raydan 2000), pas de Barzilai-Borwein + recherche linéaire d'Armijo non
-  monotone — jusqu'ici seul un QP de boîte ad hoc existait dans `scirust-control`.
+- **Spectral projected gradient** (`optimize::spg`): box-constrained optimization
+  (Birgin, Martínez & Raydan 2000), Barzilai-Borwein step + non-monotone Armijo line
+  search — until now only an ad hoc box QP existed in `scirust-control`.
 
-### Ajouté — simulation quantique par réseaux de tenseurs
-- **Simulateur de circuits quantiques MPS / Tensor-Train** (`quantum::Mps`/`MpsNode`) : représente
-  un état à `n` qubits par une **chaîne de tenseurs de rang 3** au lieu des `2ⁿ` amplitudes d'un
-  state-vector dense ⇒ tant que l'intrication reste modérée, le coût passe de **exponentiel** à
-  `O(n·χ³)` (`χ` = dimension de liaison bornant l'intrication à chaque coupe). Une porte 1-qubit
-  contracte une `2×2` dans l'indice physique en place ; une porte **2-qubits** sur des qubits
-  adjacents (1) contracte les deux nœuds en un tenseur `θ`, (2) **applique** la porte `4×4`,
-  (3) reforme une matrice et exécute une **SVD tronquée** (la SVD **maison** `tn::ops::truncated_svd`,
-  **Rust pur via nalgebra — zéro FFI**), gardant au plus `χ` valeurs singulières pour plafonner la
-  dimension de liaison. Amplitudes réelles `f32` (portes réelles `H`/`X`/`Z`/`CNOT`/`CZ`/`Ry`) ;
-  les amplitudes complexes (phase/`S`/`T`/`Rz`) sont un travail futur. Oracle honnête (pas de
-  mock) : le MPS **reproduit exactement le state-vector dense** (simulateur de référence en clair)
-  sur un circuit **aléatoire** de 5 qubits / 40 portes + Bell `(|00⟩+|11⟩)/√2` (bond 2) + GHZ
-  3-qubits ; **troncation saine** (état produit → bond 1 ; cap `χ=1` ⇒ approximation de haute
-  fidélité) ; norme préservée ; déterminisme bit-exact. La même machinerie contraction + SVD
-  tronquée **est** la compression de poids Tensor-Train déjà présente (`tn::tt_decompose`,
-  `nn::tt_linear`) — directement réutilisable pour compresser des LLM locaux (SLHAv2).
-  *Note d'architecture* : refus délibéré de `openblas-src`/`cuSOLVER` (FFI C/CUDA, briseraient la
-  thèse zéro-FFI + déterminisme bit-exact) et de `faer` (Rust pur mais redondant avec nalgebra) —
-  la SVD maison existante suffit.
+### Added — quantum simulation via tensor networks
+- **MPS / Tensor-Train quantum circuit simulator** (`quantum::Mps`/`MpsNode`): represents
+  an `n`-qubit state by a **chain of rank-3 tensors** instead of the `2ⁿ` amplitudes of a
+  dense state-vector ⇒ as long as entanglement stays moderate, the cost goes from **exponential** to
+  `O(n·χ³)` (`χ` = bond dimension bounding the entanglement at each cut). A 1-qubit gate
+  contracts a `2×2` into the physical index in place; a **2-qubit** gate on adjacent
+  qubits (1) contracts the two nodes into a tensor `θ`, (2) **applies** the `4×4` gate,
+  (3) re-forms a matrix and performs a **truncated SVD** (the **homegrown** `tn::ops::truncated_svd`,
+  **pure Rust via nalgebra — zero FFI**), keeping at most `χ` singular values to cap the
+  bond dimension. Real `f32` amplitudes (real gates `H`/`X`/`Z`/`CNOT`/`CZ`/`Ry`);
+  complex amplitudes (phase/`S`/`T`/`Rz`) are future work. Honest oracle (no
+  mock): the MPS **reproduces the dense state-vector exactly** (reference simulator in plain)
+  on a **random** 5-qubit / 40-gate circuit + Bell `(|00⟩+|11⟩)/√2` (bond 2) + 3-qubit GHZ;
+  **sane truncation** (product state → bond 1; cap `χ=1` ⇒ high-fidelity approximation);
+  preserved norm; bit-exact determinism. The same contraction + truncated-SVD machinery
+  **is** the already-present Tensor-Train weight compression (`tn::tt_decompose`,
+  `nn::tt_linear`) — directly reusable to compress local LLMs (SLHAv2).
+  *Architecture note*: deliberate refusal of `openblas-src`/`cuSOLVER` (C/CUDA FFI, would break the
+  zero-FFI + bit-exact-determinism thesis) and of `faer` (pure Rust but redundant with nalgebra) —
+  the existing homegrown SVD suffices.
 
-### Ajouté — synergie d'écosystème (CCOS, SLHAv2)
-- **Commandes CLI de la synergie** (`scirust kvcache | guard | attest`) : exposent les primitives
-  ci-dessous en ligne de commande, déterministes par `--seed`. `kvcache [--budget B]` compresse une
-  séquence KV et affiche le **ratio de compression** + la **fidélité cosinus** de l'attention vs
-  pleine précision (et le soft-paging borné avec `--budget`) ; `guard [--alpha A]` calibre le guard
-  et affiche la **couverture empirique** (≥ 1−α) + des verdicts Accept/Abstain/Reject ; `attest`
-  enregistre des inférences vérifiables dans le **journal hash-chaîné**, vérifie la chaîne, rejette
-  une inférence falsifiée et démontre l'inviolabilité. Documentées dans `docs/REFERENCE.md` et dans
-  les **8 langues** (`Documentation*.md`).
-- **Guard à garantie statistique** (`nn::guard::StatisticalGuard`) : une porte de réponse à
-  **garantie de couverture sans hypothèse de distribution**, pour alimenter le `guard` de **CCOS**
-  (valider/abstenir sur la sortie d'un modèle) sans seuil ad-hoc. À partir des probabilités de
-  classe d'une décision, le guard forme l'**ensemble de prédiction conforme** (#21,
-  `ConformalClassifier`) et en tire un verdict : une seule classe franchit `1−q̂` ⇒ **Accept** ;
-  plusieurs ⇒ **Abstain** (ambigu) ; aucune ⇒ **Reject** (hors-distribution). La calibration
-  conforme garantit que la vraie classe est dans l'ensemble avec proba **≥ 1−α** sur données
-  échangeables, *quelle que soit la distribution* — le guard ne laisse donc prouvablement pas
-  filer la bonne réponse plus d'une fraction `α` du temps. Oracle honnête : **couverture empirique
-  ≥ 1−α** sur données fraîches (3-classes, déterministe) + logique de verdict (confiant→Accept,
-  partagé→Abstain, plat/OOD→Reject). Les deep ensembles (#40) donnent un signal épistémique
-  complémentaire pour le flag OOD.
-- **Codec KV accéléré SIMD, bit-exact** (`scirust_simd::ops::dequantize_int4_into`, câblé dans
-  `nn::elastic_kv_cache`) : la déquantification INT4 (`out[i]=code[i]·échelle`) passe par le kernel
-  SIMD `mul_f32` ; étant **élémentaire** (pas de réduction) et un produit IEEE-754 identique par
-  lane et en scalaire, le résultat est **bit-identique entre largeurs SIMD et plateformes** — le
-  chemin rapide du codec KV **sans casser le déterminisme** (les réductions cosinus/attention
-  restent sur le chemin déterministe). Oracle : SIMD ≡ scalaire **bit-exact** pour toute longueur
-  (y compris < une lane) et une plage d'échelles.
-- **Journal d'attestation hash-chaîné** (`scirust_runtime::attest`) : le pont de l'**inférence
-  vérifiable** de scirust (`vinfer` #80) vers l'`event_log` de **CCOS**. Chaque `InferenceEvent`
-  fige l'engagement du modèle, le hash de l'entrée et le hash de la sortie, et se chaîne au
-  précédent par un **hash SHA-256** (`entréeₙ = H(entréeₙ₋₁ ‖ seq ‖ engagement ‖ entrée ‖ sortie)`)
-  — exactement la forme append-only et inviolable de CCOS, donc les inférences d'un runtime scirust
-  s'ingèrent dans son journal d'audit. Recalculer la chaîne re-dérive la **même tête** (replay
-  déterministe) ; toute mutation ou réordonnancement la **casse**. `attest_and_record` vérifie en
-  plus, *avant* d'ajouter, que la paire `(entrée, sortie)` est une inférence **authentique** du
-  modèle engagé (Freivalds sur `GF(p)`, #80) — la chaîne n'atteste donc que des inférences réelles.
-  Oracle honnête : la chaîne se vérifie et se rejoue (même tête) ; falsification d'un événement /
-  réordonnancement **détectés** ; une inférence authentique est attestée et chaînée tandis qu'une
-  sortie **falsifiée est rejetée** (journal inchangé). Complète la pile de preuve (#3, `proof`,
+### Added — ecosystem synergy (CCOS, SLHAv2)
+- **Synergy CLI commands** (`scirust kvcache | guard | attest`): expose the primitives
+  below on the command line, deterministic via `--seed`. `kvcache [--budget B]` compresses a
+  KV sequence and displays the **compression ratio** + the **cosine fidelity** of attention vs
+  full precision (and bounded soft-paging with `--budget`); `guard [--alpha A]` calibrates the guard
+  and displays the **empirical coverage** (≥ 1−α) + Accept/Abstain/Reject verdicts; `attest`
+  records verifiable inferences in the **hash-chained journal**, verifies the chain, rejects
+  a falsified inference and demonstrates tamper-evidence. Documented in `docs/REFERENCE.md` and in
+  **8 languages** (`Documentation*.md`).
+- **Statistically guaranteed guard** (`nn::guard::StatisticalGuard`): a response gate with a
+  **distribution-free coverage guarantee**, to feed the **CCOS** `guard`
+  (validate/abstain on a model's output) without an ad-hoc threshold. From the class
+  probabilities of a decision, the guard forms the **conformal prediction set** (#21,
+  `ConformalClassifier`) and derives a verdict: a single class crossing `1−q̂` ⇒ **Accept**;
+  several ⇒ **Abstain** (ambiguous); none ⇒ **Reject** (out-of-distribution). Conformal
+  calibration guarantees that the true class is in the set with probability **≥ 1−α** on
+  exchangeable data, *whatever the distribution* — the guard thus provably lets the correct
+  answer through at most a fraction `α` of the time. Honest oracle: **empirical coverage
+  ≥ 1−α** on fresh data (3-class, deterministic) + verdict logic (confident→Accept,
+  split→Abstain, flat/OOD→Reject). Deep ensembles (#40) provide complementary epistemic
+  signal for the OOD flag.
+- **SIMD-accelerated, bit-exact KV codec** (`scirust_simd::ops::dequantize_int4_into`, wired into
+  `nn::elastic_kv_cache`): the INT4 dequantization (`out[i]=code[i]·scale`) goes through the
+  SIMD `mul_f32` kernel; being **elementwise** (no reduction) and an IEEE-754 product identical per
+  lane and in scalar, the result is **bit-identical across SIMD widths and platforms** — the KV codec
+  fast path **without breaking determinism** (cosine/attention reductions
+  stay on the deterministic path). Oracle: SIMD ≡ scalar **bit-exact** for any length
+  (including < one lane) and a range of scales.
+- **Hash-chained attestation journal** (`scirust_runtime::attest`): the bridge from scirust's
+  **verifiable inference** (`vinfer` #80) to **CCOS**'s `event_log`. Each `InferenceEvent`
+  freezes the model commitment, the input hash and the output hash, and chains onto the
+  previous one via a **SHA-256 hash** (`inputₙ = H(inputₙ₋₁ ‖ seq ‖ commitment ‖ input ‖ output)`)
+  — exactly CCOS's append-only, tamper-evident form, so a scirust runtime's inferences
+  ingest into its audit journal. Recomputing the chain re-derives the **same head** (deterministic
+  replay); any mutation or reordering **breaks it**. `attest_and_record` additionally verifies,
+  *before* appending, that the `(input, output)` pair is an **authentic** inference of the
+  committed model (Freivalds over `GF(p)`, #80) — the chain therefore attests only real inferences.
+  Honest oracle: the chain verifies and replays (same head); falsification of an event /
+  reordering **detected**; an authentic inference is attested and chained while a **falsified**
+  output **is rejected** (journal unchanged). Completes the proof stack (#3, `proof`,
   DiFR #5, `vinfer` #80).
-- **KV-cache compressé élastique** (`nn::elastic_kv_cache`) : la primitive déterministe
-  partagée derrière **SLHAv2** (compresser le KV-cache pour faire tourner un LLM dans le cache
-  du CPU plutôt que sur un GPU hors de prix) et **CCOS** (paging à mémoire bornée), bâtie sur la
-  quantification et le déterminisme de scirust. Une paire clé/valeur d'attention est compressée
-  en une `KvTile` par quantification **INT4 à deux niveaux** (base symétrique + **résidu** INT4 —
-  le « residual tracking » de SLHAv2), chaque niveau à **échelles adaptatives par groupe**
-  (`quantize_int4_grouped` : une échelle plus fine par groupe de canaux ⇒ « adaptive scaling »
-  cosine-aware de SLHAv2, dans l'esprit per-canal de KVQuant #68), ce qui porte la fidélité
-  **cosinus** au-delà de 0,99 tout en réduisant l'empreinte plusieurs fois par rapport au `f32`. L'`ElasticKvCache` conserve ces
-  tuiles sous un **budget** optionnel et évince la plus ancienne au dépassement (soft-paging /
-  mémoire élastique — l'abstraction de paging commune avec CCOS), et sert l'attention directement
-  depuis les tuiles compressées en réutilisant `contiguous_attention` (#63), si bien que le seul
-  écart avec un cache pleine précision est l'erreur de compression (mesurée). Oracle honnête :
-  reconstruction à **fidélité cosinus** élevée (>0,95, le niveau résidu battant strictement la
-  base seule) ; **attention compressée ≈ pleine** (cosinus >0,99) ; **ratio de compression** ≥3×
-  vs `f32` ; cache **borné** sous budget (la plus ancienne évincée) et **bit-exact déterministe**.
-  Codec exposé (`quantize_int4`/`dequantize_int4`/`KvTile`/`cosine_similarity`) pour être consommé
-  par SLHAv2/CCOS. Rejoint KVQuant (#68) et PagedAttention (#63) dans la pile KV-cache.
+- **Elastic compressed KV cache** (`nn::elastic_kv_cache`): the deterministic primitive
+  shared behind **SLHAv2** (compressing the KV cache to run an LLM in the CPU's cache
+  rather than on a prohibitively expensive GPU) and **CCOS** (bounded-memory paging), built on
+  scirust's quantization and determinism. An attention key/value pair is compressed
+  into a `KvTile` via **two-level INT4** quantization (symmetric base + INT4 **residue** —
+  SLHAv2's "residual tracking"), each level with **per-group adaptive scales**
+  (`quantize_int4_grouped`: a finer scale per channel group ⇒ SLHAv2's cosine-aware
+  "adaptive scaling", in the spirit of KVQuant #68's per-channel approach), which lifts **cosine**
+  fidelity beyond 0.99 while reducing the footprint several-fold versus `f32`. The `ElasticKvCache` retains these
+  tiles under an optional **budget** and evicts the oldest on overflow (soft-paging /
+  elastic memory — the paging abstraction shared with CCOS), and serves attention directly
+  from the compressed tiles by reusing `contiguous_attention` (#63), so the only
+  gap versus a full-precision cache is the compression error (measured). Honest oracle:
+  reconstruction at high **cosine fidelity** (>0.95, the residue level strictly beating the
+  base alone); **compressed attention ≈ full** (cosine >0.99); **compression ratio** ≥3×
+  vs `f32`; cache **bounded** under budget (oldest evicted) and **bit-exact deterministic**.
+  Codec exposed (`quantize_int4`/`dequantize_int4`/`KvTile`/`cosine_similarity`) for consumption
+  by SLHAv2/CCOS. Joins KVQuant (#68) and PagedAttention (#63) in the KV-cache stack.
 
-### Corrigé
-- **SIMD `portable` — bug d'alignement (résultats faux, non déterministe)** :
-  `add_f32/f64_inplace`, `dot_f32/f64` et `fma_f32` (`scirust-simd::portable`)
-  découpaient **chaque opérande indépendamment** via `as_simd`/`as_simd_mut`.
-  Quand deux slices avaient des alignements mémoire différents (fréquent : dépend
-  de l'allocation), les boucles SIMD du cœur appariaient des lanes **décalées** →
-  résultats **incorrects**, de façon **non déterministe** (d'où le test
-  `test_add_f32_inplace` qui échouait ~30–50 % des lancers). Réécrites avec
-  `chunks_exact`, qui apparie le bloc k de chaque slice à l'identique quel que
-  soit l'alignement. Ajout d'un test de régression couvrant tous les décalages
-  relatifs (add/dot/fma vs référence scalaire) ; 12/12 lancers verts. Au passage,
-  un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
+### Fixed
+- **SIMD `portable` — alignment bug (wrong results, non-deterministic)**:
+  `add_f32/f64_inplace`, `dot_f32/f64` and `fma_f32` (`scirust-simd::portable`)
+  split **each operand independently** via `as_simd`/`as_simd_mut`. When two
+  slices had different memory alignments (common: allocation-dependent), the
+  core SIMD loops paired **offset** lanes → **incorrect** results, in a
+  **non-deterministic** way (hence the `test_add_f32_inplace` test that
+  failed ~30–50 % of runs). Rewritten with `chunks_exact`, which pairs the k
+  block of each slice identically regardless of alignment. Added a regression
+  test covering all relative offsets (add/dot/fma vs scalar reference);
+  12/12 runs green. Along the way, a `needless_return` in `complex.rs`
+  (`portable-simd` path) fixed.
 
-### Ajouté — campagne « faire grandir scirust »
-- **Reluplex — vérification *complète* de style SMT** (`nn::ibp::reluplex_verify`/
-  `reluplex_unstable_count`, Katz et al. 2017, roadmap #4) : une recherche de **satisfiabilité**
-  d'un contre-exemple par **case-splitting des phases ReLU** — mais **paresseuse**, la signature de
-  Reluplex : un neurone dont l'intervalle de pré-activation reste entièrement d'un côté de 0 sur la
-  boîte est **stable**, donc sa phase est **forcée** (jamais scindée) ; seuls les neurones
-  **instables** sont scindés, soit `2^instables` feuilles au lieu des `2^cachés` de l'énumération
-  *eager* du MILP (#31). Sur chaque feuille (un patron ReLU complet) le réseau est affine et un
-  contre-exemple est cherché en minimisant chaque marge sur la région du patron (le **LP 2D exact**
-  partagé avec le vérificateur MILP) ; on renvoie le **premier** contre-exemple trouvé (SAT) ou
-  Robust. Distinct du branch-and-bound (#26, scinde le domaine d'entrée) et du MILP (#31, énumère
-  *tous* les patrons) par le **splitting paresseux des phases ReLU**. Oracle honnête : **accord avec
-  MILP** sur tout un balayage de rayons (deux méthodes exactes ⇒ mêmes décisions) ; contre-exemple
-  réel (marge ≤ 0, dans la boîte) ; à petit rayon, **moins de neurones scindés** que `cachés`
-  (élimination par bornes) ; déterministe. Réseau (2 entrées, 1 couche). **Clôt la pile de
-  vérification** (IBP, CROWN, zonotopes, DeepPoly, randomized smoothing, Lipschitz, CROWN-IBP, BaB,
-  MILP, Reluplex).
-- **Inférence vérifiable — argument cryptographique compact** (`scirust_runtime::vinfer`,
-  ZK-based Verifiable ML, roadmap #80) : prolonge les certificats `proof` de la ré-exécution
-  bit-exacte vers une **garantie de soundness succincte**. Le modèle (une couche linéaire entière
-  quantifiée sur le corps premier `GF(p)`, `p = 2³¹−1`) est **engagé** par le hachage de ses poids.
-  Pour vérifier une sortie batchée `Y` revendiquée pour des entrées `X`, le vérifieur exécute la
-  **vérification de Freivalds** sur `GF(p)` : tirer un `r` aléatoire et tester `W·(X·r) = Y·r`.
-  Calculer `W·(X·r)` coûte `O(out·in + in·b)` contre `O(out·in·b)` pour recalculer `Y = W·X`, donc
-  pour un batch c'est **succinct** (sous-linéaire dans le coût de recalcul). Un `Y` faux passe avec
-  proba `≤ 1/p` par défi, donc quelques défis donnent une erreur de soundness négligeable. Le défi
-  `r` est dérivé par **Fiat-Shamir** d'un hachage de `(engagement, X, Y)`, donc non-interactif et
-  **lié à la sortie revendiquée** (le prouveur ne peut pas adapter `Y` à un `r` connu). Oracle
-  honnête : accepte une inférence correcte (déterministe) ; **soundness** — sur 1000 falsifications
-  aléatoires d'une entrée de la sortie, **toutes** rejetées ; l'engagement **lie** le modèle
-  (vérifier contre l'engagement d'un autre modèle échoue) ; Fiat-Shamir **lie** la sortie (la sortie
-  valide d'**autres** entrées est rejetée pour `X`). Fournit la **soundness** cryptographique (la
-  sortie provient prouvablement du modèle engagé), **pas** le zero-knowledge — le vérifieur détient
-  les poids ; les zk-SNARK cachant les poids restent hors périmètre. Couronne la pile de preuve
-  (sommation reproductible #3, certificats `proof`, DiFR #5).
-- **DiFR — vérification d'inférence malgré le non-déterminisme** (`scirust_runtime::difr::difr_verify`,
-  2025, roadmap #5) : les certificats [`proof`] vérifient une inférence par **ré-exécution
-  bit-exacte** — ce qui ne marche que si le vérificateur reproduit l'arithmétique du prouveur à
-  l'identique. Or sur un **matériel différent** (largeurs SIMD, FMA, nombre de threads) la sommation
-  flottante est **non-déterministe**, donc un contrôle bit-exact rejetterait des sorties pourtant
-  honnêtes. DiFR vérifie *malgré* cela : il recompute une **référence canonique** avec
-  `reproducible_dot` (produits et somme accumulés en `f64`, indépendant de l'ordre) et accepte la
-  sortie revendiquée ssi elle se trouve dans une **enveloppe d'erreur flottante saine** de cette
-  référence. *Tout* calcul `f32` honnête — dans *n'importe quel* ordre de sommation — est
-  prouvablement dans l'enveloppe (donc accepté) ; une sortie **falsifiée** au-delà est rejetée.
-  L'enveloppe est la borne d'arrondi du produit scalaire `γ·Σ|termes|` propagée à travers les
-  couches (la ReLU est 1-lipschitzienne, elle la transmet sans l'amplifier) et reste **minuscule**
-  (quelques ppm de l'échelle d'activation), si bien que le contrôle attrape toute falsification
-  signifiante. Oracle honnête : accepte un calcul `f32` dans un **ordre de sommation différent** ;
-  enveloppe **saine** (1000 ordres aléatoires, tous acceptés) et **fine** (< 0,001 de l'échelle) ;
-  **rejette** une falsification (au-delà de l'enveloppe, ici de quoi changer la classe prédite) ;
-  déterministe. Prolonge la sommation reproductible (#3) et l'outillage de preuve d'inférence.
-- **MILP — vérification *exacte*** (`nn::ibp::milp_min_margin`/`milp_verify_robustness`, Tjeng
-  et al. 2019, roadmap #31) : la vérification exacte d'un réseau ReLU par la formulation MILP.
-  L'observation clé : les **patrons d'activation** des ReLU sont précisément les variables
-  **binaires** du MILP, et sur le domaine d'un patron fixé le réseau est **affine**. Pour un petit
-  réseau (2 entrées, 1 couche cachée) on **énumère** les patrons et on résout chaque LP
-  **exactement** — la marge `logitₜ − logitⱼ` y est affine, minimisée sur la boîte intersectée
-  avec les demi-espaces d'activation du patron par **énumération des sommets** du polygone 2D (pas
-  de simplexe fragile : robuste et exact). Le minimum global sur tous les patrons et toutes les
-  classes concurrentes est donc **exact** ; `> 0` ⇒ robuste, sinon l'argmin est un **contre-exemple
-  exact**. Oracle honnête : le minimum énumérée **égale la force brute** (il minore toute valeur
-  d'une grille fine et la grille s'en approche), le contre-exemple est **réel** (marge ≤ 0, dans la
-  boîte), et — étant exact — il est **≥ la borne inférieure (saine) de DeepPoly** partout et
-  **strictement plus serré** à certains rayons ; déterministe. Distinct du branch-and-bound (#26),
-  complet **à tolérance près** : MILP est exact (tranche même la frontière de mesure nulle).
-- **Branch-and-bound — vérification *complète*** (`nn::ibp::verify_robustness`/`BabResult`,
-  GCP-CROWN, Zhang et al. 2022, roadmap #26) : là où IBP/CROWN/DeepPoly donnent **une** borne
-  *saine mais incomplète*, le branch-and-bound **décide**. Il borne les **marges** par classe
-  (`logitₜ − logitⱼ`, fusionnées dans une dernière couche pour que DeepPoly suive la corrélation)
-  sur la boîte d'entrée ; si toutes les bornes inférieures sont `> 0` la boîte est **prouvée
-  robuste** ; sinon il sonde le **centre** de la boîte pour un **contre-exemple concret**, et à
-  défaut **scinde** la boîte le long de son axe le plus large et récurse. Comme les sous-boîtes
-  rétrécissent, la relaxation ReLU de DeepPoly devient exacte, si bien que la recherche **tranche**
-  (jusqu'à une tolérance) — prouvant des cas qu'une borne unique ne peut pas, et renvoyant un
-  contre-exemple réel quand la classe peut effectivement changer. Oracle honnête : `Robust` est
-  **sain** (5000 points échantillonnés bien classés) ; le **rayon ℓ∞ certifié dépasse strictement**
-  celui de DeepPoly seul (et la région supplémentaire est échantillonnée robuste) ; `Unsafe`
-  renvoie un **vrai** contre-exemple (mal classé, dans la boîte) ; déterministe. Exposé dans la CLI
-  `certify`. (Le branchement est sur le **domaine d'entrée** ; le split des ReLU instables et les
-  plans coupants de GCP-CROWN ne sont pas implémentés.) Couronne la pile de vérification (IBP #1,
-  CROWN #2, zonotopes #29, DeepPoly #28, CROWN-IBP #30).
-- **DeepPoly — domaine abstrait relationnel** (`nn::ibp::deeppoly_certify`/`IbpMlp::certify_deeppoly`,
-  Singh et al. 2019, roadmap #28) : un vérificateur de robustesse plus précis qu'IBP. Là où IBP
-  traite chaque neurone par un simple intervalle (perdant toute corrélation), DeepPoly garde pour
-  chaque neurone une **borne basse et haute affines en les entrées** du réseau et les **back-
-  substitue** couche par couche. La relaxation ReLU est **asymétrique** : pour un pré-activation de
-  plage `[l,u]` instable, la borne supérieure est la **corde** `z ≤ (u/(u−l))(y−l)` et la borne
-  inférieure `z ≥ λy` avec `λ` choisi pour **minimiser l'aire** de la relaxation (`λ=1` si `u>−l`,
-  sinon `0`). Comme les bornes restent affines, les corrélations sont préservées et le résultat est
-  plus serré qu'IBP — **à n'importe quelle profondeur** (là où `crown_bounds` était limité à 2
-  couches). Oracle honnête : **sain** (4000 points échantillonnés ∈ boîte certifiée, MLP 3 couches)
-  + **strictement plus serré qu'IBP** sur `relu(x)+relu(−x)=|x|` sur `x∈[−1,1]` (DeepPoly donne la
-  boîte **exacte** [0,1] car le `x` s'annule dans la borne supérieure, vs IBP [0,2]) + déterminisme.
-  Exposé dans la CLI `certify` (à côté d'IBP, CROWN, zonotopes, smoothing). Prolonge IBP (#1) /
-  CROWN (#2) / zonotopes (#29).
-- **CROWN-IBP — entraînement certifié (vérifié)** (`nn::crown_ibp::CrownIbpMlp`, Zhang et al.
-  2020, roadmap #30) : l'entraînement ordinaire minimise la perte aux entrées *concrètes* — un
-  réseau peut les ajuster parfaitement et pourtant **changer de prédiction** sous une perturbation
-  minime. CROWN-IBP entraîne au contraire sur une **borne certifiée de la perte du pire cas** sur
-  une boule ℓ∞ autour de chaque entrée, rendant le réseau **prouvablement** robuste. L'idée clé :
-  la **propagation par intervalles (IBP) est différentiable**. Pour une couche affine `y=x·W+b`,
-  la boîte se transforme en `centre'=centre·W+b`, `rayon'=rayon·|W|` — et `|W|=relu(W)+relu(−W)`,
-  donc toute la borne (y compris le `|W|` qui semblait exiger un op `abs` dédié) tourne sur la
-  tape N-D ; la ReLU sur un intervalle `[l,u]` devient `[relu(l),relu(u)]`. Les **logits robustes**
-  placent la vraie classe à sa borne **inférieure** et les autres à leur borne **supérieure**
-  (`zₜ=cₜ−rₜ`, `z_j=c_j+r_j`) : une cross-entropy faible dessus signifie que la vraie classe gagne
-  *même dans le pire cas* — le point est **certifié**. Oracle honnête : la propagation IBP sur la
-  tape **coïncide** avec le vérificateur de référence `IbpMlp` (plain `f32`) et est **saine**
-  (2000 points échantillonnés ∈ boîte certifiée) ; après entraînement certifié, le **rayon ℓ∞
-  certifié croît** nettement (réseau robuste-entraîné vs accuracy-only, tous deux classant juste à
-  100 %) + déterminisme bit-exact. Prolonge IBP (#1) / CROWN (#2) / zonotopes (#29) vers
-  l'entraînement.
-- **Sophia — optimiseur de 2e ordre clippé** (`nn::nd_optim::NdSophia`, Liu et al. 2023, roadmap
-  #44) : Sophia met à l'échelle le momentum de chaque coordonnée par une estimation de la
-  **Hessienne diagonale** et **clippe** le résultat : `θ ← θ − lr·clip(m/max(γ·h,eps),ρ)`. Les
-  directions plates (petite courbure `h`) prennent un pas borné de type signe ; les directions
-  courbées prennent un pas de type **Newton** `m/h` — d'où une robustesse au mauvais
-  conditionnement. La Hessienne diagonale est estimée par un **estimateur de Hutchinson** avec un
-  **produit Hessien-vecteur en différences finies** : avec un vecteur de signes `v∈{±1}` seedé,
-  `Hv ≈ (∇L(θ+εv) − ∇L(θ))/ε` et `ĥ = v⊙Hv` (pour un quadratique c'est la Hessienne diagonale
-  **exacte**, mon ancien blocage « il faut un op `abs` sur la tape » était infondé — le clipping
-  se fait dans l'optimiseur en `f32`, pas sur la tape). Comme SAM, cela demande **deux** calculs
-  de gradient par pas, donc l'appelant orchestre `probe` (perturbe `θ` de `εv`) puis `step`
-  (restaure `θ`, applique la mise à jour) — optimiseur **de bibliothèque hors de la boucle
-  `lm --opt`** (à un seul gradient). Oracle honnête : **converge sur un quadratique mal
-  conditionné** (courbures 4 vs 0,25, conditionnement 16) là où le pas Newton par coordonnée
-  neutralise le conditionnement + déterminisme bit-exact (probe seedé). Rejoint la famille
-  d'optimiseurs (Adam, Lion, Muon, Shampoo, SOAP, Adafactor, LAMB, Adan, Prodigy, SAM, …).
-- **QuIP# — incohérence Hadamard + codebook lattice E8** (`quantization::quantize_quip`/
-  `nearest_e8`/`random_hadamard_transform`, Tseng et al. 2024, roadmap #64) : deux idées. (1) Le
-  **traitement d'incohérence** : multiplier les poids par une **transformée de Hadamard
-  randomisée** (signes ±1 seedés puis FWHT, *orthogonale*) étale les aberrants à travers les
-  coordonnées et **rétrécit la plage dynamique** ; à budget de bits **égal**, les `2^bits`
-  niveaux fixes résolvent alors bien mieux le gros des poids (le RTN scalaire devait, lui, étaler
-  ses rares niveaux sur toute la plage pour couvrir les aberrants). (2) Le codebook **lattice
-  E8** : quantifier les poids tournés par blocs de 8 vers le point le plus proche du **réseau
-  E8** (`D8 ∪ (D8+½·1)`, décodeur fermé de Conway-Sloane) — le plus dense en dimension 8, avec un
-  **moment quadratique** plus bas que la grille cubique à densité **égale** (gain de packing
-  ~14 %). Oracle honnête : la RHT est orthogonale (round-trip exact) et **réduit la plage** d'un
-  poids à aberrants ; le décodeur E8 renvoie un point **valide** du réseau (coords toutes
-  entières ou toutes demi-entières, somme paire) et quantifie **mieux que la grille cubique en
-  moyenne** (gain lattice mesuré sur 4000 vecteurs) ; bout-en-bout, QuIP# reconstruit **mieux que
-  le RTN** scalaire à budget 2-bit sur des poids à aberrants épars + déterminisme bit-exact. (Le
-  grand Hadamard global et le codebook E8P curé de QuIP# sont simplifiés ici en un Hadamard par
-  bloc de 8 et le réseau E8 nu.) Complète la famille de quantification (AQLM, GPTQ, AWQ, NF4,
-  SqueezeLLM, SpQR, KVQuant, LLM.int8, OmniQuant, BitNet).
-- **AQLM — quantification additive multi-codebook** (`quantization::quantize_aqlm`/`AqlmResult`,
-  Egiazarian et al. 2024, roadmap #70) : au lieu de quantifier chaque poids **scalairement**, AQLM
-  découpe les poids en **groupes** de dimension `g` et approxime chaque groupe par la **somme**
-  d'un mot de code tiré de chacun de `M` codebooks appris (de `K` mots chacun). Les codebooks sont
-  initialisés par **k-means résiduel** puis affinés par **optimisation alternée** : ré-encoder
-  chaque groupe (assignation résiduelle gloutonne à travers les `M` codebooks) puis ré-ajuster
-  chaque codebook par moindres carrés sachant la contribution des autres (la beam search d'AQLM
-  est ici simplifiée en assignation gloutonne — documenté). Comme les mots de code sont des
-  **vecteurs**, la quantification additive capte la **structure inter-dimensions** que le
-  round-to-nearest scalaire ignore, d'où une bien meilleure reconstruction à bas budget. Oracle
-  honnête : erreur **< 0,7× RTN** scalaire à budget ~2-bit **égal** (`M·log₂K/g`) sur des poids
-  structurés (groupes bâtis sur quelques directions prototypes) + round-trip exact (longueur non
-  divisible, padding zéro) + déterminisme bit-exact. Rejoint la famille de quantification (GPTQ,
-  AWQ, NF4, SqueezeLLM, SpQR, KVQuant, LLM.int8, OmniQuant, BitNet).
-- **S5 — SSM MIMO + scan associatif parallèle** (`nn::nd_layers::s5_scan`/`s5_parallel_scan`/
-  `NdS5`, Smith et al. 2023, roadmap #52) : contrairement aux SSM **SISO par canal** de S4D
-  (chaque canal son propre état indépendant), S5 pilote un **unique état partagé** de dimension
-  `n` avec **toutes** les entrées via une matrice `B`, et lit `m` sorties via `C` (d'où *MIMO*) :
-  `hₜ=Ā⊙hₜ₋₁+xₜB`, `yₜ=hₜC`. La récurrence étant linéaire, elle se calcule par un **scan
-  associatif** : l'élément `(aₜ,uₜ)` représente la carte affine `h↦aₜ⊙h+uₜ`, et ces cartes se
-  composent par l'opérateur **associatif** `(a₁,u₁)∘(a₂,u₂)=(a₂⊙a₁, a₂⊙u₁+u₂)`. Un scan
-  inclusif de **Hillis-Steele** (ordre de doublage `log₂ seq` fixe ⇒ **déterministe**) produit
-  tous les états préfixes en parallèle. Oracle honnête : le **scan parallèle ≡ la récurrence
-  séquentielle** — testé avec `aₜ` **variable dans le temps** (un vrai scan associatif, pas le
-  cas trivial constant), ce qui prouve l'associativité qui licencie la parallélisation ;
-  `s5_scan` sur la tape ≡ référence MIMO écrite à la main (valide le câblage `B`/`C`) ;
-  **gradient check** (x, Ā, B, C) ; `NdS5` entraîne (MSE↓) + déterminisme bit-exact. Complète la
-  famille espace-d'états (Mamba, Mamba-2/SSD, S4).
-- **Mamba-2 / SSD — dualité espace-d'états ↔ attention** (`nn::nd_layers::ssd_dual`/`NdMamba2`,
-  Dao & Gu 2024, roadmap #50) : Mamba-2 restreint la matrice d'état du SSM à une **décroissance
-  scalaire** `aₜ` par pas (au lieu du `A` diagonal par canal de Mamba). Cette restriction rend
-  la récurrence linéaire `Hₜ=aₜHₜ₋₁+xₜBₜᵀ` (état `d×n`), `yₜ=HₜCₜ` **exactement égale** à une
-  unique forme quadratique masquée de type attention — la **dualité** : `Y=(L⊙CBᵀ)X` avec
-  `L[i,j]=∏_{j<k≤i}aₖ` pour `i≥j`. Calculée sur la tape : le log-décroissance cumulé
-  `cumlogᵢ=Σ_{k≤i}a_logₖ` est une **préfixe-somme** (matmul avec une matrice triangulaire de
-  uns), `L=exp(cumlogᵢ−cumlogⱼ)` masquée causale, `Y=(L⊙CBᵀ)X`. `a_log=log a` est le paramètre
-  (en Mamba-2 `a_logₜ=Δₜ·A`), donc **aucun op `log`** n'est requis ; le masque est appliqué
-  **avant** l'`exp` (`diff⊙mask`, puis `exp`, puis `⊙mask`) pour garder l'exposant borné dans le
-  triangle supérieur (évite `inf·0=NaN`) et y annuler exactement. Oracle honnête : la **forme
-  duale ≡ la récurrence séquentielle** écrite à la main (c'est littéralement la dualité du
-  papier) ; **gradient check** (x, B, C, a_log) ; `NdMamba2` entraîne (MSE↓) + déterminisme
-  bit-exact. Rejoint Mamba/S4/RWKV/RetNet/GLA/HGRN/DeltaNet/xLSTM/Hyena.
-- **FNO — opérateur neuronal de Fourier** (`nn::fno::FnoSpectralConv1d`/`NdFno`, Li et al.
-  2021, roadmap #75) : un opérateur neuronal apprend une application entre **fonctions** (p.ex.
-  condition initiale ↦ solution de PDE), pas entre vecteurs de taille fixe. FNO réalise
-  l'intégrale de noyau **globale** dans le **domaine de Fourier** : transformer le signal
-  échantillonné, garder les `modes` plus basses fréquences, multiplier chaque mode par un
-  **poids complexe appris** `R_k=Ar_k+iAi_k` (matrice `width×width`, mélange de canaux), puis
-  transformer en sens inverse. La DFT réelle et son inverse sont des **matrices cosinus/sinus
-  fixes** : tout le transform est un matmul ordinaire (déterministe) que la tape N-D dérive
-  directement — **sans FFT, sans type complexe, sans nouvel op** ; les poids par mode sont
-  appliqués par un matmul **par lots** (`bmm`) sur les modes. Bloc FNO complet :
-  `σ(SpectralConv(v)+W·v)`. Oracle honnête : reconstruction **exacte** d'un signal band-limité
-  aux modes gardés (DFT⁻¹∘DFT, valide les matrices + l'inverse unilatéral facteur-2) ;
-  **gradient check** par différences finies (signal, Ar, Ai) ; comme la dérivation est
-  diagonale en Fourier (`d/dx↔×ik`), une seule conv spectrale **apprend l'opérateur de
-  dérivation** `sin(ωx+φ)↦ω cos(ωx+φ)` et **généralise à une phase non vue** (MSE test <0,02,
-  ajustement convexe) ; déterminisme bit-exact. Rejoint la famille calcul scientifique
-  (Neural ODE, PINN, DeepONet, KAN).
-- **Hyena — convolutions longues implicites + gating** (`nn::nd_layers::hyena_long_conv`/
-  `NdHyena`, Poli et al. 2023, roadmap #56) : un mélangeur de tokens **sans attention**. La
-  portée longue vient d'une **convolution causale** dont le filtre n'est pas stocké tap par
-  tap mais **généré** par un petit MLP à partir d'un encodage positionnel fixe, puis fenêtré
-  par une décroissance exponentielle apprenable `exp(−γ·t̄)` par canal — c'est ce qui permet
-  des filtres **longs à peu de paramètres** (le coeur de Hyena). L'équivalent du rôle de
-  l'attention (la dépendance aux données) est fourni par un **gating multiplicatif** :
-  `z=x1⊙(h1*v)` puis `z=x2⊙(h2*z)` (ordre 2). La convolution causale par canal
-  `y[t,c]=Σ_τ h[τ,c]·u[t−τ,c]` est exprimée sur la tape comme `Σ_τ h[τ,:]⊙(Sτ·u)` avec des
-  **matrices de décalage constantes** `Sτ` (distribuer le matmul sur les taps apprenables ⇒
-  différentiable en `u` et `h` sans op scatter). Oracle honnête : conv ≡ référence causale
-  écrite à la main ; **gradient check** par différences finies (`u`, `h`) ; entraînement
-  `NdHyena` (MSE↓) + déterminisme bit-exact. Rejoint la famille de modèles de séquence.
-- **xLSTM — sLSTM scalaire + mLSTM matriciel** (`nn::nd_layers::slstm_scan`/`mlstm_scan`/
-  `NdXlstm`, Beck et al. 2024, roadmap #57) : le LSTM étendu remplace les portes sigmoïdes
-  de l'entrée par une **porte exponentielle** `iₜ=exp(ĩₜ)` accompagnée d'un **état
-  normaliseur** `nₜ=fₜnₜ₋₁+iₜ`, la sortie étant `hₜ=oₜ⊙(cₜ/nₜ)`. Comme `cₜ/nₜ` est une
-  moyenne pondérée positive de `zₜ=tanh∈(−1,1)`, la sortie reste bornée dans (−1,1) : la
-  récurrence est **stable sans le stabilisateur log** (omis, c'est un pur dispositif
-  numérique qui s'annule dans le ratio). `tanh` est construit à partir du seul op `sigmoid`
-  via l'identité exacte `tanh(x)=2σ(2x)−1`. La variante **mLSTM** porte une mémoire
-  covariance `d×d` mise à jour par produits externes `vₜᵀkₜ`, lue par requête, avec le
-  dénominateur stabilisant `max(|nₜ·qₜ|,1)` reconstruit **exactement** via `|a|=relu(a)+
-  relu(−a)` et `max(a,1)=relu(a−1)+1` (aucun nouvel op, garde fidèle). Oracle honnête :
-  mLSTM ≡ récurrence de référence écrite à la main (dénominateur actif) ; **gradient check**
-  par différences finies (sLSTM : 4 portes ; mLSTM : q,k,v,iₜ,fₜ, régime lisse) ;
-  entraînement `NdXlstm` (MSE↓) + déterminisme bit-exact. Rejoint la famille de modèles de
-  séquence (Mamba, S4, RWKV, RetNet, GLA, HGRN, DeltaNet).
-- **OmniQuant — clipping de poids apprenable** (`quantization::omniquant_quantize`, Shao
-  et al. 2024, roadmap #65) : le round-to-nearest quantifie chaque canal sur sa plage
-  **complète** `[−max|w|, max|w|]` — avec des poids à queue lourde, la plupart des niveaux
-  de code sont gaspillés sur de rares aberrants. OmniQuant apprend un **facteur de coupe**
-  `γ∈(0,1]` par canal qui **rétrécit** la plage à `γ·max|w|`, échangeant un peu d'erreur de
-  coupe sur les aberrants contre des pas bien plus fins sur le gros des poids — trouvé ici
-  par une recherche déterministe sur une grille qui **inclut `γ=1`** (RTN pur). Oracle
-  honnête : erreur de reconstruction **< RTN** sur poids à queue lourde (≥1 canal coupe
-  réellement) + **jamais pire** que RTN (γ=1 est candidat) + déterminisme bit-exact.
-  Rejoint la famille de quantification (GPTQ, AWQ, NF4, SqueezeLLM, SpQR, KVQuant, LLM.int8).
-- **S4 (S4D) — espace d'états structuré diagonal** (`nn::nd_layers::s4_scan`/`NdS4`,
-  Gu et al. 2022, roadmap #51) : SSM **linéaire invariant dans le temps** (contrairement
-  au `selective_scan` de Mamba dont les matrices dépendent de l'entrée) — `A` diagonal,
-  `B`/`C`/`Δ` sont des **paramètres fixes** ; discrétisation `Ā=exp(Δ⊙A)`, `B̄=Δ⊙B`,
-  récurrence `h_t=Ā⊙h_{t−1}+B̄⊙x_t` (état `(d,n)`) déroulée sur la tape, lecture
-  `y_t=Σ_n C⊙h_t`. Init **HiPPO** diagonale (S4D-Lin) `A[:,j]=−(j+1)`, `A<0` contractif.
-  La couche `NdS4` ajoute projections d'entrée/sortie + skip gaté `D⊙x`. Oracle :
-  **gradient check** (différences finies vs analytique sur x, a_log, B, C, log_dt) +
-  entraînement (MSE↓ vers une cible) + déterminisme bit-exact. Couche de bibliothèque.
-- **AI² / zonotopes — domaine abstrait pour la vérification** (`nn::ibp::Zonotope`/
-  `IbpMlp::certify_zonotope`, Gehr et al. 2018, roadmap #29) : propagation par
-  **zonotopes** (centre + générateurs, `{c+Σεᵢgᵢ : εᵢ∈[−1,1]}`) — les couches affines
-  sont **exactes**, la ReLU est relaxée façon **DeepZ** (`y=λx+μ±μ`, `λ=u/(u−l)`,
-  `μ=−λl/2`, un générateur frais par neurone instable). Les `εᵢ` partagés capturent les
-  **corrélations** linéaires que les intervalles perdent. Oracle honnête : affine exacte
-  (= forward intervalle) + **soundness** (des milliers de points échantillonnés dans la
-  boîte d'entrée tombent dans la boîte zonotope d'un MLP ReLU 3 couches) + **plus serré
-  qu'IBP sous corrélation** (réseau `relu(x)−relu(x)` ≡ 0 : zonotope `[−0,5;0,5]` vs IBP
-  `[−1;1]`, les deux sains). Étend `nn::ibp` (IBP #1, CROWN #2) ; affiché dans la CLI
-  `certify` à côté d'IBP et CROWN.
-- **EAGLE — décodage spéculatif au niveau features** (`nn::nd_decoder::EagleHead`/
-  `generate_eagle`, Li et al. 2024, roadmap #62) : là où Medusa prédit des *tokens*
-  futurs, EAGLE brouillonne au niveau **feature** — une tête légère mappe
-  `(feature_t, embed(token_{t+1})) → feature_{t+1}`, et la tête LM **gelée** transforme
-  la feature prédite en token ; chaînée, elle donne un brouillon **autorégressif**
-  vérifié par une passe (préfixe accepté + correction greedy). `NdDecoderLM` expose
-  `token_embedding`/`head_logits`/`d_model` ; `EagleHead::train` ajuste la tête par MSE
-  sur les features du modèle gelé. Oracle honnête : sortie **exactement = greedy** pour
-  une tête **quelconque** (vérification) + déterminisme + tête **entraînée** ⇒ ≥1 bloc
-  accepte >1 token (forwards < 2·n) en restant exact. Couche de bibliothèque.
-- **Medusa — décodage à têtes multiples** (`nn::nd_decoder::MedusaHeads`/`generate_medusa`,
-  Cai et al. 2024, roadmap #61) : accélère le décodage en attachant au modèle de base
-  des **têtes supplémentaires** (tête `j` prédit le token à `+j+2` depuis l'état caché),
-  qui produisent un **brouillon multi-token d'un seul forward** ; une passe de
-  vérification accepte le plus long préfixe correspondant à l'argmax du modèle puis
-  commet un token de correction/bonus. `NdDecoderLM` expose désormais
-  `forward_hidden`/`forward_with_hidden` (état caché post-LayerNorm) ; `MedusaHeads::train`
-  entraîne les têtes sur les états cachés du modèle **gelé**. Oracle honnête : sortie
-  **exactement = greedy** pour des têtes **quelconques** (même aléatoires — la vérification
-  garantit l'exactitude) + déterminisme + têtes **entraînées** ⇒ au moins un bloc accepte
-  >1 token (forwards < 2·n) tout en restant exact. Couche de bibliothèque.
-- **PagedAttention — KV-cache paginé** (`nn::paged_attention::PagedKvCache`, Kwon et al.
-  / vLLM 2023, roadmap #63) : le cache clés/valeurs du décodage est découpé en **blocs**
-  de taille fixe tirés d'un pool partagé, adressés indirectement par une **table de
-  blocs** (comme la pagination mémoire) ⇒ quasi zéro fragmentation. `append` remplit les
-  blocs à la demande, `gather_keys/values` reconstruit le cache contigu, et `attention`
-  fait le produit scalaire softmax en indexant clés/valeurs **à travers la table**.
-  Oracle honnête : avec des blocs **leurres** interleavés (layout physique non
-  séquentiel), le gather est **bit-identique** aux vecteurs insérés et l'attention
-  paginée est **bit-identique** à l'attention sur cache contigu (même ordre
-  arithmétique) — la pagination est prouvée sans coût numérique ; + comptabilité des
-  blocs (`⌈len/bloc⌉`) et cas vide + déterminisme. Couche de bibliothèque (nouveau module).
-- **DoRA — adaptation low-rank décomposée poids** (`nn::dora::DoraLinear`, Liu et al.
-  2024, roadmap #73) : PEFT qui décompose un poids gelé `W₀` en **magnitude** (vecteur
-  par colonne `m`) × **direction** (normalisée), la direction étant pilotée par une
-  mise à jour low-rank LoRA `BA` : `W' = m ⊙ (W₀+BA)/‖W₀+BA‖_col`. Seuls `m`, `A`, `B`
-  s'entraînent. Backward de la normalisation par colonne en **forme close** (`u=V/‖V‖`,
-  `∂L/∂V=(m/‖V‖)(gw−u·s)`, `∂L/∂m=s`). Oracle honnête : init `B=0, m=‖W₀‖_col` ⇒ poids
-  effectif **= W₀ exactement** (l'adaptation part de la fonction pré-entraînée) +
-  **gradient check** (différences finies centrales vs analytique, params génériques) +
-  récupère une cible générée par DoRA (perte ÷100 par descente de gradient) +
-  déterminisme bit-exact. Couche de bibliothèque (nouveau module).
-- **GaLore — projection low-rank des gradients** (`nn::nd_optim::NdGalore`/
-  `galore_subspace`, Zhao et al. 2024, roadmap #48) : optimiseur à **mémoire
-  réduite** — pour un paramètre matriciel, le gradient `G` est projeté sur son
-  propre sous-espace dominant rang-`r` `P` (top-`r` vecteurs singuliers gauches via
-  `jacobi_eigenvectors`, rafraîchi tous les `update_gap` pas), Adam tourne sur le
-  petit gradient projeté `PᵀG` puis l'update est remonté par `P`. Les états passent
-  de `m×n` à `rank×max(m,n)` ; les vecteurs retombent sur Adam. Oracle honnête :
-  `P` **orthonormal** (`PᵀP=I`) et projection **orthogonale optimale** (identité de
-  Pythagore `‖G−PPᵀG‖²=‖G‖²−‖PᵀG‖²`, erreur décroissante en `r`, nulle au rang
-  plein) + gradient **bas-rang reconstruit exactement** (sous-rang ⇒ résidu) +
-  **convergence sur une cible bas-rang** avec état compressé `2×4` (≠ `4×4`) +
-  sous-rang ne l'atteint pas + déterminisme bit-exact. Rejoint la famille
-  d'optimiseurs ; CLI `lm --opt galore`.
-- **YaRN — extension de contexte RoPE** (`nn::yarn`, Peng et al. 2023, roadmap #60) :
-  étend le contexte utilisable d'un modèle RoPE d'un facteur `s` par interpolation
-  **NTK-by-parts** — `yarn_frequencies` garde intactes les dimensions **haute
-  fréquence** (`r_p>β` ⇒ ordre local préservé), interpole pleinement les **basses
-  fréquences** (`r_p<α` ⇒ `θ_p→θ_p/s`), avec une rampe linéaire entre les deux
-  (`θ'_p=θ_p·((1−γ)/s+γ)`). `rope_apply_freqs`/`rope_yarn` appliquent la rotation
-  (convention emboîtée identique à la RoPE existante de `autodiff::nd`) ;
-  `yarn_attention_scale` donne la température `0.1·ln(s)+1`. Oracle honnête :
-  **propriété de position relative** `⟨rope(q,m),rope(k,n)⟩=g(m−n)` préservée malgré
-  les fréquences modifiées + l'angle d'une dimension basse fréquence à la longueur
-  **étendue** `s·L` revient **exactement** à sa valeur d'entraînement à `L` (alors
-  que la RoPE simple explose) + bornes NTK-by-parts (haute fréquence inchangée, basse
-  = `θ/s`, rampe monotone) + `scale=1` ≡ RoPE simple + déterminisme. Couche de
-  bibliothèque (primitive positionnelle, pas de CLI).
-- **Learn then Test (LtT)** (`nn::conformal::learn_then_test`/`hoeffding_pvalue`,
-  Angelopoulos et al. 2021, roadmap #37) : contrôle **distribution-free** de
-  **risques multiples arbitraires** (non emboîtés) par tests d'hypothèses. Chaque
-  configuration `λ` d'une grille devient une **p-value de Hoeffding** pour
-  `H₀: R(λ) > α` (`p = exp(−2n(α−R̂)₊²)`, super-uniforme sous le null), puis
-  correction **familiale de Bonferroni** au niveau `δ` : on retient les `λ` avec
-  `p ≤ δ/m`. Garantit que, avec proba `≥ 1−δ`, **toute** config retenue vérifie
-  `R(λ) ≤ α` (FWER `≤ δ`) — **sans** hypothèse de monotonie (contrairement à RCPS
-  #36). Oracle honnête : FWER vérifié **par simulation** (toutes les configs sur
-  la frontière `R=α` ⇒ FWER mesuré `≤ δ`, vs sélection naïve qui échoue ~toujours)
-  + puissance (les configs sûres sont retenues, les non-sûres rejetées) +
-  déterminisme. Couche de bibliothèque.
-- **Comptable RDP (Rényi DP)** (`dp::gaussian_rdp`/`rdp_to_dp`/`rdp_gaussian_epsilon`,
-  Mironov 2017, roadmap #78) : comptabilité de budget de confidentialité par
-  **Rényi-DP**, plus serrée et plus principielle que la composition `(ε,δ)` naïve.
-  RDP du mécanisme gaussien `RDP(α)=α/(2σ²)` (additif en composition), conversion
-  Mironov `ε=RDP(α)+ln(1/δ)/(α−1)` (le `α−1` est ce qui la rend serrée), optimisée
-  sur une grille d'ordres α. Renforce le DP-SGD existant (#19). Oracle : RDP et
-  conversion exactes (formes closes) + `ε` **bien en dessous** de la composition
-  linéaire basique (qui paie une pénalité ~√étapes) + monotonie (plus d'étapes ⇒ ε
-  plus grand ; plus de bruit ⇒ ε plus petit). Couche de bibliothèque.
-- **Watermark pour LLM** (`nn::watermark`, Kirchenbauer et al. 2023, roadmap #79) :
-  filigrane statistique rendant le texte généré **auditable sans accès au modèle**.
-  Le token précédent seede une partition du vocabulaire en liste **verte** (fraction
-  γ) / rouge ; `apply_green_bias` ajoute `δ` aux logits verts pour orienter la
-  génération. Le détecteur, qui ne connaît que le seed et γ, recompte les tokens
-  verts : un texte filigrané en contient bien plus que la fraction γ attendue par
-  hasard, ce qu'un **test z** `(g−γn)/√(nγ(1−γ))` (`detect_z`) signale par une
-  p-value minuscule, tandis que le texte naturel score `z≈0`. Tout est un hash
-  déterministe de `(seed, prev, token)`. Oracle : fraction verte ≈ γ + biais
-  appliqué aux seuls tokens verts + texte filigrané détecté (z≫8) vs naturel (z≈0)
-  + un **mauvais seed ne détecte pas** (pas de fausse provenance) + déterminisme.
-  Couche de bibliothèque.
-- **DeepONet — apprentissage d'opérateurs** (`nn::deeponet::DeepONet`, Lu et al.
-  2021, roadmap #76) : apprend un **opérateur** `G : u ↦ G(u)` (fonction →
-  fonction) via une factorisation **branch × trunk** `G(u)(y) ≈ Σ_k b_k(u)·t_k(y)`
-  — la branch encode la fonction d'entrée `u` (échantillonnée à des capteurs
-  fixes), la trunk encode la position `y`. Variante **POD-DeepONet** (trunk cosinus
-  **fixe** `cos(kπy)` + branch **linéaire**) ⇒ ajustement **convexe**, exact pour
-  les opérateurs linéaires comme l'**antidérivée** `∫₀^y u`. Oracle : entraîné sur
-  certaines fonctions, il approxime l'antidérivée sur des fonctions **non vues** à
-  MSE test < 0,01 (≪ prédicteur constant) — la propriété d'apprentissage
-  d'opérateurs — + déterminisme. Couche de bibliothèque.
-- **Deep Ensembles** (`nn::ensemble::DeepEnsemble`, Lakshminarayanan, Pritzel &
-  Blundell 2017, roadmap #40) : incertitude prédictive par **ensemble seedé**. N
-  petits MLP ReLU (`1→hidden→1`) entraînés sur la tape N-D avec `NdAdam`, chacun
-  seedé différemment ; `predict(x)` renvoie `(moyenne, écart-type)` — l'estimation
-  ponctuelle et son **incertitude épistémique** (désaccord entre membres). Oracle :
-  la MSE de la moyenne d'ensemble est ≤ la MSE moyenne des membres (Jensen) +
-  l'écart-type est **bien plus grand hors-distribution** (loin de la plage
-  d'entraînement) qu'en-distribution + déterminisme bit-exact. Couche de
-  bibliothèque.
-- **LLM.int8()** (`quantization::int8_mixed_matmul`, Dettmers et al. 2022, roadmap
-  #71) : matmul mixte int8/fp32. Les activations des transformeurs ont quelques
-  **colonnes de features outliers** de très grande magnitude ; les quantifier en
-  int8 avec le reste gonfle l'échelle et écrase la résolution des features
-  normales. LLM.int8() garde ces colonnes (et les lignes de W correspondantes) en
-  **pleine précision** et quantifie le reste en **int8** :
-  `X·W = X_normal·W_normal (int8) + X_outlier·W_outlier (fp32)`. Une colonne est
-  outlier si un `|X[i,j]|` dépasse le seuil (défaut 6.0). Oracle : sur des
-  activations à colonnes outliers, l'erreur vs fp est **< 0,5×** celle de l'int8
-  simple ; sans outliers, se réduit à l'int8 pur ; déterminisme. Couche de
-  bibliothèque.
-- **RCPS — Risk-Controlling Prediction Sets** (`nn::conformal::hoeffding_ucb` +
-  `rcps_select`, Bates et al. 2021, roadmap #36) : là où le conformal contrôle la
-  *couverture*, RCPS contrôle un **risque borné quelconque** (perte dans [0,1] :
-  taux de faux négatifs, non-couverture, …) avec une garantie **haute probabilité
-  (PAC)**. Pour une famille de prédicteurs `C_λ` à risque non-croissant en λ, RCPS
-  choisit le plus petit `λ̂` dont la **borne de concentration de Hoeffding** sur le
-  risque est ≤ α (pour λ̂ et tout λ plus grand) ⇒ `R(λ̂) ≤ α` avec proba ≥ 1−δ.
-  Oracle : la borne dépasse la moyenne du bon écart + sélection exacte (cas
-  calculé) + sur données fraîches le risque empirique reste ≤ α (borne
-  conservatrice). Couche de bibliothèque.
-- **Prodigy** (`nn::nd_optim::NdProdigy` + `ProdigyConfig`, Mishchenko & Defazio
-  2023, roadmap #46) : un Adam **sans learning-rate** (« parameter-free »). Il
-  estime en ligne la distance `d ≈ ‖x₀ − x*‖` à la solution — via la corrélation
-  globale `⟨g, x₀ − x⟩` accumulée — et l'utilise comme taux effectif, partant d'un
-  `d₀ = 1e-6` minuscule qui croît jusqu'à l'échelle du problème. `d`, le numérateur
-  `r` et la norme du dénominateur sont des scalaires **globaux** sur tous les
-  paramètres. Oracle : `d` s'adapte à l'échelle de la distance (sans réglage de lr)
-  + la perte quadratique chute fortement + déterminisme bit-exact. CLI :
-  `scirust lm --opt prodigy` (8 langues).
-- **KVQuant** (`quantization::kvquant_kv`, Hooper et al. 2024, roadmap #68) :
-  quantification du **KV-cache** d'attention à la granularité qui épouse sa
-  structure d'outliers — **clés per-canal** (les outliers des clés se concentrent
-  par colonne de features) et **valeurs per-token** (par ligne). Bien plus fidèle
-  qu'une échelle per-tensor unique, qu'une poignée de gros canaux de clés
-  domineraient (écrasant la résolution de tous les autres). Oracle : sur des clés à
-  outliers de canal, l'erreur de la sortie d'attention vs fp est **< 0,6×** celle
-  de la quantif per-tensor ; le per-canal résout les petites colonnes (<0,1× erreur)
-  là où le per-tensor échoue ; déterminisme. Couche de bibliothèque.
-- **ALiBi — Attention with Linear Biases** (`nn::nd_layers::alibi_slopes` +
-  `alibi_bias` + `NdMultiHeadAttention::with_alibi`, Press, Smith & Lewis 2022,
-  roadmap #59) : remplace les positions apprises/rotatives par un **biais statique
-  linéaire en distance** ajouté aux scores d'attention — pour la requête `i` et la
-  clé `j ≤ i`, `−penteₕ·(i−j)`, avec des pentes par tête en suite géométrique
-  `2^(−8h/H)`. Aucune position apprise ⇒ **extrapolation en longueur**. Branché dans
-  `NdMultiHeadAttention` (builder `with_alibi`, inclut le masque causal). Oracle :
-  pentes géométriques (ratio `2^(−8/H)`) + biais linéaire/causal/Toeplitz + poids
-  softmax décroissant avec la distance (exactement `∝ exp(−pente·dist)`) + forward
-  d'attention déterministe.
-- **ACI — Adaptive Conformal Inference** (`nn::conformal::AdaptiveConformal`, Gibbs
-  & Candès 2021, roadmap #38) : conformal **en ligne** robuste à la **dérive de
-  distribution**. Le conformal statique perd silencieusement sa couverture sous
-  changement de distribution ; ACI suit un niveau effectif `αₜ` et le corrige après
-  chaque observation par rétroaction `αₜ₊₁ = αₜ + γ(α − errₜ)`, ce qui pilote le
-  taux d'erreur long-terme vers `α` (couverture vers `1−α`) pour **tout** flux de
-  scores. Avec une fenêtre glissante de scores récents, la couverture reste ≈ 1−α
-  à travers les changements là où le conformal statique s'effondre. Oracle : règle
-  de mise à jour de `αₜ` exacte (cas calculé) + couverture ≈ 1−α maintenue sous
-  changement de variance (vs conformal statique qui chute) + déterminisme. Couche
-  de bibliothèque. Complète CQR/APS/RAPS dans le pilier conformal.
-- **KAN — Kolmogorov-Arnold Networks** (`nn::kan::KanLayer`, Liu et al. 2024 ;
-  base RBF de FastKAN, Li 2024 ; roadmap #77) : activations **apprenables sur les
-  arêtes** plutôt que sur les nœuds — `y_j = Σᵢ φᵢⱼ(xᵢ)` avec chaque `φ` une somme
-  de RBF gaussiennes (grille fixe) + un terme de base `SiLU`. La sortie est
-  **linéaire dans les coefficients**, donc l'ajustement est un problème de moindres
-  carrés **convexe** résolu par descente de gradient déterministe. Oracle : une
-  seule couche KAN ajuste la cible additive non-linéaire `sin(2x₀)+x₁²` à MSE<0,02
-  — bien en dessous du meilleur modèle linéaire (qui ne peut représenter sin/carré)
-  ; base RBF localisée ; déterminisme bit-exact. Couche de bibliothèque (variante
-  RBF/FastKAN, pas les B-splines du papier original).
-- **RWKV time-mixing (WKV)** (`nn::nd_layers::rwkv_wkv` + `NdRwkv`, Peng et al.
-  2023, roadmap #53) : opérateur **WKV** — attention linéaire récurrente à
-  **décroissance temporelle exponentielle par canal** `decay ∈ (0,1)` plus un
-  **bonus** pour le token courant, normalisée (numérateur/dénominateur), déroulée
-  en temps linéaire sur la tape. A nécessité un nouvel op autograd **`div`**
-  (division élémentaire, gradient `∂a=g/b`, `∂b=−g·a/b²`, gradient-checké). La
-  couche `NdRwkv` ajoute une **réception** `r=σ(W_r·x)` qui gate la sortie, avec
-  decay/bonus par canal apprenables. Oracle : la récurrence sur tape **≡ la
-  formule de somme pondérée explicite** + gradient check (k, v, decay, bonus) +
-  entraînement (MSE↓) + déterminisme bit-exact. CLI : `scirust rwkv` (8 langues).
-- **GloRo — robustesse certifiée par Lipschitz** (`nn::lipschitz`, Leino, Wang &
-  Fredrikson 2021, roadmap #32) : `spectral_norm` (norme spectrale par power
-  iteration déterministe), `spectral_normalize` (couche **1-Lipschitz** contrainte)
-  et `GloroClassifier` (classifieur linéaire à **rayon de robustesse L2 prouvé**
-  `marge/(√2·‖W‖₂)`, sans recherche ni échantillonnage ; le `√2` vient de la
-  Lipschitz `≤ √2·L` de la marge `f_A−f_B`). Oracle : normes spectrales connues
-  (diagonale, rectangulaire) ; norme ≈ 1 après normalisation ; rayon **sain** (la
-  pire perturbation à ce rayon ne bascule pas la prédiction) **et conservateur**
-  (≤ distance exacte à la frontière la plus proche) ; déterminisme. Couche de
-  bibliothèque. Complète le pilier certifiable : IBP, CROWN, smoothing, GloRo.
-- **Randomized Smoothing — robustesse L2 certifiée** (`nn::smoothing::SmoothedClassifier`
-  + `clopper_pearson_lower` + `inv_normal_cdf`, Cohen, Rosenfeld & Kolter 2019,
-  roadmap #27) : transforme tout classifieur en un classifieur **lissé** sous bruit
-  gaussien `N(0,σ²I)`, avec un **rayon de robustesse L2 prouvé** `σ·Φ⁻¹(pₐ)`. La
-  probabilité de la classe top `pₐ` est minorée par **Clopper-Pearson** (beta
-  incomplète régularisée `betai`/`lgamma`, exacte) ; `Φ⁻¹` par l'approximation
-  rationnelle d'Acklam. Oracle : pour un classifieur **demi-espace** le rayon
-  certifié **égale la distance exacte à la frontière** (indépendant de σ) +
-  soundness/abstention au bord + déterminisme + valeurs repères de `Φ⁻¹`/`betai`/
-  Clopper-Pearson. CLI : `scirust certify` affiche désormais IBP/CROWN
-  (déterministe) **et** smoothing (probabiliste).
-- **SpQR — Sparse-Quantized Representation** (`quantization::SpqrOutliers`,
-  Dettmers et al. 2023, roadmap #67) : l'erreur de quantification est à **queue
-  lourde** — une petite fraction de poids « outliers » concentre l'essentiel de
-  l'erreur. SpQR garde cette fraction (les plus grosses erreurs de quantif dense)
-  en **pleine précision** (canal creux) et quantifie le reste densément, donc ~1 %
-  d'outliers retire une grande part de l'erreur pour un faible surcoût mémoire.
-  Oracle : sur poids gaussiens + outliers injectés, garder 1 % des poids divise
-  l'erreur quadratique par > 3 ; reconstruction exacte des outliers ; déterminisme.
-  Couche de bibliothèque (les scales groupés bi-niveaux du papier sont orthogonaux).
-- **SqueezeLLM** (`quantization::SqueezeLlmCodebook` + `weighted_quant_error`, Kim
-  et al. 2023, roadmap #66) : quantification **non-uniforme** des poids par
-  **k-means pondéré par la sensibilité** (proxy de la diagonale de la Hessienne)
-  — un codebook de `2^bits` centroïdes placés là où ils réduisent le plus la
-  *perte*, et non là où les poids sont denses. Init déterministe (quantiles) +
-  itérations de Lloyd pondérées. Oracle : erreur de quantification pondérée
-  **strictement < round-to-nearest uniforme** (poids gaussiens, 3 bits, < 0,85×) +
-  round-trip exact sur les valeurs du codebook + déterminisme. Couche de
-  bibliothèque (la branche « sparse » outliers n'est pas modélisée).
-- **APS / RAPS — ensembles de prédiction adaptatifs** (`nn::conformal::AdaptivePredictionSets`,
-  Romano, Sesia & Candès 2020 ; Angelopoulos et al. 2021 ; roadmap #34/#35) :
-  conformal **classification** par score cumulatif `s(x,c)` = masse de toutes les
-  classes au moins aussi probables que `c`. Set `{c : s(x,c) ≤ q̂}` ⇒ couverture
-  marginale sans distribution ≥ 1−α avec **taille adaptative** (entrée confiante →
-  petit ensemble, ambiguë → grand). **RAPS** ajoute `λ·max(0, rang−k_reg)` au
-  score (`calibrate_raps`) pour rogner les classes peu probables et produire des
-  ensembles **plus petits** à couverture égale. Oracle : score cumulatif exact
-  (cas main) + couverture sur données fraîches + adaptativité (facile vs ambigu) +
-  RAPS < APS en taille moyenne + déterminisme. Couche de bibliothèque (comme
-  `ConformalClassifier`).
-- **CQR — Conformalized Quantile Regression** (`nn::conformal::ConformalQuantileRegressor`,
-  Romano, Patterson & Candès 2019, roadmap #33) : conformalise un régresseur de
-  **quantiles** pour produire des intervalles **adaptatifs** (hétéroscédastiques)
-  à couverture garantie. Score signé `Eᵢ = max(q_lo(xᵢ)−yᵢ, yᵢ−q_hi(xᵢ))`,
-  correction finie `Q` (quantile conformal des `Eᵢ`, réutilise `conformal_quantile`),
-  intervalle `[q_lo(x)−Q, q_hi(x)+Q]` — largeur **variable selon x** là où le
-  split-conformal symétrique est de largeur constante (`Q` peut être négatif et
-  resserrer une bande trop large). Oracle : sémantique exacte du score (cas
-  calculé à la main) + couverture marginale ≥ 1−α sur données fraîches +
-  **adaptativité** (intervalles bien plus larges en région à fort bruit) +
-  déterminisme. CLI : `scirust conformal` montre désormais split **et** CQR.
-- **SAM — Sharpness-Aware Minimization** (`nn::nd_optim::NdSam` + `SamConfig`,
-  Foret et al. 2021, roadmap #47) : optimiseur **à deux phases** qui minimise la
-  perte du *pire cas* dans une boule de rayon ρ (biais vers les minima plats).
-  `ascent` perturbe les poids vers `θ + ρ·g/‖g‖` (norme **globale** du gradient) ;
-  `descent` restaure θ et fait un pas SGD avec le gradient **au point perturbé**.
-  Deux gradients par pas ⇒ hors de la boucle `lm --opt` à gradient unique (couche
-  de bibliothèque). Oracle : perturbation = `ρ·g/‖g‖` avec `‖ε‖ = ρ` + convergence
-  sur quadratique (bande ∝ lr·ρ) + déterminisme.
-- **Shampoo** (`nn::nd_optim::NdShampoo` + `ShampooConfig` + `inverse_pth_root`,
-  Gupta/Koren/Singer 2018, roadmap #41) : préconditionneur **Kronecker** structuré
-  — pour une matrice de poids, maintient les deux facteurs `L = E[GGᵀ]`,
-  `R = E[GᵀG]` et avance par l'update préconditionné
-  `W ← W − lr·L^(−1/4) G R^(−1/4)`. Les racines inverses des matrices viennent
-  d'une décomposition de Jacobi (`inverse_pth_root`, réutilise
-  `jacobi_eigenvectors`), cachées et rafraîchies tous les `precond_freq` pas.
-  Paramètres non-matriciels : Adagrad diagonal. Oracle : `A^(−1/2)²·A ≈ I` +
-  convergence sur quadratique matricielle + repli Adagrad + déterminisme. CLI :
-  `scirust lm --opt shampoo` (11e valeur `--opt`).
-- **Adafactor** (`nn::nd_optim::NdAdafactor` + `AdafactorConfig`, Shazeer & Stern
-  2018, roadmap #42) : optimiseur à **moments du 2e ordre factorisés** — pour une
-  matrice de poids, ne stocke que les sommes **ligne** et **colonne** du carré du
-  gradient (`rows + cols` nombres au lieu de `rows·cols`) et reconstruit la rank-1
-  `V[i,j] = R[i]·C[j]/ΣR` (mémoire sous-linéaire). Update `G/√V` **clippé en RMS** ;
-  planning `β2ₜ = 1 − t^(−0.8)`. Paramètres non-matriciels : 2e moment complet
-  (RMSProp). Oracle : reconstruction rang-1 **exacte** quand `G²` est rang-1 +
-  convergence (bande) + chemin matriciel factorisé qui réduit `½‖W−T‖²` +
-  déterminisme. CLI : `scirust lm --opt adafactor` (10e valeur `--opt`).
-- **NF4** (`quantization::nf4_quantize`/`nf4_dequantize` + `NF4_LEVELS`, QLoRA,
-  Dettmers et al. 2023, roadmap #74) : type 4-bit **NormalFloat** — 16 niveaux qui
-  sont les **quantiles d'une normale** (échelle absmax par bloc). Optimal pour des
-  poids gaussiens. Oracle : erreur de reconstruction **< int4 uniforme** sur des
-  poids gaussiens (Box-Muller seedé) + round-trip exact sur les niveaux +
-  déterminisme. Couche de bibliothèque.
-- **BitNet b1.58** (`quantization::ternary_quantize` + `ternary_matmul`, Ma et al.
-  2024, roadmap #69) : quantification **ternaire** des poids vers `{−1,0,+1}`
-  (échelle absmean, ~1,58 bit/poids, ~20× plus compact) ; **matmul sans
-  multiplication** (addition / soustraction / skip selon le signe). Oracle :
-  `ternary_matmul` = la forme somme-de-signes **bit-exact** et = le produit
-  déquantifié à la réassociation flottante près. CLI : `scirust bitnet` (en
-  direct : max erreur 1,4e-6 vs déquant, 986/4096 poids nuls). Déterministe.
-- **HGRN** (`nn::nd_layers::hgrn` + `NdHgrn`, Qin et al. 2023, roadmap #58) : RNN
-  linéaire à intégration leaky par canal (`hₜ = fₜ⊙h_{t-1} + (1−fₜ)⊙cₜ`), porte
-  d'oubli **bornée inférieurement** `f = lb + (1−lb)·σ(·)` (la borne `lb` fixe
-  l'horizon mémoire minimal). Pas d'état matriciel ; déroulé sur la tape. Tests :
-  match référence + gradient check (c,f) + entraînement + déterminisme. CLI :
-  `scirust hgrn` (en direct : MSE 27.37 → 4.59).
-- **GLA — Gated Linear Attention** (`nn::nd_layers::gated_linear_attention` +
-  `NdGla`, Yang et al. 2024, roadmap #55) : attention linéaire **gatée** — porte
-  d'oubli par canal **dépendante de l'entrée** `αₜ=σ(·)`
-  (`S_t = diag(αₜ)·S_{t-1} + kₜᵀvₜ`, `o_t = q_t·S_t`), déroulée sur la tape.
-  Tests : match d'une référence Vec + gradient check (q,k,v,α) + entraînement +
-  déterminisme. CLI : `scirust gla` (en direct : MSE 27.16 → 0.0000).
+### Added — "grow scirust" campaign
+- **Reluplex — *complete* SMT-style verification** (`nn::ibp::reluplex_verify`/
+  `reluplex_unstable_count`, Katz et al. 2017, roadmap #4): a **satisfiability**
+  search for a counterexample by **case-splitting ReLU phases** — but
+  **lazy**, the signature of Reluplex: a neuron whose pre-activation interval
+  stays entirely on one side of 0 over the box is **stable**, so its phase is
+  **forced** (never split); only **unstable** neurons are split, i.e. `2^instable`
+  leaves instead of the `2^hidden` of the MILP's *eager* enumeration (#31). On
+  each leaf (a complete ReLU pattern) the network is affine and a
+  counterexample is sought by minimizing each margin over the pattern region
+  (the **exact 2D LP** shared with the MILP verifier); the **first**
+  counterexample found (SAT) is returned, or Robust. Distinct from
+  branch-and-bound (#26, splits the input domain) and MILP (#31, enumerates
+  *all* patterns) by the **lazy ReLU-phase splitting**. Honest oracle:
+  **agreement with MILP** over a full radius sweep (two exact methods ⇒ same
+  decisions); real counterexample (margin ≤ 0, inside the box); at small
+  radius, **fewer neurons split** than `hidden` (bound elimination);
+  deterministic. Network (2 inputs, 1 layer). **Closes the verification
+  stack** (IBP, CROWN, zonotopes, DeepPoly, randomized smoothing, Lipschitz,
+  CROWN-IBP, BaB, MILP, Reluplex).
+- **Verifiable inference — compact cryptographic argument**
+  (`scirust_runtime::vinfer`, ZK-based Verifiable ML, roadmap #80): extends
+  the `proof` certificates from bit-exact re-execution to a **succinct
+  soundness guarantee**. The model (an integer linear layer quantized over
+  the prime field `GF(p)`, `p = 2³¹−1`) is **committed** by hashing its
+  weights. To verify a claimed batched output `Y` for inputs `X`, the
+  verifier runs the **Freivalds check** over `GF(p)`: draw a random `r` and
+  test `W·(X·r) = Y·r`. Computing `W·(X·r)` costs `O(out·in + in·b)` vs
+  `O(out·in·b)` to recompute `Y = W·X`, so for a batch it is **succinct**
+  (sublinear in the recomputation cost). A false `Y` passes with probability
+  `≤ 1/p` per challenge, so a few challenges give negligible soundness
+  error. The challenge `r` is derived by **Fiat-Shamir** from a hash of
+  `(commitment, X, Y)`, hence non-interactive and **bound to the claimed
+  output** (the prover cannot adapt `Y` to a known `r`). Honest oracle:
+  accepts a correct inference (deterministic); **soundness** — over 1000
+  random forgeries of one output entry, **all** rejected; the commitment
+  **binds** the model (verifying against another model's commitment fails);
+  Fiat-Shamir **binds** the output (the valid output of *other* inputs is
+  rejected for `X`). Provides cryptographic **soundness** (the output
+  provably comes from the committed model), **not** zero-knowledge — the
+  verifier holds the weights; weight-hiding zk-SNARKs remain out of scope.
+  Crowns the proof stack (reproducible summation #3, `proof` certificates,
+  DiFR #5).
+- **DiFR — inference verification despite nondeterminism**
+  (`scirust_runtime::difr::difr_verify`, 2025, roadmap #5): the [`proof`]
+  certificates verify an inference by **bit-exact re-execution** — which only
+  works if the verifier reproduces the prover's arithmetic identically. But
+  on **different hardware** (SIMD widths, FMA, thread counts) floating-point
+  summation is **non-deterministic**, so a bit-exact check would reject
+  honest outputs. DiFR verifies *despite* this: it recomputes a **canonical
+  reference** with `reproducible_dot` (products and sum accumulated in
+  `f64`, order-independent) and accepts the claimed output iff it lies
+  within a **sound floating-point error envelope** of that reference. *Every*
+  honest `f32` computation — in *any* summation order — is provably inside
+  the envelope (hence accepted); a **forged** output beyond it is rejected.
+  The envelope is the dot-product rounding bound `γ·Σ|terms|` propagated
+  through the layers (ReLU is 1-Lipschitz, it transmits it without
+  amplification) and stays **tiny** (a few ppm of the activation scale), so
+  the check catches any significant forgery. Honest oracle: accepts an `f32`
+  computation in a **different summation order**; envelope **sound** (1000
+  random orders, all accepted) and **tight** (< 0.001 of scale); **rejects**
+  a forgery (beyond the envelope, here enough to change the predicted
+  class); deterministic. Extends reproducible summation (#3) and the
+  inference-proof tooling.
+- **MILP — *exact* verification** (`nn::ibp::milp_min_margin`/
+  `milp_verify_robustness`, Tjeng et al. 2019, roadmap #31): exact
+  verification of a ReLU network via the MILP formulation. The key
+  observation: the ReLU **activation patterns** are precisely the MILP
+  **binary** variables, and on the domain of a fixed pattern the network is
+  **affine**. For a small network (2 inputs, 1 hidden layer) the patterns
+  are **enumerated** and each LP is solved **exactly** — the margin
+  `logitₜ − logitⱼ` is affine there, minimized over the box intersected
+  with the pattern's activation half-spaces by **vertex enumeration** of the
+  2D polygon (no fragile simplex: robust and exact). The global minimum over
+  all patterns and all competing classes is therefore **exact**; `> 0` ⇒
+  robust, otherwise the argmin is an **exact counterexample**. Honest
+  oracle: the enumerated minimum **equals brute force** (it lower-bounds
+  every value of a fine grid and the grid approaches it), the counterexample
+  is **real** (margin ≤ 0, inside the box), and — being exact — it is **≥
+  DeepPoly's (sound) lower bound** everywhere and **strictly tighter** at
+  some radii; deterministic. Distinct from branch-and-bound (#26), complete
+  **up to tolerance**: MILP is exact (it even slices the measure-zero
+  boundary).
+- **Branch-and-bound — *complete* verification**
+  (`nn::ibp::verify_robustness`/`BabResult`, GCP-CROWN, Zhang et al. 2022,
+  roadmap #26): where IBP/CROWN/DeepPoly give **one** *sound but incomplete*
+  bound, branch-and-bound **decides**. It bounds the per-class **margins**
+  (`logitₜ − logitⱼ`, merged into a final layer so DeepPoly follows the
+  correlation) over the input box; if all lower bounds are `> 0` the box is
+  **proved robust**; otherwise it probes the **center** of the box for a
+  **concrete counterexample**, and failing that **splits** the box along its
+  widest axis and recurses. As sub-boxes shrink, DeepPoly's ReLU relaxation
+  becomes exact, so the search **decides** (up to a tolerance) — proving
+  cases a single bound cannot, and returning a real counterexample when the
+  class can actually change. Honest oracle: `Robust` is **sound** (5000
+  sampled points well classified); the **certified ℓ∞ radius strictly
+  exceeds** DeepPoly's alone (and the extra region is sampled robust);
+  `Unsafe` returns a **true** counterexample (misclassified, inside the
+  box); deterministic. Exposed in the `certify` CLI. (Branching is on the
+  **input domain**; unstable-ReLU splitting and GCP-CROWN cutting planes are
+  not implemented.) Crowns the verification stack (IBP #1, CROWN #2,
+  zonotopes #29, DeepPoly #28, CROWN-IBP #30).
+- **DeepPoly — relational abstract domain**
+  (`nn::ibp::deeppoly_certify`/`IbpMlp::certify_deeppoly`, Singh et al. 2019,
+  roadmap #28): a robustness verifier more precise than IBP. Where IBP
+  treats each neuron with a plain interval (losing all correlation), DeepPoly
+  keeps for each neuron a **lower and upper bound affine in the network
+  inputs** and **back-substitutes** them layer by layer. The ReLU relaxation
+  is **asymmetric**: for an unstable pre-activation range `[l,u]`, the upper
+  bound is the **chord** `z ≤ (u/(u−l))(y−l)` and the lower bound `z ≥ λy`
+  with `λ` chosen to **minimize the area** of the relaxation (`λ=1` if
+  `u>−l`, else `0`). Since the bounds stay affine, correlations are
+  preserved and the result is tighter than IBP — **at any depth** (where
+  `crown_bounds` was limited to 2 layers). Honest oracle: **sound** (4000
+  sampled points ∈ certified box, 3-layer MLP) + **strictly tighter than
+  IBP** on `relu(x)+relu(−x)=|x|` over `x∈[−1,1]` (DeepPoly gives the
+  **exact** box [0,1] because the `x` cancels in the upper bound, vs IBP
+  [0,2]) + determinism. Exposed in the `certify` CLI (next to IBP, CROWN,
+  zonotopes, smoothing). Extends IBP (#1) / CROWN (#2) / zonotopes (#29).
+- **CROWN-IBP — certified (verified) training**
+  (`nn::crown_ibp::CrownIbpMlp`, Zhang et al. 2020, roadmap #30): ordinary
+  training minimizes the loss at *concrete* inputs — a network can fit them
+  perfectly and yet **change prediction** under a minimal perturbation.
+  CROWN-IBP instead trains on a **certified bound of the worst-case loss**
+  over an ℓ∞ ball around each input, making the network **provably**
+  robust. The key idea: **interval bound propagation (IBP) is
+  differentiable**. For an affine layer `y=x·W+b`, the box transforms to
+  `center'=center·W+b`, `radius'=radius·|W|` — and `|W|=relu(W)+relu(−W)`,
+  so the whole bound (including the `|W|` that seemed to need a dedicated
+  `abs` op) runs on the N-D tape; the ReLU on an interval `[l,u]` becomes
+  `[relu(l),relu(u)]`. The **robust logits** place the true class at its
+  **lower** bound and the others at their **upper** bound (`zₜ=cₜ−rₜ`,
+  `z_j=c_j+r_j`): a low cross-entropy over them means the true class wins
+  *even in the worst case* — the point is **certified**. Honest oracle: the
+  tape IBP propagation **coincides** with the reference `IbpMlp` verifier
+  (plain `f32`) and is **sound** (2000 sampled points ∈ certified box);
+  after certified training, the **certified ℓ∞ radius grows** markedly
+  (robust-trained vs accuracy-only network, both classifying correctly at
+  100 %) + bit-exact determinism. Extends IBP (#1) / CROWN (#2) / zonotopes
+  (#29) toward training.
+- **Sophia — clipped second-order optimizer**
+  (`nn::nd_optim::NdSophia`, Liu et al. 2023, roadmap #44): Sophia scales
+  each coordinate's momentum by an estimate of the **diagonal Hessian** and
+  **clips** the result: `θ ← θ − lr·clip(m/max(γ·h,eps),ρ)`. Flat
+  directions (small curvature `h`) take a bounded sign-like step; curved
+  directions take a **Newton-like** step `m/h` — hence robustness to bad
+  conditioning. The diagonal Hessian is estimated by a **Hutchinson
+  estimator** with a **finite-difference Hessian-vector product**: with a
+  seeded sign vector `v∈{±1}`, `Hv ≈ (∇L(θ+εv) − ∇L(θ))/ε` and
+  `ĥ = v⊙Hv` (for a quadratic this is the **exact** diagonal Hessian; my
+  old blocker "we need an `abs` op on the tape" was unfounded — the
+  clipping happens in the optimizer in `f32`, not on the tape). Like SAM,
+  this requires **two** gradient computations per step, so the caller
+  orchestrates `probe` (perturbs `θ` by `εv`) then `step` (restores `θ`,
+  applies the update) — a **library optimizer outside the single-gradient
+  `lm --opt` loop**. Honest oracle: **converges on an ill-conditioned
+  quadratic** (curvatures 4 vs 0.25, conditioning 16) where the
+  per-coordinate Newton step neutralizes the conditioning + bit-exact
+  determinism (seeded probe). Joins the optimizer family (Adam, Lion, Muon,
+  Shampoo, SOAP, Adafactor, LAMB, Adan, Prodigy, SAM, …).
+- **QuIP# — Hadamard incoherence + E8 lattice codebook**
+  (`quantization::quantize_quip`/`nearest_e8`/`random_hadamard_transform`,
+  Tseng et al. 2024, roadmap #64): two ideas. (1) **Incoherence processing**:
+  multiplying the weights by a **randomized Hadamard transform** (seeded ±1
+  signs then FWHT, *orthogonal*) spreads outliers across coordinates and
+  **narrows the dynamic range**; at an **equal** bit budget, the `2^bits`
+  fixed levels then resolve the bulk of the weights far better (scalar RTN
+  had to spread its few levels over the whole range to cover outliers). (2)
+  The **E8 lattice codebook**: quantize the rotated weights in blocks of 8
+  to the nearest point of the **E8 lattice** (`D8 ∪ (D8+½·1)`, closed
+  Conway-Sloane decoder) — the densest in dimension 8, with a **lower
+  quadratic moment** than the cubic grid at **equal** density (~14 %
+  packing gain). Honest oracle: the RHT is orthogonal (exact round-trip)
+  and **narrows the range** of an outlier weight; the E8 decoder returns a
+  **valid** lattice point (coordinates all integer or all half-integer,
+  even sum) and quantizes **better than the cubic grid on average** (lattice
+  gain measured over 4000 vectors); end-to-end, QuIP# reconstructs **better
+  than scalar RTN** at a 2-bit budget on sparse-outlier weights + bit-exact
+  determinism. (QuIP#'s global large Hadamard and curated E8P codebook are
+  simplified here to a per-block-of-8 Hadamard and the bare E8 lattice.)
+  Complements the quantization family (AQLM, GPTQ, AWQ, NF4, SqueezeLLM,
+  SpQR, KVQuant, LLM.int8, OmniQuant, BitNet).
+- **AQLM — multi-codebook additive quantization**
+  (`quantization::quantize_aqlm`/`AqlmResult`, Egiazarian et al. 2024,
+  roadmap #70): instead of quantizing each weight **scalarly**, AQLM splits
+  the weights into **groups** of dimension `g` and approximates each group
+  by the **sum** of one codeword from each of `M` learned codebooks (of `K`
+  words each). The codebooks are initialized by **residual k-means** then
+  refined by **alternating optimization**: re-encode each group (greedy
+  residual assignment across the `M` codebooks) then refit each codebook by
+  least squares given the other contributions (AQLM's beam search is
+  simplified here to greedy assignment — documented). Because codewords are
+  **vectors**, additive quantization captures the **cross-dimension
+  structure** that scalar round-to-nearest ignores, hence much better
+  reconstruction at low budget. Honest oracle: error **< 0.7× scalar RTN**
+  at an **equal** ~2-bit budget (`M·log₂K/g`) on structured weights
+  (groups built on a few prototype directions) + exact round-trip
+  (non-divisible length, zero padding) + bit-exact determinism. Joins the
+  quantization family (GPTQ, AWQ, NF4, SqueezeLLM, SpQR, KVQuant, LLM.int8,
+  OmniQuant, BitNet).
+- **S5 — MIMO SSM + parallel associative scan**
+  (`nn::nd_layers::s5_scan`/`s5_parallel_scan`/`NdS5`, Smith et al. 2023,
+  roadmap #52): unlike S4D's **per-channel SISO** SSMs (each channel its own
+  independent state), S5 drives a **single shared state** of dimension `n`
+  with **all** inputs through a matrix `B`, and reads `m` outputs through
+  `C` (hence *MIMO*): `hₜ=Ā⊙hₜ₋₁+xₜB`, `yₜ=hₜC`. Being linear, the
+  recurrence can be computed by an **associative scan**: the element
+  `(aₜ,uₜ)` represents the affine map `h↦aₜ⊙h+uₜ`, and these maps compose
+  via the **associative** operator `(a₁,u₁)∘(a₂,u₂)=(a₂⊙a₁, a₂⊙u₁+u₂)`. An
+  inclusive **Hillis-Steele** scan (fixed `log₂ seq` doubling order ⇒
+  **deterministic**) produces all prefix states in parallel. Honest oracle:
+  the **parallel scan ≡ the sequential recurrence** — tested with
+  **time-varying** `aₜ` (a real associative scan, not the trivial constant
+  case), which proves the associativity that licenses parallelization;
+  `s5_scan` on the tape ≡ hand-written MIMO reference (validates the
+  `B`/`C` wiring); **gradient check** (x, Ā, B, C); `NdS5` trains (MSE↓) +
+  bit-exact determinism. Complements the state-space family (Mamba,
+  Mamba-2/SSD, S4).
+- **Mamba-2 / SSD — state-space ↔ attention duality**
+  (`nn::nd_layers::ssd_dual`/`NdMamba2`, Dao & Gu 2024, roadmap #50):
+  Mamba-2 restricts the SSM state matrix to a **scalar decay** `aₜ` per step
+  (instead of Mamba's per-channel diagonal `A`). This restriction makes the
+  linear recurrence `Hₜ=aₜHₜ₋₁+xₜBₜᵀ` (state `d×n`), `yₜ=HₜCₜ` **exactly
+  equal** to a single masked attention-like quadratic form — the
+  **duality**: `Y=(L⊙CBᵀ)X` with `L[i,j]=∏_{j<k≤i}aₖ` for `i≥j`. Computed
+  on the tape: the cumulative log-decay `cumlogᵢ=Σ_{k≤i}a_logₖ` is a
+  **prefix-sum** (matmul with a triangular matrix of ones),
+  `L=exp(cumlogᵢ−cumlogⱼ)` causally masked, `Y=(L⊙CBᵀ)X`. `a_log=log a` is
+  the parameter (in Mamba-2 `a_logₜ=Δₜ·A`), so **no `log` op** is needed;
+  the mask is applied **before** the `exp` (`diff⊙mask`, then `exp`, then
+  `⊙mask`) to keep the exponent bounded in the upper triangle (avoid
+  `inf·0=NaN`) and zero it there exactly. Honest oracle: the **dual form ≡
+  the hand-written sequential recurrence** (literally the paper's duality);
+  **gradient check** (x, B, C, a_log); `NdMamba2` trains (MSE↓) +
+  bit-exact determinism. Joins Mamba/S4/RWKV/RetNet/GLA/HGRN/DeltaNet/
+  xLSTM/Hyena.
+- **FNO — Fourier neural operator** (`nn::fno::FnoSpectralConv1d`/`NdFno`,
+  Li et al. 2021, roadmap #75): a neural operator learns a mapping between
+  **functions** (e.g. initial condition ↦ PDE solution), not between
+  fixed-size vectors. FNO implements the **global** kernel integral in the
+  **Fourier domain**: transform the sampled signal, keep the lower-frequency
+  `modes`, multiply each mode by a **learned complex weight**
+  `R_k=Ar_k+iAi_k` (a `width×width` matrix, channel mixing), then transform
+  back. The real DFT and its inverse are **fixed cosine/sine matrices**:
+  the whole transform is an ordinary matmul (deterministic) that the N-D
+  tape differentiates directly — **no FFT, no complex type, no new op**;
+  per-mode weights are applied by a **batched** matmul (`bmm`) over the
+  modes. Full FNO block: `σ(SpectralConv(v)+W·v)`. Honest oracle: **exact**
+  reconstruction of a band-limited signal at the kept modes (DFT⁻¹∘DFT,
+  validates the matrices + the one-sided factor-2 inverse); **gradient
+  check** by finite differences (signal, Ar, Ai); since differentiation is
+  diagonal in Fourier (`d/dx↔×ik`), a single spectral conv **learns the
+  differentiation operator** `sin(ωx+φ)↦ω cos(ωx+φ)` and **generalizes to
+  an unseen phase** (test MSE <0.02, convex fit); bit-exact determinism.
+  Joins the scientific-computing family (Neural ODE, PINN, DeepONet, KAN).
+- **Hyena — implicit long convolutions + gating**
+  (`nn::nd_layers::hyena_long_conv`/`NdHyena`, Poli et al. 2023, roadmap
+  #56): an **attention-free** token mixer. The long range comes from a
+  **causal convolution** whose filter is not stored tap by tap but
+  **generated** by a small MLP from a fixed positional encoding, then
+  windowed by a learnable exponential decay `exp(−γ·t̄)` per channel —
+  that is what enables **long filters with few parameters** (the heart of
+  Hyena). The attention-equivalent (data dependence) is provided by
+  **multiplicative gating**: `z=x1⊙(h1*v)` then `z=x2⊙(h2*z)` (order 2).
+  The per-channel causal convolution `y[t,c]=Σ_τ h[τ,c]·u[t−τ,c]` is
+  expressed on the tape as `Σ_τ h[τ,:]⊙(Sτ·u)` with **constant shift
+  matrices** `Sτ` (distributing the matmul over the learnable taps ⇒
+  differentiable in `u` and `h` with no scatter op). Honest oracle: conv ≡
+  hand-written causal reference; **gradient check** by finite differences
+  (`u`, `h`); `NdHyena` training (MSE↓) + bit-exact determinism. Joins the
+  sequence-model family.
+- **xLSTM — scalar sLSTM + matrix mLSTM**
+  (`nn::nd_layers::slstm_scan`/`mlstm_scan`/`NdXlstm`, Beck et al. 2024,
+  roadmap #57): the extended LSTM replaces the sigmoid input gate with an
+  **exponential gate** `iₜ=exp(ĩₜ)` accompanied by a **normalizer state**
+  `nₜ=fₜnₜ₋₁+iₜ`, the output being `hₜ=oₜ⊙(cₜ/nₜ)`. Since `cₜ/nₜ` is a
+  positive weighted average of `zₜ=tanh∈(−1,1)`, the output stays bounded
+  in (−1,1): the recurrence is **stable without the log stabilizer**
+  (omitted, a pure numerical device that cancels in the ratio). `tanh` is
+  built from the single `sigmoid` op via the exact identity
+  `tanh(x)=2σ(2x)−1`. The **mLSTM** variant carries a `d×d` covariance
+  memory updated by outer products `vₜᵀkₜ`, read by query, with the
+  stabilizing denominator `max(|nₜ·qₜ|,1)` reconstructed **exactly** via
+  `|a|=relu(a)+relu(−a)` and `max(a,1)=relu(a−1)+1` (no new op, faithful
+  guard). Honest oracle: mLSTM ≡ hand-written reference recurrence (active
+  denominator); **gradient check** by finite differences (sLSTM: 4 gates;
+  mLSTM: q,k,v,iₜ,fₜ, smooth regime); `NdXlstm` training (MSE↓) +
+  bit-exact determinism. Joins the sequence-model family (Mamba, S4, RWKV,
+  RetNet, GLA, HGRN, DeltaNet).
+- **OmniQuant — learnable weight clipping**
+  (`quantization::omniquant_quantize`, Shao et al. 2024, roadmap #65):
+  round-to-nearest quantizes each channel over its **full** range
+  `[−max|w|, max|w|]` — with heavy-tailed weights, most code levels are
+  wasted on rare outliers. OmniQuant learns a **clipping factor** `γ∈(0,1]`
+  per channel that **narrows** the range to `γ·max|w|`, trading a little
+  clipping error on outliers for far finer steps on the bulk of the weights
+  — found here by a deterministic grid search that **includes `γ=1`** (pure
+  RTN). Honest oracle: reconstruction error **< RTN** on heavy-tailed
+  weights (≥1 channel actually clips) + **never worse** than RTN (γ=1 is a
+  candidate) + bit-exact determinism. Joins the quantization family (GPTQ,
+  AWQ, NF4, SqueezeLLM, SpQR, KVQuant, LLM.int8).
+- **S4 (S4D) — diagonal structured state space**
+  (`nn::nd_layers::s4_scan`/`NdS4`, Gu et al. 2022, roadmap #51): **linear
+  time-invariant** SSM (unlike Mamba's `selective_scan` whose matrices
+  depend on the input) — `A` diagonal, `B`/`C`/`Δ` are **fixed
+  parameters**; discretization `Ā=exp(Δ⊙A)`, `B̄=Δ⊙B`, recurrence
+  `h_t=Ā⊙h_{t−1}+B̄⊙x_t` (state `(d,n)`) unrolled on the tape, readout
+  `y_t=Σ_n C⊙h_t`. Diagonal **HiPPO** init (S4D-Lin) `A[:,j]=−(j+1)`,
+  `A<0` contractive. The `NdS4` layer adds input/output projections + gated
+  skip `D⊙x`. Oracle: **gradient check** (finite differences vs analytic on
+  x, a_log, B, C, log_dt) + training (MSE↓ toward a target) + bit-exact
+  determinism. Library layer.
+- **AI² / zonotopes — abstract domain for verification**
+  (`nn::ibp::Zonotope`/`IbpMlp::certify_zonotope`, Gehr et al. 2018, roadmap
+  #29): propagation by **zonotopes** (center + generators,
+  `{c+Σεᵢgᵢ : εᵢ∈[−1,1]}`) — affine layers are **exact**, the ReLU is
+  relaxed DeepZ-style (`y=λx+μ±μ`, `λ=u/(u−l)`, `μ=−λl/2`, one fresh
+  generator per unstable neuron). The shared `εᵢ` capture the **linear
+  correlations** that intervals lose. Honest oracle: exact affine (=
+  interval forward) + **soundness** (thousands of sampled points in the
+  input box fall in the zonotope box of a 3-layer ReLU MLP) + **tighter
+  than IBP under correlation** (network `relu(x)−relu(x)` ≡ 0: zonotope
+  `[−0.5;0.5]` vs IBP `[−1;1]`, both sound). Extends `nn::ibp` (IBP #1,
+  CROWN #2); displayed in the `certify` CLI next to IBP and CROWN.
+- **EAGLE — feature-level speculative decoding**
+  (`nn::nd_decoder::EagleHead`/`generate_eagle`, Li et al. 2024, roadmap
+  #62): where Medusa predicts future *tokens*, EAGLE drafts at the
+  **feature** level — a light head maps
+  `(feature_t, embed(token_{t+1})) → feature_{t+1}`, and the **frozen** LM
+  head turns the predicted feature into a token; chained, it gives an
+  **autoregressive** draft verified in one pass (accepted prefix + greedy
+  correction). `NdDecoderLM` exposes `token_embedding`/`head_logits`/
+  `d_model`; `EagleHead::train` fits the head by MSE on the frozen model's
+  features. Honest oracle: output **exactly = greedy** for an **arbitrary**
+  head (verification) + determinism + **trained** head ⇒ ≥1 block accepts
+  >1 token (forwards < 2·n) while staying exact. Library layer.
+- **Medusa — multi-head decoding** (`nn::nd_decoder::MedusaHeads`/
+  `generate_medusa`, Cai et al. 2024, roadmap #61): speeds up decoding by
+  attaching **additional heads** to the base model (head `j` predicts the
+  token at `+j+2` from the hidden state), producing a **multi-token draft
+  from a single forward**; a verification pass accepts the longest prefix
+  matching the model's argmax then commits a correction/bonus token.
+  `NdDecoderLM` now exposes `forward_hidden`/`forward_with_hidden`
+  (post-LayerNorm hidden state); `MedusaHeads::train` trains the heads on
+  the **frozen** model's hidden states. Honest oracle: output **exactly =
+  greedy** for **arbitrary** heads (even random — verification guarantees
+  correctness) + determinism + **trained** heads ⇒ at least one block
+  accepts >1 token (forwards < 2·n) while staying exact. Library layer.
+- **PagedAttention — paged KV-cache** (`nn::paged_attention::PagedKvCache`,
+  Kwon et al. / vLLM 2023, roadmap #63): the decoding key/value cache is
+  split into **blocks** of fixed size drawn from a shared pool, addressed
+  indirectly by a **block table** (like memory paging) ⇒ near-zero
+  fragmentation. `append` fills blocks on demand, `gather_keys/values`
+  rebuilds the contiguous cache, and `attention` does the softmax
+  dot-product by indexing keys/values **through the table**. Honest oracle:
+  with **decoy** blocks interleaved (non-sequential physical layout), the
+  gather is **bit-identical** to the inserted vectors and the paged
+  attention is **bit-identical** to attention over a contiguous cache (same
+  arithmetic order) — paging is proven at zero numerical cost; + block
+  accounting (`⌈len/block⌉`) and the empty case + determinism. Library
+  layer (new module).
+- **DoRA — weight-decomposed low-rank adaptation**
+  (`nn::dora::DoraLinear`, Liu et al. 2024, roadmap #73): PEFT that
+  decomposes a frozen weight `W₀` into **magnitude** (per-column vector
+  `m`) × **direction** (normalized), the direction driven by a LoRA low-rank
+  update `BA`: `W' = m ⊙ (W₀+BA)/‖W₀+BA‖_col`. Only `m`, `A`, `B` train.
+  Backward of the column normalization in **closed form** (`u=V/‖V‖`,
+  `∂L/∂V=(m/‖V‖)(gw−u·s)`, `∂L/∂m=s`). Honest oracle: init `B=0, m=‖W₀‖_col`
+  ⇒ effective weight **= W₀ exactly** (adaptation starts from the
+  pretrained function) + **gradient check** (central finite differences vs
+  analytic, generic params) + recovers a DoRA-generated target (loss ÷100
+  by gradient descent) + bit-exact determinism. Library layer (new module).
+- **GaLore — low-rank gradient projection**
+  (`nn::nd_optim::NdGalore`/`galore_subspace`, Zhao et al. 2024, roadmap
+  #48): **memory-reduced** optimizer — for a matrix parameter, the gradient
+  `G` is projected onto its own dominant rank-`r` subspace `P` (top-`r` left
+  singular vectors via `jacobi_eigenvectors`, refreshed every `update_gap`
+  steps), Adam runs on the small projected gradient `PᵀG` then the update is
+  lifted back by `P`. The states go from `m×n` to `rank×max(m,n)`; vectors
+  fall back to Adam. Honest oracle: `P` **orthonormal** (`PᵀP=I`) and
+  **optimal orthogonal projection** (Pythagorean identity
+  `‖G−PPᵀG‖²=‖G‖²−‖PᵀG‖²`, error decreasing in `r`, zero at full rank) +
+  gradient **low-rank reconstructed exactly** (sub-rank ⇒ residual) +
+  **convergence on a low-rank target** with compressed state `2×4` (≠
+  `4×4`) + sub-rank does not reach it + bit-exact determinism. Joins the
+  optimizer family; CLI `lm --opt galore`.
+- **YaRN — RoPE context extension** (`nn::yarn`, Peng et al. 2023, roadmap
+  #60): extends the usable context of a RoPE model by a factor `s` via
+  **NTK-by-parts** interpolation — `yarn_frequencies` keeps the
+  **high-frequency** dimensions intact (`r_p>β` ⇒ local order preserved),
+  fully interpolates the **low frequencies** (`r_p<α` ⇒ `θ_p→θ_p/s`), with a
+  linear ramp in between (`θ'_p=θ_p·((1−γ)/s+γ)`). `rope_apply_freqs`/
+  `rope_yarn` apply the rotation (nested convention identical to the
+  existing RoPE of `autodiff::nd`); `yarn_attention_scale` gives the
+  temperature `0.1·ln(s)+1`. Honest oracle: **relative-position property**
+  `⟨rope(q,m),rope(k,n)⟩=g(m−n)` preserved despite the modified frequencies
+  + the angle of a low-frequency dimension at the **extended** length `s·L`
+  returns **exactly** to its training value at `L` (where plain RoPE blows
+  up) + NTK-by-parts bounds (high frequency unchanged, low = `θ/s`,
+  monotone ramp) + `scale=1` ≡ plain RoPE + determinism. Library layer
+  (positional primitive, no CLI).
+- **Learn then Test (LtT)** (`nn::conformal::learn_then_test`/
+  `hoeffding_pvalue`, Angelopoulos et al. 2021, roadmap #37): **distribution-
+  free** control of **multiple arbitrary (non-nested) risks** by hypothesis
+  testing. Each configuration `λ` of a grid becomes a **Hoeffding p-value**
+  for `H₀: R(λ) > α` (`p = exp(−2n(α−R̂)₊²)`, super-uniform under the null),
+  then a **Bonferroni family-wise** correction at level `δ`: keep the `λ`
+  with `p ≤ δ/m`. Guarantees that, with probability `≥ 1−δ`, **every** kept
+  configuration satisfies `R(λ) ≤ α` (FWER `≤ δ`) — **without** a
+  monotonicity assumption (unlike RCPS #36). Honest oracle: FWER verified
+  **by simulation** (all configs on the boundary `R=α` ⇒ measured FWER
+  `≤ δ`, vs naive selection that fails ~always) + power (safe configs kept,
+  unsafe ones rejected) + determinism. Library layer.
+- **RDP accountant (Rényi DP)** (`dp::gaussian_rdp`/`rdp_to_dp`/
+  `rdp_gaussian_epsilon`, Mironov 2017, roadmap #78): privacy-budget
+  accounting by **Rényi-DP**, tighter and more principled than naive
+  `(ε,δ)` composition. RDP of the Gaussian mechanism `RDP(α)=α/(2σ²)`
+  (additive under composition), Mironov conversion
+  `ε=RDP(α)+ln(1/δ)/(α−1)` (the `α−1` is what makes it tight), optimized
+  over a grid of orders α. Strengthens the existing DP-SGD (#19). Oracle:
+  exact RDP and conversion (closed forms) + `ε` **far below** the basic
+  linear composition (which pays a ~√steps penalty) + monotonicity (more
+  steps ⇒ larger ε; more noise ⇒ smaller ε). Library layer.
+- **Watermark for LLMs** (`nn::watermark`, Kirchenbauer et al. 2023, roadmap
+  #79): a statistical watermark making generated text **auditable without
+  model access**. The previous token seeds a partition of the vocabulary
+  into a **green** list (fraction γ) / red; `apply_green_bias` adds `δ` to
+  the green logits to steer generation. The detector, knowing only the seed
+  and γ, recounts the green tokens: watermarked text contains far more than
+  the γ fraction expected by chance, which a **z-test**
+  `(g−γn)/√(nγ(1−γ))` (`detect_z`) flags with a minuscule p-value, while
+  natural text scores `z≈0`. Everything is a deterministic hash of
+  `(seed, prev, token)`. Oracle: green fraction ≈ γ + bias applied to green
+  tokens only + watermarked text detected (z≫8) vs natural (z≈0) + a
+  **wrong seed does not detect** (no false provenance) + determinism.
+  Library layer.
+- **DeepONet — operator learning** (`nn::deeponet::DeepONet`, Lu et al.
+  2021, roadmap #76): learns an **operator** `G : u ↦ G(u)` (function →
+  function) via a **branch × trunk** factorization
+  `G(u)(y) ≈ Σ_k b_k(u)·t_k(y)` — the branch encodes the input function `u`
+  (sampled at fixed sensors), the trunk encodes the position `y`. Variant
+  **POD-DeepONet** (fixed **cosine** trunk `cos(kπy)` + **linear** branch) ⇒
+  **convex** fitting, exact for linear operators like the **antiderivative**
+  `∫₀^y u`. Oracle: trained on some functions, it approximates the
+  antiderivative on **unseen** functions at test MSE < 0.01 (≪ constant
+  predictor) — the operator-learning property — + determinism. Library
+  layer.
+- **Deep Ensembles** (`nn::ensemble::DeepEnsemble`, Lakshminarayanan,
+  Pritzel & Blundell 2017, roadmap #40): predictive uncertainty by
+  **seeded ensemble**. N small ReLU MLPs (`1→hidden→1`) trained on the N-D
+  tape with `NdAdam`, each seeded differently; `predict(x)` returns
+  `(mean, std)` — the point estimate and its **epistemic uncertainty**
+  (disagreement between members). Oracle: the ensemble-mean MSE is ≤ the
+  members' mean MSE (Jensen) + the std is **far larger out-of-distribution**
+  (far from the training range) than in-distribution + bit-exact
+  determinism. Library layer.
+- **LLM.int8()** (`quantization::int8_mixed_matmul`, Dettmers et al. 2022,
+  roadmap #71): mixed int8/fp32 matmul. Transformer activations have a few
+  **outlier feature columns** of very large magnitude; quantizing them in
+  int8 with the rest inflates the scale and crushes the resolution of
+  normal features. LLM.int8() keeps these columns (and the corresponding
+  rows of W) in **full precision** and quantizes the rest in **int8**:
+  `X·W = X_normal·W_normal (int8) + X_outlier·W_outlier (fp32)`. A column
+  is an outlier if any `|X[i,j]|` exceeds the threshold (default 6.0).
+  Oracle: on outlier-column activations, the error vs fp is **< 0.5×** that
+  of plain int8; without outliers, reduces to pure int8; determinism.
+  Library layer.
+- **RCPS — Risk-Controlling Prediction Sets**
+  (`nn::conformal::hoeffding_ucb` + `rcps_select`, Bates et al. 2021,
+  roadmap #36): where conformal controls *coverage*, RCPS controls an
+  **arbitrary bounded risk** (loss in [0,1]: false-negative rate,
+  non-coverage, …) with a **high-probability (PAC)** guarantee. For a
+  family of predictors `C_λ` with risk non-increasing in λ, RCPS chooses the
+  smallest `λ̂` whose **Hoeffding concentration bound** on the risk is ≤ α
+  (for λ̂ and every larger λ) ⇒ `R(λ̂) ≤ α` with probability ≥ 1−δ. Oracle:
+  the bound exceeds the mean by the right gap + exact selection (computed
+  case) + on fresh data the empirical risk stays ≤ α (conservative bound).
+  Library layer.
+- **Prodigy** (`nn::nd_optim::NdProdigy` + `ProdigyConfig`, Mishchenko &
+  Defazio 2023, roadmap #46): a **learning-rate-free** Adam
+  ("parameter-free"). It estimates online the distance `d ≈ ‖x₀ − x*‖` to
+  the solution — via the accumulated global correlation `⟨g, x₀ − x⟩` —
+  and uses it as the effective rate, starting from a tiny `d₀ = 1e-6` that
+  grows to the problem's scale. `d`, the numerator `r` and the denominator
+  norm are **global** scalars over all parameters. Oracle: `d` adapts to
+  the distance scale (no lr tuning) + the quadratic loss drops sharply +
+  bit-exact determinism. CLI: `scirust lm --opt prodigy` (8 languages).
+- **KVQuant** (`quantization::kvquant_kv`, Hooper et al. 2024, roadmap #68):
+  KV-cache quantization at the granularity that matches its outlier
+  structure — **keys per-channel** (key outliers concentrate by feature
+  column) and **values per-token** (per row). Far more faithful than a
+  single per-tensor scale, which a handful of large key channels would
+  dominate (crushing the resolution of all the others). Oracle: on keys
+  with channel outliers, the attention-output error vs fp is **< 0.6×**
+  that of per-tensor quantization; per-channel fixes the small columns
+  (<0.1× error) where per-tensor fails; determinism. Library layer.
+- **ALiBi — Attention with Linear Biases**
+  (`nn::nd_layers::alibi_slopes` + `alibi_bias` +
+  `NdMultiHeadAttention::with_alibi`, Press, Smith & Lewis 2022, roadmap
+  #59): replaces learned/rotary positions with a **static distance-linear
+  bias** added to the attention scores — for query `i` and key `j ≤ i`,
+  `−slopeₕ·(i−j)`, with per-head slopes in geometric progression
+  `2^(−8h/H)`. No learned position ⇒ **length extrapolation**. Wired into
+  `NdMultiHeadAttention` (builder `with_alibi`, includes the causal mask).
+  Oracle: geometric slopes (ratio `2^(−8/H)`) + linear/causal/Toeplitz bias
+  + softmax weights decaying with distance (exactly `∝ exp(−slope·dist)`) +
+  deterministic attention forward.
+- **ACI — Adaptive Conformal Inference**
+  (`nn::conformal::AdaptiveConformal`, Gibbs & Candès 2021, roadmap #38):
+  **online** conformal robust to **distribution drift**. Static conformal
+  silently loses coverage under distribution shift; ACI tracks an effective
+  level `αₜ` and corrects it after each observation by feedback
+  `αₜ₊₁ = αₜ + γ(α − errₜ)`, driving the long-term error rate toward `α`
+  (coverage toward `1−α`) for **any** score stream. With a sliding window of
+  recent scores, coverage stays ≈ 1−α through changes where static
+  conformal collapses. Oracle: exact `αₜ` update rule (computed case) +
+  coverage ≈ 1−α maintained under variance change (vs static conformal that
+  drops) + determinism. Library layer. Complements CQR/APS/RAPS in the
+  conformal pillar.
+- **KAN — Kolmogorov-Arnold Networks** (`nn::kan::KanLayer`, Liu et al.
+  2024; FastKAN RBF basis, Li 2024; roadmap #77): **learnable activations
+  on the edges** rather than on nodes — `y_j = Σᵢ φᵢⱼ(xᵢ)` with each `φ` a
+  sum of Gaussian RBFs (fixed grid) + a `SiLU` base term. The output is
+  **linear in the coefficients**, so the fit is a **convex** least-squares
+  problem solved by deterministic gradient descent. Oracle: a single KAN
+  layer fits the non-linear additive target `sin(2x₀)+x₁²` at MSE<0.02 —
+  well below the best linear model (which cannot represent sin/square);
+  localized RBF basis; bit-exact determinism. Library layer (RBF/FastKAN
+  variant, not the original paper's B-splines).
+- **RWKV time-mixing (WKV)** (`nn::nd_layers::rwkv_wkv` + `NdRwkv`, Peng et
+  al. 2023, roadmap #53): **WKV** operator — recurrent linear attention
+  with **per-channel exponential time decay** `decay ∈ (0,1)` plus a
+  **bonus** for the current token, normalized (numerator/denominator),
+  unrolled in linear time on the tape. Required a new autograd **`div`** op
+  (elementwise division, gradient `∂a=g/b`, `∂b=−g·a/b²`, gradient-checked).
+  The `NdRwkv` layer adds a **receptance** `r=σ(W_r·x)` gating the output,
+  with learnable per-channel decay/bonus. Oracle: the tape recurrence **≡
+  the explicit weighted-sum formula** + gradient check (k, v, decay, bonus)
+  + training (MSE↓) + bit-exact determinism. CLI: `scirust rwkv` (8
+  languages).
+- **GloRo — Lipschitz-certified robustness** (`nn::lipschitz`, Leino, Wang &
+  Fredrikson 2021, roadmap #32): `spectral_norm` (spectral norm by
+  deterministic power iteration), `spectral_normalize` (constrained
+  **1-Lipschitz** layer) and `GloroClassifier` (linear classifier with a
+  **proved L2 robustness radius** `margin/(√2·‖W‖₂)`, no search or
+  sampling; the `√2` comes from the `≤ √2·L` Lipschitz of the margin
+  `f_A−f_B`). Oracle: known spectral norms (diagonal, rectangular); norm ≈ 1
+  after normalization; radius **sound** (the worst perturbation at that
+  radius does not flip the prediction) **and conservative** (≤ exact
+  distance to the nearest boundary); determinism. Library layer. Complements
+  the certifiable pillar: IBP, CROWN, smoothing, GloRo.
+- **Randomized Smoothing — certified L2 robustness**
+  (`nn::smoothing::SmoothedClassifier` + `clopper_pearson_lower` +
+  `inv_normal_cdf`, Cohen, Rosenfeld & Kolter 2019, roadmap #27): turns any
+  classifier into a **smoothed** one under Gaussian noise `N(0,σ²I)`, with a
+  **proved L2 robustness radius** `σ·Φ⁻¹(pₐ)`. The top-class probability
+  `pₐ` is lower-bounded by **Clopper-Pearson** (regularized incomplete beta
+  `betai`/`lgamma`, exact); `Φ⁻¹` by Acklam's rational approximation.
+  Oracle: for a **half-space** classifier the certified radius **equals the
+  exact distance to the boundary** (independent of σ) + soundness/abstention
+  at the edge + determinism + reference values of `Φ⁻¹`/`betai`/
+  Clopper-Pearson. CLI: `scirust certify` now displays IBP/CROWN
+  (deterministic) **and** smoothing (probabilistic).
+- **SpQR — Sparse-Quantized Representation**
+  (`quantization::SpqrOutliers`, Dettmers et al. 2023, roadmap #67): the
+  quantization error is **heavy-tailed** — a small fraction of "outlier"
+  weights concentrates most of the error. SpQR keeps this fraction (the
+  largest dense-quantization errors) in **full precision** (sparse channel)
+  and quantizes the rest densely, so ~1 % of outliers removes a large share
+  of the error for a small memory overhead. Oracle: on Gaussian weights with
+  injected outliers, keeping 1 % of the weights divides the squared error by
+  > 3; exact outlier reconstruction; determinism. Library layer (the
+  paper's two-level grouped scales are orthogonal).
+- **SqueezeLLM** (`quantization::SqueezeLlmCodebook` +
+  `weighted_quant_error`, Kim et al. 2023, roadmap #66): **non-uniform**
+  weight quantization by **sensitivity-weighted k-means** (proxy of the
+  Hessian diagonal) — a codebook of `2^bits` centroids placed where they
+  reduce the *loss* most, not where the weights are dense. Deterministic
+  init (quantiles) + weighted Lloyd iterations. Oracle: weighted
+  quantization error **strictly < uniform round-to-nearest** (Gaussian
+  weights, 3 bits, < 0.85×) + exact round-trip on codebook values +
+  determinism. Library layer (the "sparse" outlier branch is not modeled).
+- **APS / RAPS — adaptive prediction sets**
+  (`nn::conformal::AdaptivePredictionSets`, Romano, Sesia & Candès 2020;
+  Angelopoulos et al. 2021; roadmap #34/#35): conformal **classification**
+  by cumulative score `s(x,c)` = mass of all classes at least as probable
+  as `c`. Set `{c : s(x,c) ≤ q̂}` ⇒ marginal coverage without distribution
+  ≥ 1−α with **adaptive size** (confident input → small set, ambiguous →
+  large). **RAPS** adds `λ·max(0, rank−k_reg)` to the score
+  (`calibrate_raps`) to prune unlikely classes and produce **smaller** sets
+  at equal coverage. Oracle: exact cumulative score (hand-computed case) +
+  coverage on fresh data + adaptivity (easy vs ambiguous) + RAPS < APS in
+  mean size + determinism. Library layer (like `ConformalClassifier`).
+- **CQR — Conformalized Quantile Regression**
+  (`nn::conformal::ConformalQuantileRegressor`, Romano, Patterson & Candès
+  2019, roadmap #33): conformalizes a **quantile** regressor to produce
+  **adaptive** (heteroscedastic) intervals with guaranteed coverage. Signed
+  score `Eᵢ = max(q_lo(xᵢ)−yᵢ, yᵢ−q_hi(xᵢ))`, finite correction `Q`
+  (conformal quantile of the `Eᵢ`, reuses `conformal_quantile`), interval
+  `[q_lo(x)−Q, q_hi(x)+Q]` — **variable width depending on x** where
+  split-conformal is constant-width (`Q` can be negative and tighten an
+  overly wide band). Oracle: exact score semantics (hand-computed case) +
+  marginal coverage ≥ 1−α on fresh data + **adaptivity** (far wider
+  intervals in the high-noise region) + determinism. CLI: `scirust
+  conformal` now shows both split **and** CQR.
+- **SAM — Sharpness-Aware Minimization** (`nn::nd_optim::NdSam` +
+  `SamConfig`, Foret et al. 2021, roadmap #47): **two-phase** optimizer that
+  minimizes the *worst-case* loss in a radius-ρ ball (bias toward flat
+  minima). `ascent` perturbs the weights toward `θ + ρ·g/‖g‖` (**global**
+  gradient norm); `descent` restores θ and takes an SGD step with the
+  gradient **at the perturbed point**. Two gradients per step ⇒ outside the
+  single-gradient `lm --opt` loop (library layer). Oracle: perturbation =
+  `ρ·g/‖g‖` with `‖ε‖ = ρ` + convergence on a quadratic (band ∝ lr·ρ) +
+  determinism.
+- **Shampoo** (`nn::nd_optim::NdShampoo` + `ShampooConfig` +
+  `inverse_pth_root`, Gupta/Koren/Singer 2018, roadmap #41): structured
+  **Kronecker** preconditioner — for a weight matrix, maintains the two
+  factors `L = E[GGᵀ]`, `R = E[GᵀG]` and steps by the preconditioned update
+  `W ← W − lr·L^(−1/4) G R^(−1/4)`. The inverse matrix roots come from a
+  Jacobi decomposition (`inverse_pth_root`, reuses
+  `jacobi_eigenvectors`), cached and refreshed every `precond_freq` steps.
+  Non-matrix parameters: diagonal Adagrad. Oracle: `A^(−1/2)²·A ≈ I` +
+  convergence on a matrix quadratic + Adagrad fallback + determinism. CLI:
+  `scirust lm --opt shampoo` (11th `--opt` value).
+- **Adafactor** (`nn::nd_optim::NdAdafactor` + `AdafactorConfig`, Shazeer &
+  Stern 2018, roadmap #42): optimizer with **factored second-order
+  moments** — for a weight matrix, stores only the **row** and **column**
+  sums of the gradient square (`rows + cols` numbers instead of
+  `rows·cols`) and reconstructs the rank-1
+  `V[i,j] = R[i]·C[j]/ΣR` (sub-linear memory). Update `G/√V` **RMS-clipped**;
+  `β2ₜ = 1 − t^(−0.8)` schedule. Non-matrix parameters: full second moment
+  (RMSProp). Oracle: **exact** rank-1 reconstruction when `G²` is rank-1 +
+  convergence (band) + factored matrix path reduces `½‖W−T‖²` +
+  determinism. CLI: `scirust lm --opt adafactor` (10th `--opt` value).
+- **NF4** (`quantization::nf4_quantize`/`nf4_dequantize` + `NF4_LEVELS`,
+  QLoRA, Dettmers et al. 2023, roadmap #74): 4-bit **NormalFloat** type —
+  16 levels that are the **quantiles of a normal** (per-block absmax scale).
+  Optimal for Gaussian weights. Oracle: reconstruction error **< uniform
+  int4** on Gaussian weights (seeded Box-Muller) + exact round-trip on the
+  levels + determinism. Library layer.
+- **BitNet b1.58** (`quantization::ternary_quantize` + `ternary_matmul`,
+  Ma et al. 2024, roadmap #69): **ternary** weight quantization to
+  `{−1,0,+1}` (absmean scale, ~1.58 bit/weight, ~20× more compact);
+  **multiplication-free matmul** (add / subtract / skip by sign). Oracle:
+  `ternary_matmul` = the sum-of-signs form **bit-exact** and = the
+  dequantized product up to floating-point reassociation. CLI: `scirust
+  bitnet` (live: max error 1.4e-6 vs dequant, 986/4096 zero weights).
+  Deterministic.
+- **HGRN** (`nn::nd_layers::hgrn` + `NdHgrn`, Qin et al. 2023, roadmap
+  #58): linear RNN with per-channel leaky integration
+  (`hₜ = fₜ⊙h_{t-1} + (1−fₜ)⊙cₜ`), **lower-bounded** forget gate
+  `f = lb + (1−lb)·σ(·)` (the bound `lb` fixes the minimum memory horizon).
+  No matrix state; unrolled on the tape. Tests: reference match + gradient
+  check (c,f) + training + determinism. CLI: `scirust hgrn` (live: MSE
+  27.37 → 4.59).
+- **GLA — Gated Linear Attention** (`nn::nd_layers::gated_linear_attention`
+  + `NdGla`, Yang et al. 2024, roadmap #55): **gated** linear attention —
+  **input-dependent** per-channel forget gate `αₜ=σ(·)`
+  (`S_t = diag(αₜ)·S_{t-1} + kₜᵀvₜ`, `o_t = q_t·S_t`), unrolled on the
+  tape. Tests: match of a Vec reference + gradient check (q,k,v,α) +
+  training + determinism. CLI: `scirust gla` (live: MSE 27.16 → 0.0000).
 - **RetNet** (`nn::nd_layers::retention` + `NdRetention`, Sun et al. 2023,
-  roadmap #54) : couche de **rétention** — attention linéaire récurrente à
-  décroissance `γ` (`S_t = γ·S_{t-1} + kₜᵀvₜ`, `o_t = q_t·S_t`), déroulée sur la
-  tape. **Oracle de dualité** : la forme récurrente **égale** la forme parallèle
-  `(QKᵀ⊙D)V` (`D_{nm}=γ^{n-m}`), testé ; + gradient check (q,k,v) + entraînement
-  + déterminisme. CLI : `scirust retnet` (en direct : MSE 24.63 → 0.0002).
-- **LAMB** (`nn::nd_optim::NdLamb`, You et al. 2020, roadmap #43) : Adam à
-  **confiance par couche** — direction Adam `r` remise à l'échelle par
-  `‖θ‖/‖r‖` par tenseur. CLI `lm --opt lamb`. Tests : convergence (bande ∝ lr,
-  car la norme de pas ≈ lr·‖θ‖) + déterminisme.
-- **Adan** (`nn::nd_optim::NdAdan`, Xie et al. 2022, roadmap #49) : momentum de
-  **Nesterov adaptatif** — 3 EMA (gradient `m`, différences `v`, terme
-  look-ahead au carré `n`) ; `θ ← (θ − η⊙(m+(1−β2)v))/(1+lr·wd)`. CLI
-  `lm --opt adan`. Tests : convergence quadratique + déterminisme.
-- **LoRA** (`nn::nd_layers::LoraLinear`, Hu et al. 2022, roadmap #72) : adaptation
-  **low-rank** — poids de base `W` **gelé** + mise à jour `ΔW = (α/r)·A·B` ; seuls
-  `A` (`in×r`) et `B` (`r×out`) sont entraînés (`r·(in+out)` paramètres au lieu de
-  `in·out`). `B=0` à l'init ⇒ la couche **vaut exactement la base**. Couche de la
-  tape N-D. Tests : init = base, **gradient check** sur `A` et `B`, `parameters()`
-  n'expose que `A`,`B`.
+  roadmap #54): **retention** layer — recurrent linear attention with decay
+  `γ` (`S_t = γ·S_{t-1} + kₜᵀvₜ`, `o_t = q_t·S_t`), unrolled on the tape.
+  **Duality oracle**: the recurrent form **equals** the parallel form
+  `(QKᵀ⊙D)V` (`D_{nm}=γ^{n-m}`), tested; + gradient check (q,k,v) +
+  training + determinism. CLI: `scirust retnet` (live: MSE 24.63 → 0.0002).
+- **LAMB** (`nn::nd_optim::NdLamb`, You et al. 2020, roadmap #43): Adam
+  with **per-layer trust** — the Adam direction `r` rescaled by `‖θ‖/‖r‖`
+  per tensor. CLI `lm --opt lamb`. Tests: convergence (band ∝ lr, because
+  the step norm ≈ lr·‖θ‖) + determinism.
+- **Adan** (`nn::nd_optim::NdAdan`, Xie et al. 2022, roadmap #49):
+  **adaptive Nesterov** momentum — 3 EMAs (gradient `m`, differences `v`,
+  squared look-ahead term `n`); `θ ← (θ − η⊙(m+(1−β2)v))/(1+lr·wd)`. CLI
+  `lm --opt adan`. Tests: quadratic convergence + determinism.
+- **LoRA** (`nn::nd_layers::LoraLinear`, Hu et al. 2022, roadmap #72):
+  **low-rank** adaptation — base weight `W` **frozen** + update
+  `ΔW = (α/r)·A·B`; only `A` (`in×r`) and `B` (`r×out`) train
+  (`r·(in+out)` parameters instead of `in·out`). `B=0` at init ⇒ the layer
+  **equals the base exactly**. N-D tape layer. Tests: init = base,
+  **gradient check** on `A` and `B`, `parameters()` exposes only `A`,`B`.
 - **Temperature scaling / calibration** (`nn::calibration`, Guo et al. 2017,
-  roadmap #39) : `temperature_scale` (recherche golden-section sur la NLL) +
-  `expected_calibration_error` + `nll`. Recalibration post-hoc des probabilités
-  **sans changer l'accuracy** (l'argmax est invariant à `T>0`). Déterministe. CLI :
-  `scirust calibrate` (en direct : ECE 0.29 → 0.004, −98,5 %, T=2,70). Tests : ECE
-  baisse + accuracy inchangée + déterminisme.
-- **Lookahead** (`nn::nd_optim::NdLookahead`, Zhang et al. 2019, roadmap #45) :
-  optimiseur **wrapper** poids lents/rapides autour d'Adam — `k` pas rapides puis
-  `φ ← φ + α(θ − φ) ; θ ← φ`. Déterministe. CLI : `scirust lm --opt lookahead`.
-  Tests : convergence quadratique, déterminisme bit-à-bit. (1er du pool de
-  candidats Tier 8-14.)
-- **PINN** (`nn::pinn` : `Pinn1D`, `solve_harmonic`, Raissi et al. 2019,
-  roadmap #17) : réseau **physics-informed** — la **physique est dans la loss**
-  via un résidu de PDE aux points de collocation + conditions aux limites.
-  Résout le problème aux limites `u'' = −u`, `u(0)=0`, `u(π/2)=1` (solution
-  exacte `sin x`) ; la dérivée seconde `u''` est prise par **différences finies
-  dans l'entrée** (les évaluations `u(x±h)` passent par les *mêmes* paramètres
-  dans un seul graphe forward), donc le gradient par rapport aux paramètres reste
-  exact (autodiff inverse) et déterministe. Vérifié contre la solution analytique
-  (erreur max ≈ 0,004). CLI : `scirust pinn`.
+  roadmap #39): `temperature_scale` (golden-section search on the NLL) +
+  `expected_calibration_error` + `nll`. Post-hoc recalibration of the
+  probabilities **without changing accuracy** (argmax invariant to `T>0`).
+  Deterministic. CLI: `scirust calibrate` (live: ECE 0.29 → 0.004, −98.5 %,
+  T=2.70). Tests: ECE decreases + accuracy unchanged + determinism.
+- **Lookahead** (`nn::nd_optim::NdLookahead`, Zhang et al. 2019, roadmap
+  #45): **wrapper** slow/fast-weights optimizer around Adam — `k` fast steps
+  then `φ ← φ + α(θ − φ) ; θ ← φ`. Deterministic. CLI: `scirust lm --opt
+  lookahead`. Tests: quadratic convergence, bit-for-bit determinism. (1st of
+  the Tier 8-14 candidate pool.)
+- **PINN** (`nn::pinn`: `Pinn1D`, `solve_harmonic`, Raissi et al. 2019,
+  roadmap #17): **physics-informed** network — the **physics is in the
+  loss** via a PDE residual at collocation points + boundary conditions.
+  Solves the boundary-value problem `u'' = −u`, `u(0)=0`, `u(π/2)=1`
+  (exact solution `sin x`); the second derivative `u''` is taken by
+  **finite differences in the input** (the `u(x±h)` evaluations pass
+  through the *same* parameters in a single forward graph), so the gradient
+  w.r.t. the parameters stays exact (reverse autodiff) and deterministic.
+  Verified against the analytic solution (max error ≈ 0.004). CLI:
+  `scirust pinn`.
 - **Mamba** (`nn::nd_layers::selective_scan` + `NdMamba`, Gu & Dao 2023,
-  roadmap #18) : **selective scan** S6 — état-espace à matrice `A` diagonale et
-  paramètres `Δ, B, C` **dépendants de l'entrée** (sélectifs) ; discrétisation
-  par maintien d'ordre zéro `Ā = exp(Δ·A)`, `B̄x = Δ·B·x` ; récurrence
-  déterministe linéaire-temps `h_t = Ā_t ⊙ h_{t-1} + B̄x_t`, `y_t = h_t·C_t`,
-  déroulée sur la tape N-D. Nouvel op autograd `NdVar::exp` (gradient-checké).
-  Init S4D-réelle (`A[:,j] = −(j+1)`), saut `D⊙x`. Tests : `selective_scan` match
-  une référence Vec, gradient check (x, Δ, A, B, C), couche entraîne (MSE↓) +
-  déterminisme. CLI : `scirust mamba`.
-- **DeltaNet** (`nn::nd_layers::delta_rule` + `NdDeltaNet`, Yang et al. 2024,
-  roadmap #25) : couche d'**attention linéaire récurrente** à règle delta
-  (`S_t = S_{t-1} + β_t(v_t − S_{t-1}k_t)k_tᵀ`, `o_t = S_t q_t`) — mémoire à poids
-  rapides, temps linéaire, causale. La récurrence est **déroulée sur la tape N-D**
-  (nouvel op autograd `NdVar::cat0` : concaténation axe 0 + backward par découpe,
-  **gradient-checké**), donc les gradients sont exacts et vérifiés par différences
-  finies (q, k, v, β). Tests : correspondance avec une référence Vec, gradient
-  check, entraînement (MSE↓) + déterminisme bit-à-bit. CLI : `scirust deltanet`.
-- **SOAP** (`nn::nd_optim::NdSoap` + `jacobi_eigenvectors`, Vyas et al. 2024,
-  roadmap #24) : optimiseur qui exécute **Adam dans la base propre de Shampoo**.
-  Pour chaque matrice de poids : facteurs `L = E[GGᵀ]`, `R = E[GᵀG]` (moyenne
-  mobile) ; rotation du gradient dans leur base propre (`Ĝ = Q_Lᵀ G Q_R`), Adam
-  dans cette base, puis rotation inverse de la mise à jour. Base propre par
-  **eigensolveur de Jacobi cyclique** déterministe (`jacobi_eigenvectors`),
-  rafraîchie tous les `precond_freq` pas (moments tournés dans la nouvelle base).
-  Repli Adam pour les paramètres non matriciels. Déterministe. CLI :
-  `scirust lm --opt soap`. Tests : Jacobi diagonalise (orthogonalité +
-  reconstruction), convergence sur quadratique matricielle, déterminisme bit-à-bit.
-- **AWQ** (`quantization::awq_quantize` + `awq_act_scale` + `AwqResult`, Lin et al.
-  2023, roadmap #15) : quantification int8 **consciente des activations** par
-  recherche d'échelle. Importance par canal d'entrée `a_j = moyenne|x_:,j|` ;
-  facteurs `s_j = a_j^alpha` (normalisés à moyenne géométrique unité) appliqués
-  aux poids avant la quantification int8 per-canal, l'équivalence étant préservée
-  côté activations ; `alpha` choisi par **grille** sur `[0,1]` (`alpha=0` =
-  round-to-nearest) en minimisant l'erreur de sortie pondérée par la calibration.
-  CLI : `scirust awq [--seed N] [--samples S] [--grid G]`. Tests : protège les
-  canaux saillants → erreur < round-to-nearest (`alpha>0` choisi) + déterminisme
-  bit-à-bit. **Complète le volet quantification #15** (SmoothQuant + GPTQ + AWQ).
-- **GPTQ** (`quantization::quantize_gptq` + `gptq_hessian`, Frantar et al. 2022,
-  roadmap #15) : quantification int8 des poids par **feedback d'erreur d'ordre 2**.
-  Hessienne proxy `H = XᵀX` sur des activations de calibration ; inverse par
-  Cholesky (en f64, déterministe) ; pour chaque canal de sortie, quantification
-  séquentielle des poids d'entrée avec propagation de l'erreur (OBQ/GPTQ, ordre
-  naturel) et complément de Schur. Scale symétrique par canal de sortie. CLI :
-  `scirust gptq [--seed N] [--samples S] [--damp D]`. Tests : **erreur de
-  reconstruction pondérée par la calibration < round-to-nearest** (≈ −85 % sur
-  données corrélées) + soundness (jamais pire) + déterminisme bit-à-bit. Complète
-  le volet quantification (#15) avec SmoothQuant et l'int8 per-canal.
-- **CROWN** (`nn::ibp::crown_bounds`, Zhang et al. 2018, roadmap #2) : bornes de
-  sortie d'un MLP ReLU à 1 couche cachée par **relaxation linéaire** +
-  back-substitution sur une boîte L∞. Relaxation par neurone : exacte pour les
-  neurones stables, chorde supérieure / pente inférieure adaptative pour les
-  instables. **Plus serrée qu'IBP** (prouvé par test). CLI : `scirust certify`
-  affiche désormais IBP **et** CROWN côte à côte (CROWN certifie la robustesse
-  là où IBP échoue). Tests : soundness (échantillonnage de la boîte) + largeur
-  CROWN ≤ largeur IBP par sortie.
-- **AdEMAMix** (`nn::nd_optim::NdAdEMAMix`, Pagliardini et al. 2024, roadmap #23) :
-  Adam à **deux EMA** du gradient (rapide β1 + lente β3 à longue mémoire, mélangées
-  par α) ; déterministe. CLI : `scirust lm --opt ademamix`. Tests : convergence
-  quadratique (bande), déterminisme bit-à-bit.
+  roadmap #18): **selective scan** S6 — state-space with diagonal matrix
+  `A` and **input-dependent** (selective) parameters `Δ, B, C`;
+  zero-order-hold discretization `Ā = exp(Δ·A)`, `B̄x = Δ·B·x`;
+  deterministic linear-time recurrence `h_t = Ā_t ⊙ h_{t-1} + B̄x_t`,
+  `y_t = h_t·C_t`, unrolled on the N-D tape. New autograd op `NdVar::exp`
+  (gradient-checked). S4D-real init (`A[:,j] = −(j+1)`), skip `D⊙x`. Tests:
+  `selective_scan` matches a Vec reference, gradient check (x, Δ, A, B, C),
+  layer trains (MSE↓) + determinism. CLI: `scirust mamba`.
+- **DeltaNet** (`nn::nd_layers::delta_rule` + `NdDeltaNet`, Yang et al.
+  2024, roadmap #25): **recurrent linear attention** layer with delta rule
+  (`S_t = S_{t-1} + β_t(v_t − S_{t-1}k_t)k_tᵀ`, `o_t = S_t q_t`) — fast
+  weight memory, linear time, causal. The recurrence is **unrolled on the
+  N-D tape** (new autograd op `NdVar::cat0`: axis-0 concatenation + slicing
+  backward, **gradient-checked**), so the gradients are exact and verified
+  by finite differences (q, k, v, β). Tests: matches a Vec reference,
+  gradient check, training (MSE↓) + bit-for-bit determinism. CLI: `scirust
+  deltanet`.
+- **SOAP** (`nn::nd_optim::NdSoap` + `jacobi_eigenvectors`, Vyas et al.
+  2024, roadmap #24): an optimizer that runs **Adam in Shampoo's eigenbasis**.
+  For each weight matrix: factors `L = E[GGᵀ]`, `R = E[GᵀG]` (moving
+  average); rotate the gradient into their eigenbasis (`Ĝ = Q_Lᵀ G Q_R`),
+  Adam in that basis, then rotate the update back. Eigenbasis by a
+  deterministic **cyclic Jacobi eigensolver** (`jacobi_eigenvectors`),
+  refreshed every `precond_freq` steps (moments rotated into the new
+  basis). Adam fallback for non-matrix parameters. Deterministic. CLI:
+  `scirust lm --opt soap`. Tests: Jacobi diagonalizes (orthogonality +
+  reconstruction), convergence on a matrix quadratic, bit-for-bit
+  determinism.
+- **AWQ** (`quantization::awq_quantize` + `awq_act_scale` + `AwqResult`,
+  Lin et al. 2023, roadmap #15): **activation-aware** int8 quantization by
+  scale search. Per-input-channel importance `a_j = mean|x_:,j|`; factors
+  `s_j = a_j^alpha` (normalized to unit geometric mean) applied to the
+  weights before per-channel int8 quantization, equivalence preserved on the
+  activation side; `alpha` chosen by **grid** over `[0,1]` (`alpha=0` =
+  round-to-nearest) minimizing the calibration-weighted output error. CLI:
+  `scirust awq [--seed N] [--samples S] [--grid G]`. Tests: protects salient
+  channels → error < round-to-nearest (`alpha>0` chosen) + bit-for-bit
+  determinism. **Completes the quantization item #15** (SmoothQuant + GPTQ +
+  AWQ).
+- **GPTQ** (`quantization::quantize_gptq` + `gptq_hessian`, Frantar et al.
+  2022, roadmap #15): int8 weight quantization by **second-order error
+  feedback**. Proxy Hessian `H = XᵀX` over calibration activations; inverse
+  by Cholesky (in f64, deterministic); for each output channel, sequential
+  quantization of the input weights with error propagation (OBQ/GPTQ,
+  natural order) and Schur complement. Symmetric per-output-channel scale.
+  CLI: `scirust gptq [--seed N] [--samples S] [--damp D]`. Tests:
+  **calibration-weighted reconstruction error < round-to-nearest** (≈ −85 %
+  on correlated data) + soundness (never worse) + bit-for-bit determinism.
+  Completes the quantization item (#15) with SmoothQuant and per-channel
+  int8.
+- **CROWN** (`nn::ibp::crown_bounds`, Zhang et al. 2018, roadmap #2):
+  output bounds of a 1-hidden-layer ReLU MLP by **linear relaxation** +
+  back-substitution over an L∞ box. Per-neuron relaxation: exact for stable
+  neurons, adaptive upper chord / lower slope for unstable ones.
+  **Tighter than IBP** (proved by test). CLI: `scirust certify` now
+  displays IBP **and** CROWN side by side (CROWN certifies robustness where
+  IBP fails). Tests: soundness (box sampling) + CROWN width ≤ IBP width per
+  output.
+- **AdEMAMix** (`nn::nd_optim::NdAdEMAMix`, Pagliardini et al. 2024, roadmap
+  #23): Adam with **two gradient EMAs** (fast β1 + slow β3 with long memory,
+  mixed by α); deterministic. CLI: `scirust lm --opt ademamix`. Tests:
+  quadratic convergence (band), bit-for-bit determinism.
+### Cleaned
+- Deletion of `scirust-core/src/nn/.legacy/` (**2363 lines** of dead code):
+  directory not wired into the module tree (dotfile, zero references),
+  superseded by the real `nn::conv2d`/`batch_norm`/`layer_norm`/
+  `pool`/`loss`/`transformer` implementations. Consistent with the fundamental "code under src/ wired and
+  tested, otherwise archived".
 
-### Nettoyé
-- Suppression de `scirust-core/src/nn/.legacy/` (**2363 lignes** de code mort) :
-  répertoire non câblé dans l'arbre de modules (dotfile, zéro référence),
-  superposé par les implémentations réelles `nn::conv2d`/`batch_norm`/`layer_norm`/
-  `pool`/`loss`/`transformer`. Conforme au fondamental « code sous src/ câblé et
-  testé, sinon archivé ».
-
-### Ajouté — campagne « faire grandir scirust » (suite)
+### Added — "grow scirust" campaign (continued)
 - **Schedule-Free** (`nn::nd_optim::NdScheduleFree`, Defazio et al. 2024, roadmap
-  #22) : optimiseur **sans planning de learning-rate** — séquence de base `z`
-  (descente), moyenne de Polyak `x` (**point d'évaluation**), gradient pris en
-  `y = (1−β)z + βx`. Déterministe. CLI : `scirust lm --opt schedule-free`
-  (le point d'éval `x` est chargé avant la prédiction). Tests : convergence sur
-  quadratique, déterminisme bit-à-bit.
+  #22): optimizer **without a learning-rate schedule** — base sequence `z`
+  (descent), Polyak average `x` (**evaluation point**), gradient taken at
+  `y = (1−β)z + βx`. Deterministic. CLI: `scirust lm --opt schedule-free`
+  (the eval point `x` is loaded before prediction). Tests: convergence on
+  quadratic, bit-for-bit determinism.
 - **Conformal prediction** (`nn::conformal`, Angelopoulos & Bates 2021, roadmap
-  #21) : `conformal_quantile`, `ConformalRegressor`, `ConformalClassifier` —
-  ensembles/intervalles de prédiction à **couverture garantie sans hypothèse de
-  distribution** (`≥ 1 − α`). Tests : la couverture empirique atteint la cible
-  sur des données fraîches (régression *et* classification). CLI : `scirust
-  conformal [--seed N] [--alpha A]` (couverture mesurée en direct, ex. 90,8 %
-  pour une cible de 90 %). CLI : 41 → 42 commandes.
-- **Lot 3 recherche → fonctions** (testées, 8 gates verts ; **14 des 20** items
-  de [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md)) :
-  - **Muon** (`nn::nd_optim`, Jordan et al. 2024) : optimiseur matriciel —
-    momentum puis **orthogonalisation Newton–Schulz** (quintique, sans SVD) de
-    la mise à jour des matrices 2-D ; `newton_schulz_orthogonalize` exposé.
-    Déterministe. Tests : orthogonalité (déviation ‖A·Aᵀ−I‖ s'effondre), perte
-    matricielle, déterminisme.
-  - **Wanda** (`pruning::prune_wanda`, Sun et al. 2023) : élagage one-shot par
-    `|W|·‖X‖` (poids × norme d'activation), par ligne de sortie — diffère de
-    l'élagage par magnitude sur les canaux à activations aberrantes.
+  #21): `conformal_quantile`, `ConformalRegressor`, `ConformalClassifier` —
+  prediction sets/intervals with **guaranteed coverage without any distribution
+  assumption** (`≥ 1 − α`). Tests: empirical coverage reaches the target
+  on fresh data (regression *and* classification). CLI: `scirust
+  conformal [--seed N] [--alpha A]` (coverage measured live, e.g. 90.8%
+  for a target of 90%). CLI: 41 → 42 commands.
+- **Research batch 3 → functions** (tested, 8 green gates; **14 of the 20** items
+  of [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md)):
+  - **Muon** (`nn::nd_optim`, Jordan et al. 2024): matrix optimizer —
+    momentum then **Newton–Schulz orthogonalization** (quintic, no SVD) of
+    the update of the 2-D matrices; `newton_schulz_orthogonalize` exposed.
+    Deterministic. Tests: orthogonality (deviation ‖A·Aᵀ−I‖ collapses), matrix
+    loss, determinism.
+  - **Wanda** (`pruning::prune_wanda`, Sun et al. 2023): one-shot pruning by
+    `|W|·‖X‖` (weights × activation norm), per output row — differs from
+    magnitude pruning on channels with aberrant activations.
   - **SmoothQuant** (`quantization::smoothquant_scales`/`apply_smoothquant`,
-    Xiao et al. 2022) : lissage par canal d'entrée qui migre les valeurs
-    aberrantes d'activation vers les poids ; **préserve `X·W`**.
-- **Lot 2 recherche → fonctions** (3 features de plus, testées, 8 gates verts ;
-  **11 des 20** items de [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md)) :
-  - **RoPE** (`autodiff::nd`, Su et al. 2021) : op `rope` (rotation par paires,
-    backward = rotation inverse) ; gradient-checkée, conservation de norme et
-    **propriété de position relative** testées ; branchée via
+    Xiao et al. 2022): input-channel smoothing that migrates the aberrant
+    activation values into the weights; **preserves `X·W`**.
+- **Research batch 2 → functions** (3 more features, tested, 8 green gates;
+  **11 of the 20** items of [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md)):
+  - **RoPE** (`autodiff::nd`, Su et al. 2021): `rope` op (pairwise rotation,
+    backward = inverse rotation); gradient-checked, norm conservation and
+    **relative position property** tested; wired via
     `NdMultiHeadAttention::with_rope`.
-  - **GQA / MQA** (`nn::nd_layers`, Ainslie et al. 2023) :
-    `NdMultiHeadAttention::new_gqa(num_kv_heads, …)` — têtes K/V partagées via le
-    broadcast `bmm` (aucune nouvelle op) ; gradient-checkée (GQA et MQA).
-  - **Neural ODE** (`nn::neural_ode`, Chen et al. 2018) : `rk4_integrate` +
-    `NeuralOde` — backprop **à travers** le solveur RK4 sur la tape N-D (fusion
-    solveurs + autograd). RK4 validé (`dy/dt=y → e`), gradient-check à travers
-    le solveur, et la dynamique **apprend** (Adam).
-- **Feuille de route recherche → fonctions** ([`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md)) :
-  20 papers réels traduits en fonctions concrètes, avec statut et effort. Premier
-  lot **livré cette session** (testé, 8 gates verts) :
-  - **IBP — bornes de sortie certifiées** (`nn::ibp`, Gowal et al. 2018) :
-    propagation d'intervalles dans un MLP ReLU → boîte de sortie **prouvée** ;
-    `certified_robust` transforme la borne en garantie de classe. Soundness
-    testée par échantillonnage (4000 points ∈ boîte certifiée). *Le* pilier « IA
-    certifiable » rendu concret.
-  - **Réductions reproductibles** (`reproducible`, Demmel & Nguyen) :
-    `reproducible_sum`/`_mean`/`_dot` **bit-identiques quel que soit l'ordre /
-    le nombre de threads** (tri canonique + expansion exacte de Shewchuk) ;
-    survit à l'annulation catastrophique.
-  - **Couches LLaMA N-D** (`nn::nd_layers`) : `NdRmsNorm`, `NdSwiGLU` (+ ops
-    `rmsnorm`/`sigmoid` gradient-checkées) et `NdLlamaBlock` (Pre-RMSNorm +
-    attention causale + SwiGLU) — entraînables, Adam-ready.
-  - **Décodage spéculatif exact** (`nn::nd_decoder`, Leviathan/Chen 2023) :
-    `generate_speculative` produit **exactement** la sortie greedy de la cible
-    pour n'importe quel brouillon, avec moins de forwards ; + `generate_greedy`.
-  - **Optimiseurs** (`nn::nd_optim`) : **AdamW** (weight-decay découplé) et
-    **Lion** (sign-momentum, déterministe).
-- **Commande CLI `lm`** : entraîne un petit LM décodeur causal (tape N-D + Adam)
-  sur une séquence de tokens et rapporte la courbe de perte + le rappel exact —
-  `scirust lm ["t0,t1,.."] [--seed N] [--steps S] [--lr R]`. Déterministe par
-  graine ; expose toute la pile N-D (embeddings, attention causale, gather,
-  cross-entropy, Adam) en une commande. CLI : 39 → 40 commandes.
-- **Optimiseur Adam N-D, réutilisable et déterministe** (`nn::nd_optim`) :
-  `NdAdam` (Kingma & Ba) sur un ensemble ordonné de paramètres. Chaque couche
-  expose `parameters() -> Vec<NdParam>` (vue `&mut` des valeurs + index du
-  gradient issu de `backward`) ; la composition remonte l'arbre
-  (`NdLinear`/`NdEmbedding`/`NdLayerNorm` → attention → bloc → `NdDecoderLM`),
-  donc **un seul `opt.step()` met à jour tout le modèle**. Arithmétique f32 en
-  ordre fixe ⇒ **bit-à-bit déterministe**. Tests : convergence sur quadratique
-  (oracle), déterminisme bit-à-bit, et **le LM décodeur entraîné par Adam via
-  `parameters()`** (< 10 % de perte en 150 pas vs 300 en SGD, prédictions
-  exactes).
-- **Modèle de langage décodeur causal bout-en-bout** (`nn::nd_decoder`) :
-  `NdDecoderLM` de style GPT entièrement sur la tape N-D — embedding de tokens
-  + embedding positionnel appris → N blocs transformer Pre-LN **causals** →
-  LayerNorm final → tête linéaire vers les logits de vocabulaire, entraîné par
-  cross-entropy au token suivant. Test phare : **le LM sur-apprend une séquence
-  et la reprédit exactement** à chaque position (preuve bout-en-bout que toute
-  la pile apprend) ; forward déterministe par graine. `NdEmbedding` (table
-  adossée à `gather`) ajoutée comme couche réutilisable.
-- **Ops N-D `gather` + `cross_entropy`** (`autodiff::nd`) : `gather(indices)`
-  (lookup d'embedding `(vocab, dim) → (n, dim)`, backward scatter-add — les
-  indices répétés s'accumulent, les lignes jamais vues gardent un gradient nul)
-  et `cross_entropy(targets)` (softmax + NLL moyen **fusionné**, log-sum-exp
-  stable, backward `(softmax − onehot)/n`). Gradient-checkées ; sanity
-  `logits uniformes → ln(vocab)`.
-- **Attention causale N-D** (`NdMultiHeadAttention { causal }`, propagée à
-  `NdTransformerBlock`) : masque triangulaire additif (`-1e9` au-dessus de la
-  diagonale) avant le softmax — aucune nouvelle op d'autograd. Test de
-  **causalité** : perturber le dernier token d'entrée laisse **chaque** sortie
-  antérieure bit-à-bit inchangée, tandis que la sortie perturbée bouge.
-- **Bloc transformer N-D complet et entraînable** (`nn::nd_layers`) :
-  `NdLinear`, `NdMultiHeadAttention`, `NdLayerNorm` (affine γ/β) et
-  `NdTransformerBlock` (Pre-LN : `x + Attn(LN(x))`, `x₁ + FFN(LN(x₁))`) sur la
-  tape N-D, tous **entraînables** (`sgd_step`). Tests : gradient check
-  entrée/couche d'attention/LayerNorm, **un MLP N-D qui apprend** ET **un bloc
-  transformer N-D complet qui apprend** (perte < 70 % de l'initiale). Ops
-  N-D ajoutées : `bmm`, `softmax`, `transpose_last2`, `reshape`, `permute`,
-  `layernorm` — toutes gradient-checkées.
-- **`MiniLLM::generate_sampled(&str)`** : génération publique à partir d'une
-  chaîne, sampling seedé sur le KV-cache, déterministe ; greedy reproduit
+  - **GQA / MQA** (`nn::nd_layers`, Ainslie et al. 2023):
+    `NdMultiHeadAttention::new_gqa(num_kv_heads, …)` — shared K/V heads via the
+    broadcast `bmm` (no new op); gradient-checked (GQA and MQA).
+  - **Neural ODE** (`nn::neural_ode`, Chen et al. 2018): `rk4_integrate` +
+    `NeuralOde` — backprop **through** the RK4 solver on the N-D tape (solver
+    + autograd fusion). RK4 validated (`dy/dt=y → e`), gradient check through
+    the solver, and the dynamics **learns** (Adam).
+- **Research roadmap → functions** ([`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md)):
+  20 real papers translated into concrete functions, with status and effort. First
+  batch **delivered this session** (tested, 8 green gates):
+  - **IBP — certified output bounds** (`nn::ibp`, Gowal et al. 2018):
+    interval propagation in a ReLU MLP → **proven** output box;
+    `certified_robust` turns the bound into a class guarantee. Soundness
+    tested by sampling (4000 points ∈ certified box). *The* "certifiable
+    AI" pillar made concrete.
+  - **Reproducible reductions** (`reproducible`, Demmel & Nguyen):
+    `reproducible_sum`/`_mean`/`_dot` **bit-identical whatever the order /
+    the number of threads** (canonical sort + exact Shewchuk expansion);
+    survives catastrophic cancellation.
+  - **LLaMA N-D layers** (`nn::nd_layers`): `NdRmsNorm`, `NdSwiGLU` (+
+    gradient-checked `rmsnorm`/`sigmoid` ops) and `NdLlamaBlock` (Pre-RMSNorm +
+    causal attention + SwiGLU) — trainable, Adam-ready.
+  - **Exact speculative decoding** (`nn::nd_decoder`, Leviathan/Chen 2023):
+    `generate_speculative` produces **exactly** the target's greedy output
+    for any draft, with fewer forwards; + `generate_greedy`.
+  - **Optimizers** (`nn::nd_optim`): **AdamW** (decoupled weight decay) and
+    **Lion** (sign-momentum, deterministic).
+- **`lm` CLI command**: trains a small causal decoder LM (N-D tape + Adam)
+  on a token sequence and reports the loss curve + exact recall —
+  `scirust lm ["t0,t1,.."] [--seed N] [--steps S] [--lr R]`. Deterministic per
+  seed; exposes the whole N-D stack (embeddings, causal attention, gather,
+  cross-entropy, Adam) in one command. CLI: 39 → 40 commands.
+- **Reusable, deterministic N-D Adam optimizer** (`nn::nd_optim`):
+  `NdAdam` (Kingma & Ba) over an ordered set of parameters. Each layer
+  exposes `parameters() -> Vec<NdParam>` (`&mut` view of the values + index of the
+  gradient from `backward`); the composition climbs back up the tree
+  (`NdLinear`/`NdEmbedding`/`NdLayerNorm` → attention → block → `NdDecoderLM`),
+  so **a single `opt.step()` updates the whole model**. f32 arithmetic in
+  fixed order ⇒ **bit-for-bit deterministic**. Tests: convergence on quadratic
+  (oracle), bit-for-bit determinism, and **the decoder LM trained by Adam via
+  `parameters()`** (< 10% loss in 150 steps vs 300 with SGD, exact
+  predictions).
+- **End-to-end causal decoder language model** (`nn::nd_decoder`):
+  GPT-style `NdDecoderLM` entirely on the N-D tape — token embedding
+  + learned positional embedding → N **causal** Pre-LN transformer blocks →
+  final LayerNorm → linear head to the vocabulary logits, trained by
+  next-token cross-entropy. Flagship test: **the LM overfits a sequence
+  and re-predicts it exactly** at every position (end-to-end proof that
+  the whole stack learns); forward deterministic per seed. `NdEmbedding` (table
+  backed by `gather`) added as a reusable layer.
+- **N-D `gather` + `cross_entropy` ops** (`autodiff::nd`): `gather(indices)`
+  (embedding lookup `(vocab, dim) → (n, dim)`, backward scatter-add — repeated
+  indices accumulate, never-seen rows keep a zero gradient)
+  and `cross_entropy(targets)` (softmax + average NLL **fused**, stable
+  log-sum-exp, backward `(softmax − onehot)/n`). Gradient-checked; sanity
+  `uniform logits → ln(vocab)`.
+- **N-D causal attention** (`NdMultiHeadAttention { causal }`, propagated to
+  `NdTransformerBlock`): additive triangular mask (`-1e9` above the
+  diagonal) before the softmax — no new autograd op. **Causality** test:
+  perturbing the last input token leaves **every** earlier output
+  bit-for-bit unchanged, while the perturbed output moves.
+- **Complete trainable N-D transformer block** (`nn::nd_layers`):
+  `NdLinear`, `NdMultiHeadAttention`, `NdLayerNorm` (affine γ/β) and
+  `NdTransformerBlock` (Pre-LN: `x + Attn(LN(x))`, `x₁ + FFN(LN(x₁))`) on the
+  N-D tape, all **trainable** (`sgd_step`). Tests: gradient check of
+  input/attention layer/LayerNorm, **an N-D MLP that learns** AND **a complete
+  N-D transformer block that learns** (loss < 70% of the initial). N-D
+  ops added: `bmm`, `softmax`, `transpose_last2`, `reshape`, `permute`,
+  `layernorm` — all gradient-checked.
+- **`MiniLLM::generate_sampled(&str)`**: public generation from a
+  string, sampling seeded on the KV-cache, deterministic; greedy reproduces
   `generate`.
-- **Attention N-D gradient-checkée** : `autodiff::nd` exprime une **attention
-  multi-tête complète** `softmax(Q·Kᵀ/√d)·V` sur `(têtes, seq, d)` (ops
-  `bmm`/`transpose_last2`/`softmax`/`mul`/`add`/`sub`/`relu`/`sum`), validée
-  par gradient check. La tape N-D devient le sur-ensemble capable ; la 2D
-  reste le défaut par choix d'architecture (coexistence, cf. GROWTH_PLAN).
-- **Sampling seedé** (`nn::sampling`) : température / top-k / top-p pilotés par
-  `PcgEngine` seedé → déterministe. `MiniLLM::generate_ids_cached_sampled`
-  (génération O(n) à KV-cache avec sampling). Greedy reproduit le chemin argmax.
-- **BPE byte-level** (`ByteBpeTokenizer`, style GPT-2) : vocab de base = 256
-  octets ⇒ **aucun OOV**, round-trip **lossless** sur tout UTF-8 (accents,
-  emoji, scripts inconnus). Déterministe. Exposé en CLI via `bpe --bytes`.
-- **LLM bout-en-bout** : décodage KV-cache O(n) (`MiniLLM::generate_ids_cached`,
+- **Gradient-checked N-D attention**: `autodiff::nd` expresses a **complete
+  multi-head attention** `softmax(Q·Kᵀ/√d)·V` on `(heads, seq, d)` (ops
+  `bmm`/`transpose_last2`/`softmax`/`mul`/`add`/`sub`/`relu`/`sum`), validated
+  by gradient check. The N-D tape becomes the capable superset; the 2D
+  remains the default by architectural choice (coexistence, cf. GROWTH_PLAN).
+- **Seeded sampling** (`nn::sampling`): temperature / top-k / top-p driven by
+  a seeded `PcgEngine` → deterministic. `MiniLLM::generate_ids_cached_sampled`
+  (O(n) generation with KV-cache + sampling). Greedy reproduces the argmax path.
+- **Byte-level BPE** (`ByteBpeTokenizer`, GPT-2 style): base vocab = 256
+  bytes ⇒ **no OOV**, **lossless** round-trip on any UTF-8 (accents,
+  emoji, unknown scripts). Deterministic. Exposed in CLI via `bpe --bytes`.
+- **End-to-end LLM**: O(n) KV-cache decoding (`MiniLLM::generate_ids_cached`,
   `TransformerBlock/Encoder::infer_step`, `PositionalEncoding::encoding_at`)
-  **prouvé équivalent** au recalcul complet ; génération découplée du tokenizer
-  (`MiniLLM::generate_ids`) → un BPE peut piloter la génération (test
-  d'intégration dans `scirust-learning`). Décodage glouton (sampling à venir).
-- **CLI `bpe`** : entraîne un tokenizer BPE déterministe sur un corpus
-  (documents séparés par `;`), encode/decode, rapporte la taille de vocab et le
-  round-trip. Adossé à `scirust-learning` (38 → 39 commandes ; nouveau groupe
-  NLP).
-- **Matmul par lots N-D** (`NdVar::bmm`) : `(…,m,k)·(…,k,n)→(…,m,n)` avec axes
-  batch broadcastés — la capacité que la tape 2D ne sait pas exprimer
-  (scores d'attention par tête). Forward + backward gradient-checkés.
-- **Autograd N-D (MVP, P2.4)** : `autodiff::nd` — `NdTape`/`NdVar` sur
-  `TensorND` (add/mul broadcastés, matmul 2D, relu, sum), à côté de la tape 2D
-  de production. Validé par un **gradient check numérique** (différences
-  finies vs backward) sur `sum(relu(X·W+b)·V)`.
-- **Ops GPU élargies** : kernel elementwise wgpu (add/mul/relu) ; une couche
-  entière (matmul → +biais → relu) reste **résidente en VRAM**, validée contre
-  l'oracle CPU sur lavapipe.
-- **ONNX import** : `import_onnx_json` + `OnnxGraph::weights` — les poids
-  font un aller-retour export→import **bit-exact** (format de checkpoint).
-- **KV-cache vérifié** : test prouvant que le décodage incrémental
-  (`MultiHeadAttention::infer_step`) donne le même dernier token que le forward
-  complet — décodage O(n) désormais testé.
-- **BPE déterministe** : tie-break par paire (`(count, Reverse(pair))`) — le
-  `max_by_key(count)` dépendait de l'ordre d'itération du HashMap ; +5 tests.
+  **proven equivalent** to full recomputation; generation decoupled from the
+  tokenizer (`MiniLLM::generate_ids`) → a BPE can drive the generation
+  (integration test in `scirust-learning`). Greedy decoding (sampling to come).
+- **`bpe` CLI**: trains a deterministic BPE tokenizer on a corpus
+  (documents separated by `;`), encode/decode, reports the vocab size and the
+  round-trip. Backed by `scirust-learning` (38 → 39 commands; new NLP
+  group).
+- **N-D batched matmul** (`NdVar::bmm`): `(…,m,k)·(…,k,n)→(…,m,n)` with batch
+  axes broadcast — the capability that the 2D tape cannot express
+  (per-head attention scores). Forward + backward gradient-checked.
+- **N-D autograd (MVP, P2.4)**: `autodiff::nd` — `NdTape`/`NdVar` on
+  `TensorND` (broadcast add/mul, 2D matmul, relu, sum), alongside the production
+  2D tape. Validated by a **numerical gradient check** (finite
+  differences vs backward) on `sum(relu(X·W+b)·V)`.
+- **Expanded GPU ops**: wgpu elementwise kernel (add/mul/relu); a whole
+  layer (matmul → +bias → relu) stays **resident in VRAM**, validated against
+  the CPU oracle on lavapipe.
+- **ONNX import**: `import_onnx_json` + `OnnxGraph::weights` — the weights
+  make an export→import round-trip **bit-exact** (checkpoint format).
+- **Verified KV-cache**: test proving that incremental decoding
+  (`MultiHeadAttention::infer_step`) gives the same last token as the full
+  forward — O(n) decoding now tested.
+- **Deterministic BPE**: pair tie-break (`(count, Reverse(pair))`) — the
+  `max_by_key(count)` depended on the HashMap iteration order; +5 tests.
 
-### Réparé
-- **Revue de code (max-effort) — durcissement** : (1) chemin GPU résident
-  (`GpuChain`) : les dimensions dégénérées (`m`/`n`/`k == 0`) faisaient paniquer
-  wgpu (buffers de taille nulle) ; gardes ajoutées (placeholder 4 octets,
-  dispatch sauté, `download` court-circuité) + test. (2) `scirust ode` :
-  `h = 0` provoquait un dépassement de capacité (panique, code 101), `t1 ≤ t0`
-  renvoyait silencieusement `y0` (code 0, réponse fausse) et dopri5/rk4
-  divergeaient sur de mauvaises bornes ; garde unifiée (`t1 > t0`, `h > 0` fini
-  → code 2) + tests. Les autres axes de revue (maths GEMM/transpose, routage
-  des gradients Conv2d, `matmul_gpu` av/ar, déterminisme de la réduction
-  threadée, restructuration cfg SIMD) ont été tracés à la main : corrects.
-- **`scirust-rustc-driver` recompile (P2.3, infra)** : le driver (exclu du
-  workspace, `rustc_private`) ne compilait plus sur la nightly courante
-  (`get_attrs` renvoie un itérateur, plus un slice). Réparé + warning-clean ;
-  job CI informatif `rustc-driver` (continue-on-error) pour rendre la dérive
-  d'API future visible ; `scirust-rustc-driver/target/` retiré du suivi git
-  (artefacts de build) et ignoré.
+### Fixed
+- **Code review (max-effort) — hardening**: (1) resident GPU path
+  (`GpuChain`): degenerate dimensions (`m`/`n`/`k == 0`) made wgpu panic
+  (zero-size buffers); guards added (4-byte placeholder,
+  skipped dispatch, short-circuited `download`) + test. (2) `scirust ode`:
+  `h = 0` caused an overflow (panic, code 101), `t1 ≤ t0`
+  silently returned `y0` (code 0, wrong answer) and dopri5/rk4
+  diverged on bad bounds; unified guard (`t1 > t0`, finite `h > 0`
+  → code 2) + tests. The other review axes (GEMM/transpose math, Conv2d
+  gradient routing, `matmul_gpu` av/ar, threaded reduction
+  determinism, SIMD cfg restructuring) were traced by hand: correct.
+- **`scirust-rustc-driver` recompiles (P2.3, infra)**: the driver (excluded from the
+  workspace, `rustc_private`) no longer compiled on the current nightly
+  (`get_attrs` returns an iterator, not a slice). Fixed + warning-clean;
+  informative CI job `rustc-driver` (continue-on-error) to make future API
+  drift visible; `scirust-rustc-driver/target/` removed from git tracking
+  (build artifacts) and ignored.
 
-### Ajouté
-- **Primitives d'inférence de forme N-D (P2.4, fondation)** : `TensorND`
-  gagne `broadcast_shape`, `matmul_shape` (matmul batché, broadcast des axes
-  batch) et `broadcast_to` (matérialisation numpy) — les briques d'inférence
-  de forme « au-delà de rows/cols » que la future tape/IR N-D utilisera, avec
-  le pont `from/to_tensor_2d` existant. 3 tests. (La fusion de la tape 2D
-  elle-même reste le gros chantier, à faire par incréments testés.)
-- **Entraînement data-parallèle à déterminisme certifié (P2.1)** :
-  `DataParallelTrainer::train_batch_threaded(n_threads, ..)` exécute les
-  workers sur N threads OS (vol de tâches via compteur atomique) mais réduit
-  les gradients dans un ordre fixe (worker 0,1,…,n-1), indépendant de
-  l'ordonnanceur. L'addition flottante n'étant pas associative, le résultat
-  est **bit-identique pour 1/2/4/8 threads** et identique au séquentiel —
-  garantie testée en CI. *(Rectifié 2026-07-10 : la claim d'unicité notée ici
-  à l'époque est retirée — RepDL, arXiv:2510.09180, fournit depuis oct. 2025
-  la reproductibilité bit-à-bit cross-platform d'un sous-ensemble f32 de
-  PyTorch ; voir l'entrée 2026-07-10.)* Trois tests
-  CI : contributions sensibles à l'ordre (±1e16), vrai backward autograd, et
-  une **boucle SGD multi-pas complète** dont la trajectoire de poids est
-  bit-identique pour 1/2/4 threads (l'invariance se compose sur l'entraînement).
+### Added
+- **N-D shape inference primitives (P2.4, foundation)**: `TensorND`
+  gains `broadcast_shape`, `matmul_shape` (batched matmul, batch-axis
+  broadcast) and `broadcast_to` (numpy materialization) — the shape-inference
+  building blocks "beyond rows/cols" that the future N-D tape/IR will use, with
+  the existing `from/to_tensor_2d` bridge. 3 tests. (Fusing the 2D tape
+  itself remains the big workstream, to be done in tested increments.)
+- **Data-parallel training with certified determinism (P2.1)**:
+  `DataParallelTrainer::train_batch_threaded(n_threads, ..)` runs the
+  workers on N OS threads (work stealing via atomic counter) but reduces
+  the gradients in a fixed order (worker 0,1,…,n-1), independent of the
+  scheduler. Since floating-point addition is not associative, the result
+  is **bit-identical for 1/2/4/8 threads** and identical to the sequential one —
+  guarantee tested in CI. *(Corrected 2026-07-10: the uniqueness claim noted here
+  at the time is withdrawn — RepDL, arXiv:2510.09180, has provided since Oct. 2025
+  the bit-for-bit cross-platform reproducibility of an f32 subset of
+  PyTorch; see the 2026-07-10 entry.)* Three CI
+  tests: order-sensitive contributions (±1e16), real autograd backward, and
+  a **complete multi-step SGD loop** whose weight trajectory is
+  bit-identical for 1/2/4 threads (the invariance composes over training).
 
-### Ajouté — parité SciPy des queues et Dirichlet-multinomiale (4e passe du volet probabilités)
-> Entrée placée en bas de la section « Non publié » à dessein : chaque volet
-> parallèle insère la sienne en tête, d'où des conflits systématiques sur le
-> même bloc ; l'ajouter ici les évite.
-- **`scirust-stats::discrete` — méthodes de queue en log** : `logcdf`,
-  `logsf` et `isf` (fonction de survie inverse) ajoutées par défaut au trait
-  `DiscreteDistribution`, alignant l'API sur `scipy.stats`. `logsf` s'appuie
-  sur la survie **directe** déjà surchargée sur chaque loi (pas de
-  `ln(1 − cdf)` qui explose en queue), et `isf(p)` fait sa dichotomie sur
-  `sf` — plus précis que `quantile(1 − p)` pour les très petits `p`. Validé
-  contre SciPy (binomiale, Poisson, zêta) et par cohérence
-  `exp(logcdf) = cdf`, aller-retour `isf∘sf`.
-- **`scirust-stats::discrete::DirichletMultinomial`** — Pólya multivariée :
-  une multinomiale à probabilités Dirichlet(α)-distribuées, généralisation
-  vectorielle de la bêta-binomiale pour les **vecteurs de comptages
-  surdispersés** (comptages de mots/thèmes, essais catégoriels répétés à
-  dérive). `ln_pmf`/`pmf` par la forme fermée en ln Γ, moyenne `n·αᵢ/A`,
-  covariance avec le facteur de surdispersion `ρ = (n+A)/(1+A)`, tirage
-  séquentiel par bêta-binomiales conditionnelles (stick-breaking exact,
-  ordre fixe ⇒ reproductible bit-à-bit). Oracles SciPy 1.17.1
-  (`dirichlet_multinomial([1,2,3], 10)` pmf/logpmf/cov) et fraction exacte
-  18/143 ; à 2 catégories = bêta-binomiale (testé), α = [1,1] = uniforme.
-- 48 tests + doctest sur le crate, clippy 0 avertissement.
+### Added — SciPy parity of tails and Dirichlet-multinomial (4th pass of the probabilities track)
+> Entry placed at the bottom of the "Unpublished" section on purpose: each parallel
+> track inserts its own at the top, hence systematic conflicts on the
+> same block; adding it here avoids them.
+- **`scirust-stats::discrete` — log tail methods**: `logcdf`,
+  `logsf` and `isf` (inverse survival function) added by default to the
+  `DiscreteDistribution` trait, aligning the API with `scipy.stats`. `logsf` relies
+  on the **direct** survival already overridden on each law (no
+  `ln(1 − cdf)` that explodes in the tail), and `isf(p)` does its bisection on
+  `sf` — more accurate than `quantile(1 − p)` for very small `p`. Validated
+  against SciPy (binomial, Poisson, zeta) and by consistency
+  `exp(logcdf) = cdf`, round-trip `isf∘sf`.
+- **`scirust-stats::discrete::DirichletMultinomial`** — multivariate Pólya:
+  a multinomial with Dirichlet(α)-distributed probabilities, vector
+  generalization of the beta-binomial for **overdispersed count
+  vectors** (word/topic counts, repeated categorical trials with
+  drift). `ln_pmf`/`pmf` via the closed form in ln Γ, mean `n·αᵢ/A`,
+  covariance with the overdispersion factor `ρ = (n+A)/(1+A)`, sequential
+  drawing by conditional beta-binomials (exact stick-breaking,
+  fixed order ⇒ bit-for-bit reproducible). SciPy 1.17.1 oracles
+  (`dirichlet_multinomial([1,2,3], 10)` pmf/logpmf/cov) and exact fraction
+  18/143; with 2 categories = beta-binomial (tested), α = [1,1] = uniform.
+- 48 tests + doctest on the crate, clippy 0 warnings.
 
-### Ajouté — interval/expect + Yule-Simon + Boltzmann (5e passe du volet probabilités)
-> Entrée en bas de section (voir la note de la 4e passe) pour éviter les
-> conflits de merge systématiques sur le bloc de tête.
-- **`scirust-stats::discrete` — `interval` et `expect`** ajoutés par défaut au
-  trait `DiscreteDistribution`, complétant la parité `scipy.stats` :
-  `interval(c)` renvoie l'intervalle équilibré `(quantile((1−c)/2),
-  quantile((1+c)/2))` ; `expect(f)` calcule `E[f(X)] = Σ f(k)·pmf(k)` par
-  sommation déterministe bornée (arrêt quand la masse de queue `sf(k)` est
-  négligeable, plafond de sécurité). Validés SciPy (intervalles binomiale/
-  Poisson/Yule-Simon, `E[X]`/`E[X²]` = moyenne / var+moyenne²).
-- **`scirust-stats::discrete::YuleSimon`** — loi **à queue lourde** sur k ≥ 1,
-  `pmf(k) = α·B(k, α+1)` (attachement préférentiel : fréquences de mots,
-  citations). Queue en loi de puissance `k^(−(α+1))` ⇒ moyenne finie ssi
-  α > 1, variance ssi α > 2 ; survie en forme fermée `sf(k) = k·B(k, α+1)`.
-  Oracles SciPy `yulesimon(2.5)` et identité exacte `α=2 ⇒ 4/(k(k+1)(k+2))`.
-- **`scirust-stats::discrete::Boltzmann`** — géométrique tronquée à `0..=n−1`
-  (Planck tronquée, `scipy.stats.boltzmann`),
-  `pmf(k) = (1−e^(−λ))e^(−λk)/(1−e^(−λN))` ; pmf/cdf/survie directe et
-  moments en forme fermée (normalisation via `−expm1` pour la précision aux
-  petits `λN`). Oracles SciPy `boltzmann(1.4, 10)`.
-- 51 tests + doctest sur le crate, clippy 0 avertissement. Couverture :
-  16 lois discrètes (13 univariées + 3 vectorielles).
+### Added — interval/expect + Yule-Simon + Boltzmann (5th pass of the probabilities track)
+> Entry at the bottom of the section (see the 4th pass note) to avoid
+> systematic merge conflicts on the head block.
+- **`scirust-stats::discrete` — `interval` and `expect`** added by default to the
+  `DiscreteDistribution` trait, completing the `scipy.stats` parity:
+  `interval(c)` returns the balanced interval `(quantile((1−c)/2),
+  quantile((1+c)/2))`; `expect(f)` computes `E[f(X)] = Σ f(k)·pmf(k)` by
+  bounded deterministic summation (stops when the tail mass `sf(k)` is
+  negligible, safety cap). Validated against SciPy (binomial/
+  Poisson/Yule-Simon intervals, `E[X]`/`E[X²]` = mean / var+mean²).
+- **`scirust-stats::discrete::YuleSimon`** — **heavy-tailed** law on k ≥ 1,
+  `pmf(k) = α·B(k, α+1)` (preferential attachment: word frequencies,
+  citations). Power-law tail `k^(−(α+1))` ⇒ finite mean iff
+  α > 1, finite variance iff α > 2; closed-form survival `sf(k) = k·B(k, α+1)`.
+  SciPy oracles `yulesimon(2.5)` and exact identity `α=2 ⇒ 4/(k(k+1)(k+2))`.
+- **`scirust-stats::discrete::Boltzmann`** — geometric truncated to `0..=n−1`
+  (truncated Planck, `scipy.stats.boltzmann`),
+  `pmf(k) = (1−e^(−λ))e^(−λk)/(1−e^(−λN))`; direct pmf/cdf/survival and
+  closed-form moments (normalization via `−expm1` for precision at
+  small `λN`). SciPy oracles `boltzmann(1.4, 10)`.
+- 51 tests + doctest on the crate, clippy 0 warnings. Coverage:
+  16 discrete laws (13 univariate + 3 vector).
 
-### Ajouté — log-series, Planck, et pmf de Loader (6e passe du volet probabilités)
-> Entrée en bas de section (convention des passes précédentes) pour éviter
-> les conflits de merge sur le bloc de tête.
-- **`scirust-special` — algorithme de Loader (saddle-point, Loader 2000)** :
-  `stirling_error(x)` (reste de la série de Stirling δ, série asymptotique
-  en 1/x pour x ≥ 16, forme directe sinon — validé contre mpmath 40 chiffres),
-  `binom_deviance(x, np)` (D₀ par série près de x ≈ np pour éviter
-  l'annulation), et les pmf en log `ln_poisson_pmf`/`ln_binomial_pmf`. Gagne
-  la **pleine précision relative à grand n/λ** là où `exp(Σ lnΓ)` dérivait
-  (~1e-10 → ~1e-15). `Binomial::ln_pmf` et `Poisson::ln_pmf` recâblés dessus
-  (c'est l'algorithme qu'utilise R `dbinom`/`dpois` et SciPy). Validé contre
-  SciPy : `binom(1e5, 0.3)`, `poisson(1e4)`, endpoints exacts.
-- **`scirust-stats::discrete::Logarithmic`** — loi log-séries sur k ≥ 1,
-  `pmf(k) = −pᵏ/(k·ln(1−p))` (`scipy.stats.logser`), modèle d'abondance
-  d'espèces de Fisher ; moyenne/variance en forme fermée. Oracles
+### Added — log-series, Planck, and Loader pmf (6th pass of the probabilities track)
+> Entry at the bottom of the section (convention of the previous passes) to avoid
+> merge conflicts on the head block.
+- **`scirust-special` — Loader's algorithm (saddle-point, Loader 2000)**:
+  `stirling_error(x)` (remainder of the Stirling series δ, asymptotic series
+  in 1/x for x ≥ 16, direct form otherwise — validated against mpmath to 40 digits),
+  `binom_deviance(x, np)` (D₀ by series near x ≈ np to avoid
+  cancellation), and the log pmfs `ln_poisson_pmf`/`ln_binomial_pmf`. Gains
+  **full relative precision at large n/λ** where `exp(Σ lnΓ)` drifted
+  (~1e-10 → ~1e-15). `Binomial::ln_pmf` and `Poisson::ln_pmf` rewired on top of it
+  (this is the algorithm used by R's `dbinom`/`dpois` and SciPy). Validated against
+  SciPy: `binom(1e5, 0.3)`, `poisson(1e4)`, exact endpoints.
+- **`scirust-stats::discrete::Logarithmic`** — log-series law on k ≥ 1,
+  `pmf(k) = −pᵏ/(k·ln(1−p))` (`scipy.stats.logser`), Fisher's species-abundance
+  model; closed-form mean/variance. Oracles
   `logser(0.6)`.
-- **`scirust-stats::discrete::Planck`** — géométrique **non tronquée** sur
-  k ≥ 0, `pmf(k) = (1−e^(−λ))e^(−λk)` (`scipy.stats.planck`), limite n → ∞
-  de Boltzmann ; testée égale à la géométrique décalée. Oracles
+- **`scirust-stats::discrete::Planck`** — **untruncated** geometric on
+  k ≥ 0, `pmf(k) = (1−e^(−λ))e^(−λk)` (`scipy.stats.planck`), the n → ∞ limit
+  of Boltzmann; tested equal to the shifted geometric. Oracles
   `planck(0.9)`.
 - scirust-special 16 tests, scirust-stats 54 tests + doctest, clippy 0
-  avertissement. Couverture : **18 lois discrètes** (15 univariées + 3
-  vectorielles).
+  warnings. Coverage: **18 discrete laws** (15 univariate + 3
+  vector).
 
-### Ajouté — Laplace discrète + ajustement méthode des moments (7e passe du volet probabilités)
-> Entrée en bas de section (convention des passes précédentes).
-- **`scirust-stats::discrete::DiscreteLaplace`** — loi de Laplace discrète
-  (géométrique bilatérale) sur ℤ, `pmf(k) = tanh(a/2)·e^(−a|k|)`
-  (`scipy.stats.dlaplace`) : différence de deux géométriques, **loi du
-  mécanisme géométrique de la confidentialité différentielle** (bruit entier
-  à garantie ε-DP pure ; pour une sensibilité 1 et un budget ε, prendre
-  a = ε). Support ℤ ⇒ API `i64` propre comme `Skellam` (pmf/ln_pmf/cdf/sf
-  directe/moments/tirage déterministe = différence de deux géométriques).
-  Symétrique, moyenne 0. Oracles SciPy `dlaplace(0.8)`.
-- **Ajustement par la méthode des moments** — `Poisson::fit_mom`,
-  `Geometric::fit_mom`, `NegativeBinomial::fit_mom` (associées, `-> Option`) :
-  une **capacité d'inférence** (l'équivalent de `.fit()` de SciPy) qui estime
-  les paramètres depuis un échantillon. Poisson `λ̂ = moyenne` (= EMV),
-  géométrique `p̂ = 1/moyenne`, binomiale négative `p̂ = m/v, r̂ = m²/(v−m)`
-  (définie sous surdispersion `v > m` seulement, `None` sinon — le cas
-  sous-dispersé relève d'une Poisson). Validé par round-trip mean/var.
-- 57 tests + doctest sur le crate, clippy 0 avertissement. Couverture :
-  **19 lois discrètes** (16 univariées + 3 vectorielles) + inférence MoM.
+### Added — discrete Laplace + method-of-moments fitting (7th pass of the probabilities track)
+> Entry at the bottom of the section (convention of the previous passes).
+- **`scirust-stats::discrete::DiscreteLaplace`** — discrete Laplace law
+  (two-sided geometric) on ℤ, `pmf(k) = tanh(a/2)·e^(−a|k|)`
+  (`scipy.stats.dlaplace`): difference of two geometrics, **the law of the
+  geometric mechanism of differential privacy** (integer noise
+  with a pure ε-DP guarantee; for sensitivity 1 and budget ε, take
+  a = ε). Support ℤ ⇒ clean `i64` API like `Skellam` (direct
+  pmf/ln_pmf/cdf/sf/moments/deterministic drawing = difference of two geometrics).
+  Symmetric, mean 0. SciPy oracles `dlaplace(0.8)`.
+- **Method-of-moments fitting** — `Poisson::fit_mom`,
+  `Geometric::fit_mom`, `NegativeBinomial::fit_mom` (associated, `-> Option`):
+  an **inference capability** (the equivalent of SciPy's `.fit()`) that estimates
+  the parameters from a sample. Poisson `λ̂ = mean` (= MLE),
+  geometric `p̂ = 1/mean`, negative binomial `p̂ = m/v, r̂ = m²/(v−m)`
+  (defined only under overdispersion `v > m`, `None` otherwise — the
+  underdispersed case falls under a Poisson). Validated by mean/var round-trip.
+- 57 tests + doctest on the crate, clippy 0 warnings. Coverage:
+  **19 discrete laws** (16 univariate + 3 vector) + MoM inference.
 
-### Ajouté — test d'adéquation χ² pour lois discrètes ajustées (8e passe du volet probabilités)
-> Entrée en bas de section (convention des passes précédentes).
-- **`scirust-stats::htest::chi2_gof_discrete`** — test du χ² de Pearson entre
-  une **loi discrète ajustée** et des comptages observés, boucle qui manquait
-  entre `fit_mom`, les pmf et `htest`. Les effectifs attendus sont tirés de la
-  loi (`N·pmf(i)` pour les valeurs exactes, `N·sf(L−2)` pour la classe de
-  queue « ≥ L−1 », somme exacte à N) ; **regroupement adjacent** jusqu'à
-  `min_expected` (règle de Cochran ≥ 5) qui absorbe aussi les classes de
-  probabilité nulle des supports commençant à 1 (Geometric) ; degrés de
-  liberté ajustés du nombre de paramètres estimés (`ddof`). Délègue le calcul
-  final au `chi_square_gof` existant. Validé contre SciPy
-  (`chisquare`/`chi2.sf`) : Poisson(1.98) sur 6 classes ⇒ χ²=2.2792, df=4,
-  p=0.6846 ; rejet d'un mauvais ajustement, regroupement d'une classe 0 de
-  Geometric, entrées dégénérées → `None`.
-- 59 tests + doctest sur le crate, clippy 0 avertissement. Le volet
-  probabilités boucle : lois → combinatoire → ζ → Loader → inférence (MoM)
-  → **validation de l'ajustement (GOF)**.
+### Added — χ² goodness-of-fit test for fitted discrete laws (8th pass of the probabilities track)
+> Entry at the bottom of the section (convention of the previous passes).
+- **`scirust-stats::htest::chi2_gof_discrete`** — Pearson's χ² test between
+  a **fitted discrete law** and observed counts, the loop that was missing
+  between `fit_mom`, the pmfs and `htest`. Expected counts are drawn from the
+  law (`N·pmf(i)` for the exact values, `N·sf(L−2)` for the tail
+  class "≥ L−1", exact sum to N); **adjacent regrouping** until
+  `min_expected` (Cochran's rule ≥ 5) which also absorbs the zero-probability
+  classes of supports starting at 1 (Geometric); degrees of
+  freedom adjusted for the number of estimated parameters (`ddof`). Delegates
+  the final computation to the existing `chi_square_gof`. Validated against SciPy
+  (`chisquare`/`chi2.sf`): Poisson(1.98) over 6 classes ⇒ χ²=2.2792, df=4,
+  p=0.6846; rejection of a bad fit, regrouping of a 0 class of
+  Geometric, degenerate inputs → `None`.
+- 59 tests + doctest on the crate, clippy 0 warnings. The probabilities
+  track loops: laws → combinatorics → ζ → Loader → inference (MoM)
+  → **fit validation (GOF)**.
 
 ## [0.14.0] — 2026-06-13
 
-### Réparé
-- **`scirust-gpu` honnête (P2.2, étape « trancher »)** : les backends
-  `WgpuBackend`/`CudaBackend` renvoyaient `vec![0.0; m*n]` — des résultats
-  **fabriqués** (zéros) sous une étiquette « wgpu »/« cuda », en violation
-  de la politique « 100 % câblé/testé, zéro sur-promesse ». Remplacés par
-  un vrai backend CPU de référence **testé** (oracle GEMM bit-déterministe)
-  et des chemins device qui signalent honnêtement `BackendError::Unavailable`
-  (jamais de sortie inventée), à l'image de `scirust_core::compute_backend`.
-  Crate passée de 0 à 6 tests. (Le câblage wgpu réel a suivi dans une étape
-  séparée — voir « Ajouté » : GEMM WGSL testé sur Vulkan logiciel.)
-- **`docs/GPU.md` honnête** : la page décrivait une API GPU en une ligne
-  (`GpuContext::try_init`, `ConvGpuPipelines`, `Conv2d::on_gpu`…) qui
-  n'existe pas (modules archivés ; `--features wgpu` ne compile rien).
-  Réécrite en page de statut + roadmap honnête (ce qui existe = backend CPU
-  de référence testé ; pourquoi le GPU n'est pas revendiqué ; plan P2.2).
-- Régression de merge cassant la compilation sur toutes architectures
-  (sgemv AVX2/SSE2/NEON, champ slab arena).
-- CI rendue réalisable : retrait de `--all-features` (features BLAS
-  mutuellement exclusives), `deny.toml` réécrit (TOML invalide),
-  cross-check aarch64 ajouté ; 6 gates verts localement.
-- Fusion d'opérateurs du graphe lazy : les chaînes pointwise fusionnent
-  réellement (chaque maillon devenait sa propre chaîne de longueur 1).
-- `RandomCrop` écrivait son résultat dans le vide (no-op silencieux).
-- 22 warnings rustdoc ; warnings rustc/clippy ramenés à zéro
-  (`-D warnings` tenable sur tous les targets).
+### Fixed
+- **Honest `scirust-gpu` (P2.2, "decide" step)**: the backends
+  `WgpuBackend`/`CudaBackend` returned `vec![0.0; m*n]` — **fabricated** results
+  (zeros) under a "wgpu"/"cuda" label, in violation
+  of the "100% wired/tested, zero over-promise" policy. Replaced by
+  a real **tested** CPU reference backend (bit-deterministic GEMM oracle)
+  and device paths that honestly report `BackendError::Unavailable`
+  (never invented output), following the example of `scirust_core::compute_backend`.
+  The crate went from 0 to 6 tests. (The real wgpu wiring followed in a
+  separate step — see "Added": WGSL GEMM tested on software Vulkan.)
+- **Honest `docs/GPU.md`**: the page described, in one line, a GPU API
+  (`GpuContext::try_init`, `ConvGpuPipelines`, `Conv2d::on_gpu`…) that
+  does not exist (archived modules; `--features wgpu` compiles nothing).
+  Rewritten as a status page + honest roadmap (what exists = tested CPU
+  reference backend; why the GPU is not claimed; P2.2 plan).
+- Merge regression breaking the build on all architectures
+  (sgemv AVX2/SSE2/NEON, slab arena field).
+- CI made feasible: removal of `--all-features` (mutually exclusive BLAS
+  features), `deny.toml` rewritten (invalid TOML),
+  aarch64 cross-check added; 6 gates green locally.
+- Lazy graph operator fusion: pointwise chains now actually fuse
+  (each link used to become its own chain of length 1).
+- `RandomCrop` used to write its result into the void (silent no-op).
+- 22 rustdoc warnings; rustc/clippy warnings brought back to zero
+  (`-D warnings` tenable on all targets).
 
-### Changé
-- **Statut GPU** retiré du tableau des features livrées du README (il
-  listait du non-câblé) → remplacé par une note honnête « Not included
-  yet » pointant la roadmap P2.2.
-- **Augmentation de données 100 % déterministe** : RNG `PcgEngine`
-  injecté, flux par échantillon indépendant de l'ordre, `with_seed`
-  effectif, vrai bruit gaussien (Box-Muller).
-- README aligné sur le code : statut GPU requalifié « Archived — not
-  wired », compte de tests mesuré.
-- `publish = false` sur les 51 manifestes (deps par chemin, licence
-  non commerciale).
+### Changed
+- **GPU status** removed from the README's delivered-features table (it
+  listed unwired stuff) → replaced by an honest "Not included
+  yet" note pointing to the P2.2 roadmap.
+- **100% deterministic data augmentation**: RNG `PcgEngine`
+  injected, per-sample streams independent of order, `with_seed`
+  effective, real Gaussian noise (Box-Muller).
+- README aligned with the code: GPU status requalified as "Archived — not
+  wired", measured test count.
+- `publish = false` on the 51 manifests (path deps, non-commercial
+  license).
 
-### Ajouté
-- **GPU wgpu réel et testé (P2.2, étape « recâbler »)** : vrai GEMM `f32`
-  en WGSL (`C = A·B`) derrière la feature `wgpu`, exécuté sur adaptateur
-  Vulkan/Metal/DX12/GL via wgpu 0.20. **Validé contre l'oracle CPU**
-  (tolérance flottante documentée, l'accumulation GPU n'étant pas
-  bit-identique) et **testé en CI** sur Vulkan logiciel Mesa lavapipe
-  (`llvmpipe`) — aucun GPU matériel requis, « pas de claim sans test »
-  respecté. `cargo deny` passe sur l'arbre de deps wgpu ; dépendance
-  optionnelle (les 8 gates par défaut ne la compilent pas). Nouveau job CI
+### Added
+- **Real and tested wgpu GPU (P2.2, "rewire" step)**: real `f32` GEMM
+  in WGSL (`C = A·B`) behind the `wgpu` feature, run on the
+  Vulkan/Metal/DX12/GL adapter via wgpu 0.20. **Validated against the CPU
+  oracle** (documented float tolerance, since GPU accumulation is not
+  bit-identical) and **tested in CI** on Mesa lavapipe software Vulkan
+  (`llvmpipe`) — no hardware GPU required, "no claim without a test"
+  respected. `cargo deny` passes on the wgpu dep tree; optional
+  dependency (the 8 default gates do not compile it). New CI job
   `GPU (wgpu / lavapipe)`.
-- **GPU wgpu branché dans la tape autograd (P2.2, étape « tape »)** :
-  `WgpuEngine` implémente le hook `GpuEngine` du `Tape` (kernel GEMM
-  général `C = α·op(A)·op(B) + β·C` avec transposition). `Var::matmul_gpu`
-  exécute **forward ET backward** (`dA = g·Bᵀ`, `dB = Aᵀ·g`) sur le GPU,
-  device/pipeline mis en cache, repli CPU si un dispatch échoue. Validé
-  bout-en-bout contre la tape CPU (forward + 2 gradients, tolérance) sur
-  lavapipe. Opt-in (feature + `matmul_gpu`) → garantie bit-exacte par
-  défaut intacte.
-- **Conv2d GPU (P2.2, étape « Conv2d »)** : les GEMM im2col de Conv2d
-  (forward `W·col`, backward `dW = dout·colᵀ` et `dInput = Wᵀ·dout`) passent
-  par l'engine via le nouvel helper `Tape::gemm_ab` (chemin transpose natif),
-  quand un `WgpuEngine` est attaché. Validé bout-en-bout contre la Conv2d CPU
-  sur lavapipe (forward + dInput + dWeight, tolérance). Repli CPU
-  bit-identique sans engine (aucune régression). im2col/col2im restent CPU.
-- **Activations résidentes en VRAM (P2.2, étape « résidence »)** : API
-  `GpuChain` — upload des entrées une fois, chaîne de `matmul` sur des
-  handles `GpuMatrix`, un intermédiaire reste en mémoire GPU et alimente le
-  GEMM suivant sans aller-retour CPU ; seul le résultat final est téléchargé.
-  Validé contre l'oracle CPU sur lavapipe (chaîne 2 GEMM + transpose). La
-  résidence transparente dans la tape (DeviceTensor matérialisé paresseusement
-  en GPU) reste un chantier futur — sans bénéfice mesurable hors GPU matériel.
-- **SBOM CycloneDX + automatisation de release** : SBOM CycloneDX 1.5
-  reproductible (`docs/sbom/scirust.cdx.json`, horodatage figé via
-  `SOURCE_DATE_EPOCH`, sans serial aléatoire → octet-identique pour une
-  source donnée), généré par `./scripts/generate-sbom.sh`. Nouveau job CI
-  `sbom` (artefact à chaque build) et workflow `release.yml` (sur tag `v*` :
-  rejoue les gates, génère le SBOM, crée la release et y attache le SBOM).
-  Section SBOM dans `SECURITY.md`, `docs/sbom/README.md` (provenance).
-- **CLI : 5e vague** — `tt` (compression tensor-train TT-SVD d'une matrice,
-  `scirust-tn` ; rapporte cœurs, rangs de liaison, ratio de compression et
-  erreur de reconstruction, sortie 1 si `--max-err` dépassé), `solve-system`
-  (système non-linéaire F(x)=0 par Broyden, `scirust-solvers`), `inverse`
-  (inverse de matrice LU), `fem-heat` (chaleur 1D −u″=source par éléments
-  finis linéaires), et méthode `dopri5` (Dormand–Prince adaptatif) pour `ode`.
-  `FemSolver1D` était non testé : 2 tests ajoutés (oracle parabolique
-  −u″=f exact aux nœuds + symétrie). Nouveau groupe TENSOR NETWORKS.
-  `reconstruct_matrix` réexporté depuis `scirust-tn` (paire de
-  `tt_decompose_matrix`). `newton_system` non exposé (closure `Fn(&[Dual])`
-  comme `bfgs`).
-- **CLI : 4e vague** — `trig` (identités trigonométriques), `patterns`
-  (tendance d'une série), `qr` (décomposition QR), `cg` (gradient
-  conjugué SPD). `bfgs` délibérément non exposé (closure `Fn(&[Dual])`
-  non constructible depuis une expression symbolique évaluée en f64).
-- **CLI : 3e vague** — `symreg` (régression symbolique par programmation
-  génétique, `scirust-symreg`), `sat` (satisfiabilité DPLL,
-  `scirust-neuro-symbolic`), et deux méthodes de plus pour `root`
-  (`secant`, `newton` via dérivée symbolique). Nouveau groupe LOGIC.
-- **CLI : 2e vague de commandes** (29 → toutes testées) : `integrate
+- **wgpu GPU wired into the autograd tape (P2.2, "tape" step)**:
+  `WgpuEngine` implements the `Tape`'s `GpuEngine` hook (general GEMM
+  kernel `C = α·op(A)·op(B) + β·C` with transposition). `Var::matmul_gpu`
+  runs **forward AND backward** (`dA = g·Bᵀ`, `dB = Aᵀ·g`) on the GPU,
+  device/pipeline cached, CPU fallback if a dispatch fails. Validated
+  end-to-end against the CPU tape (forward + 2 gradients, tolerance) on
+  lavapipe. Opt-in (feature + `matmul_gpu`) → the bit-exact guarantee by
+  default stays intact.
+- **GPU Conv2d (P2.2, "Conv2d" step)**: Conv2d's im2col GEMMs
+  (forward `W·col`, backward `dW = dout·colᵀ` and `dInput = Wᵀ·dout`) go
+  through the engine via the new `Tape::gemm_ab` helper (native transpose
+  path), when a `WgpuEngine` is attached. Validated end-to-end against CPU
+  Conv2d on lavapipe (forward + dInput + dWeight, tolerance). Bit-identical
+  CPU fallback without an engine (no regression). im2col/col2im stay on CPU.
+- **Activations resident in VRAM (P2.2, "residency" step)**: API
+  `GpuChain` — upload inputs once, chain of `matmul` over
+  `GpuMatrix` handles, an intermediate stays in GPU memory and feeds the
+  next GEMM without CPU round-trips; only the final result is downloaded.
+  Validated against the CPU oracle on lavapipe (chain of 2 GEMMs + transpose).
+  The transparent residency in the tape (DeviceTensor lazily materialized
+  on GPU) remains a future workstream — no measurable benefit without hardware GPU.
+- **CycloneDX SBOM + release automation**: CycloneDX 1.5
+  reproducible SBOM (`docs/sbom/scirust.cdx.json`, timestamp frozen via
+  `SOURCE_DATE_EPOCH`, no random serial → byte-identical for a given
+  source), generated by `./scripts/generate-sbom.sh`. New CI job
+  `sbom` (artifact on every build) and `release.yml` workflow (on tag `v*`:
+  replays the gates, generates the SBOM, creates the release and attaches
+  the SBOM to it). SBOM section in `SECURITY.md`, `docs/sbom/README.md`
+  (provenance).
+- **CLI: 5th wave** — `tt` (tensor-train TT-SVD compression of a matrix,
+  `scirust-tn`; reports cores, bond ranks, compression ratio and
+  reconstruction error, exit 1 if `--max-err` exceeded), `solve-system`
+  (nonlinear system F(x)=0 via Broyden, `scirust-solvers`), `inverse`
+  (LU matrix inverse), `fem-heat` (1D heat −u″=source via linear finite
+  elements), and `dopri5` method (adaptive Dormand–Prince) for `ode`.
+  `FemSolver1D` was untested: 2 tests added (parabolic oracle
+  −u″=f exact at the nodes + symmetry). New TENSOR NETWORKS group.
+  `reconstruct_matrix` re-exported from `scirust-tn` (pair of
+  `tt_decompose_matrix`). `newton_system` not exposed (closure `Fn(&[Dual])`
+  like `bfgs`).
+- **CLI: 4th wave** — `trig` (trigonometric identities), `patterns`
+  (series trend), `qr` (QR decomposition), `cg` (SPD conjugate
+  gradient). `bfgs` deliberately not exposed (closure `Fn(&[Dual])`
+  not constructible from a symbolic expression evaluated in f64).
+- **CLI: 3rd wave** — `symreg` (symbolic regression by genetic
+  programming, `scirust-symreg`), `sat` (DPLL satisfiability,
+  `scirust-neuro-symbolic`), and two more methods for `root`
+  (`secant`, `newton` via symbolic derivative). New LOGIC group.
+- **CLI: 2nd wave of commands** (29 → all tested): `integrate
   --method simpson|gauss`, `root --method bisection`, `optimize`
-  (Nelder–Mead multi-variable), `lstsq` (moindres carrés QR), `cholesky`,
-  `prove` (équivalence symbolique), `gradient` (numérique 1–2 var). Les
-  commandes à expression réutilisent `scirust-symbolic::eval`.
-- **CLI massivement étoffée** (19 commandes, toutes adossées à du code
-  testé) : ajout de `cmaes` ; maths symboliques `to-rust`, `regress` ;
-  solveurs numériques `integrate` (Romberg), `root`/`minimize` (Brent,
-  via dérivée symbolique), `linsolve`/`det` (LU), `polyroots`,
-  `ode` (RK4). Les commandes pilotées par expression utilisent
-  `scirust-symbolic::eval` comme pont vers les solveurs `scirust-solvers`.
-  +10 tests CLI ; bug d'ordre (intercept,slope) de `regress` corrigé et
-  épinglé par un test.
-- **CLI `scirust` étoffée** (niveau industriel) : nouvelles commandes
-  groupées et documentées — `som train` (modèle d'ownership, accuracy vs
-  baseline), `evo` (optimiseur génétique seedé), `diff`/`simplify`/`eval`/
-  `solve` (maths symboliques), `info` (garanties). `scirust help` les
-  liste par thème. Chaque commande est adossée à du code déjà testé.
-- **Flash Attention réellement testé** : 4 tests dans
-  `nn/transformer/flash_attention.rs` (forward vs oracle d'attention
-  dense, masque causal, déterminisme bit-exact, gradients finis) — la
-  ligne de statut passe de revendiquée à vérifiée.
-- **CLI unifiée `scirust`** (`scirust-cli`) : point d'entrée unique et
-  découvrable (`scirust help`) regroupant `quickstart` (démo MLP 2→8→2
-  bit-déterministe, 4/4), `analyze` (ownership, délègue à som-cli),
-  `verify` (certificats, délègue à `proofcli`), `version`. Logique verify
-  factorisée dans `scirust_runtime::proofcli` (zéro duplication ;
-  `scirust-verify` délègue désormais). Quickstart du README réécrit
-  autour de la CLI (plus de copier-coller de 40 lignes d'API), exemple
-  bibliothèque corrigé pour l'API réelle.
-- **Support Rust stable** : `#![feature(portable_simd)]` rendu réellement
-  optionnel (`cfg_attr`), fallback scalaire du tiling ; les 683 tests
-  passent sur stable ; job CI `build-test-stable`. La feature nightly
-  `portable-simd` (cassée par la migration d'API std::simd) est réparée.
-- **`scirust-verify`** : certificats d'inférence `SCIRUST-PROOF-1`
-  fichier-à-fichier (emit/verify, exit codes), détection d'altération
-  artefact/certificat testée, ré-émission bit-identique.
-- **`cargo som` + `--sarif`** : le linter d'ownership en sous-commande
-  cargo avec sortie SARIF 2.1.0 pour le code scanning CI.
-- **SOM opérationnel sur du vrai Rust** : frontend `syn`
-  (`scirust-som-frontend`), oracle d'ownership **type-aware**
-  (Copy/move exact, E0382/E0502/E0503-style), CLI `som-analyze`,
-  pipeline Transformer entraîné/évalué contre l'oracle (ownership
-  87,3 % vs baseline 33,1 % sur held-out), bit-déterminisme testé.
-- Modules recâblés et réparés : `core::lazy` (fusion), 
+  (multi-variable Nelder–Mead), `lstsq` (QR least squares), `cholesky`,
+  `prove` (symbolic equivalence), `gradient` (numerical 1–2 vars). The
+  expression commands reuse `scirust-symbolic::eval`.
+- **Massively expanded CLI** (19 commands, all backed by tested
+  code): added `cmaes`; symbolic math `to-rust`, `regress`;
+  numerical solvers `integrate` (Romberg), `root`/`minimize` (Brent,
+  via symbolic derivative), `linsolve`/`det` (LU), `polyroots`,
+  `ode` (RK4). The expression-driven commands use
+  `scirust-symbolic::eval` as a bridge to the `scirust-solvers` solvers.
+  +10 CLI tests; the order bug (intercept,slope) of `regress` fixed and
+  pinned by a test.
+- **Expanded `scirust` CLI** (industrial level): new grouped and documented
+  commands — `som train` (ownership model, accuracy vs
+  baseline), `evo` (seeded genetic optimizer), `diff`/`simplify`/`eval`/
+  `solve` (symbolic math), `info` (guarantees). `scirust help` lists them
+  by theme. Each command is backed by already-tested code.
+- **Flash Attention really tested**: 4 tests in
+  `nn/transformer/flash_attention.rs` (forward vs dense attention
+  oracle, causal mask, bit-exact determinism, finite gradients) — the
+  status line goes from claimed to verified.
+- **Unified `scirust` CLI** (`scirust-cli`): single discoverable entry
+  point (`scirust help`) grouping `quickstart` (bit-deterministic MLP 2→8→2
+  demo, 4/4), `analyze` (ownership, delegates to som-cli),
+  `verify` (certificates, delegates to `proofcli`), `version`. Verify logic
+  factored into `scirust_runtime::proofcli` (zero duplication;
+  `scirust-verify` now delegates). README quickstart rewritten
+  around the CLI (no more copy-pasting 40 lines of API), library
+  example fixed for the real API.
+- **Rust stable support**: `#![feature(portable_simd)]` made truly
+  optional (`cfg_attr`), scalar fallback for tiling; all 683 tests
+  pass on stable; CI job `build-test-stable`. The nightly
+  `portable-simd` feature (broken by the std::simd API migration) is fixed.
+- **`scirust-verify`**: `SCIRUST-PROOF-1` inference certificates
+  file-to-file (emit/verify, exit codes), tamper detection of
+  artifact/certificate tested, bit-identical re-emission.
+- **`cargo som` + `--sarif`**: the ownership linter as a cargo
+  subcommand with SARIF 2.1.0 output for CI code scanning.
+- **SOM operational on real Rust**: `syn` frontend
+  (`scirust-som-frontend`), **type-aware** ownership oracle
+  (exact Copy/move, E0382/E0502/E0503-style), `som-analyze` CLI,
+  Transformer pipeline trained/evaluated against the oracle (ownership
+  87.3% vs 33.1% baseline on held-out), bit-determinism tested.
+- Rewired and repaired modules: `core::lazy` (fusion),
   `core::tensor::{broadcast,device}`, `scirust_symbolic::prelude`.
-- `archive/` : sources historiques retirées du build avec état documenté
-  (GPU non câblé, NEON/SVE dupliqués, brouillon quant incorrect).
-- Docs industrielles : `docs/REFERENCE.md` (commandes/binaires/API
-  exhaustifs), `CONTRIBUTING.md`, `SECURITY.md`, audit
+- `archive/`: historical sources removed from the build with documented status
+  (GPU not wired, duplicated NEON/SVE, incorrect quantization draft).
+- Industrial docs: `docs/REFERENCE.md` (exhaustive commands/binaries/API),
+  `CONTRIBUTING.md`, `SECURITY.md`, audit
   `scirust_complete_audit_report.md`.

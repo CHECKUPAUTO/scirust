@@ -1,94 +1,94 @@
-# SciRust Elliptic Discovery — exécution et rejeu locaux v0.1
+# SciRust Elliptic Discovery — local execution and replay v0.1
 
-## Statut
+## Status
 
-Ce document définit la phase 6, après l’intégration des phases 0 à 5. Il ne
-modifie pas le périmètre de sécurité du document de conception principal :
-seules des courbes jouets générées localement peuvent être évaluées.
+This document defines phase 6, after the integration of phases 0 through 5. It does
+not modify the security scope of the main design document:
+only locally generated toy curves may be evaluated.
 
-## Objectif
+## Objective
 
-La bibliothèque sait construire les corpus, générer des relations, les
-falsifier et produire des justifications. Il manque encore une frontière
-d’exécution unique qui :
+The library can build the corpora, generate relations, falsify them, and produce
+justifications. What is still missing is a single execution
+boundary that:
 
-1. exécute un `SearchPlan` validé ;
-2. résume exactement tous les candidats évalués ;
-3. produit un reçu canonique avec séparation de domaine et empreinte SHA-256 ;
-4. rejoue le même plan et détecte toute divergence ;
-5. ne décode aucune donnée externe.
+1. executes a validated `SearchPlan`;
+2. summarizes exactly all evaluated candidates;
+3. produces a canonical receipt with domain separation and a SHA-256 fingerprint;
+4. replays the same plan and detects any divergence;
+5. decodes no external data.
 
-Le reçu n’est ni une preuve mathématique ni une affirmation de nouveauté. Il
-atteste seulement qu’un plan local donné a produit un résultat automatisé
-précis avec cette version du schéma.
+The receipt is neither a mathematical proof nor a claim of novelty. It
+only attests that a given local plan produced a precise automated
+result with this version of the schema.
 
-## Décisions
+## Decisions
 
-### API de bibliothèque, sans protocole externe
+### Library API, without an external protocol
 
-La phase 6 ajoute une API Rust dans `scirust-elliptic-discovery`. Elle
-n’ajoute pas de CLI généraliste, de format JSON entrant, de serveur, de réseau
-ou de système de greffons. Le seul point d’entrée est un `SearchPlan` déjà
-borné par le crate.
+Phase 6 adds a Rust API in `scirust-elliptic-discovery`. It
+does not add a general-purpose CLI, an incoming JSON format, a server, networking,
+or a plugin system. The only entry point is a `SearchPlan` already
+bounded by the crate.
 
-Cette décision empêche qu’un chemin de rejeu devienne implicitement un parseur
-d’adresse, de clé publique, d’encodage SEC 1 ou de cible blockchain.
+This decision prevents a replay path from implicitly becoming a parser
+for addresses, public keys, SEC 1 encodings, or blockchain targets.
 
-### Reçu canonique
+### Canonical receipt
 
-Un `ExecutionReceipt` contient :
+An `ExecutionReceipt` contains:
 
-- le plan exact ;
-- les empreintes ordonnées des trois corpus intégrés ;
-- une empreinte ordonnée de chaque évaluation de candidat ;
-- un résumé par statut autorisé ;
-- le nombre de contre-exemples enregistrés.
+- the exact plan;
+- the ordered fingerprints of the three built-in corpora;
+- an ordered fingerprint of each candidate evaluation;
+- a summary per authorized status;
+- the number of recorded counterexamples.
 
-L'encodage est binaire, big-endian, à longueurs explicites et séparé par le
-domaine `SCIRUST-ELLIPTIC-DISCOVERY/EXECUTION-RECEIPT/V1` dans la définition
-d'origine. La phase 7 fait évoluer le comportement de génération et passe les
-domaines de plan, d'évaluation et de reçu à `V2`; voir
+The encoding is binary, big-endian, with explicit lengths, and separated by the
+domain `SCIRUST-ELLIPTIC-DISCOVERY/EXECUTION-RECEIPT/V1` in the original
+definition. Phase 7 evolves the generation behavior and moves the
+plan, evaluation, and receipt domains to `V2`; see
 [`SCIRUST_ELLIPTIC_DISCOVERY_HARDENING_V0_1.md`](SCIRUST_ELLIPTIC_DISCOVERY_HARDENING_V0_1.md).
-Les relations sont encodées par leur arbre syntaxique typé, jamais par `Debug`
-ou `Display`.
+Relations are encoded by their typed syntax tree, never by `Debug`
+or `Display`.
 
-### Rejeu
+### Replay
 
-`replay_local` réexécute le plan porté par un reçu, recalcule un reçu complet
-et compare les octets canoniques. Le résultat expose les empreintes attendue et
-observée ainsi qu’un booléen de concordance. Il ne remplace pas le reçu
-attendu, afin de conserver la divergence pour audit.
+`replay_local` re-executes the plan carried by a receipt, recomputes a complete receipt,
+and compares the canonical bytes. The result exposes the expected and observed
+fingerprints as well as a boolean of concordance. It does not replace the expected
+receipt, so as to keep the divergence for audit.
 
 ## Invariants
 
-| Invariant | Vérification |
+| Invariant | Verification |
 |---|---|
-| Entrées locales seulement | L’API accepte uniquement `SearchPlan`. |
-| Bornes finies | La construction de `SearchPlan` conserve toutes les limites de phase 4. |
-| Exactitude | Aucun flottant n’est ajouté au chemin d’exécution ou de reçu. |
-| Ordre stable | Corpus et candidats restent dans leurs ordres canoniques existants. |
-| Rejeu strict | La comparaison porte sur tous les octets du reçu, pas sur un résumé partiel. |
-| Non-nouveauté | Le résumé réutilise exclusivement `ClassificationStatus`. |
-| Rust pur | Aucun `unsafe`, aucune FFI et aucune nouvelle dépendance. |
-| Pas d’E/S cachée | L’exécution ne lit ni fichier, ni variable d’environnement, ni réseau. |
+| Local inputs only | The API accepts only `SearchPlan`. |
+| Finite bounds | The construction of `SearchPlan` keeps all phase 4 limits. |
+| Exactness | No floating point is added to the execution or receipt path. |
+| Stable order | Corpora and candidates remain in their existing canonical orders. |
+| Strict replay | The comparison covers all bytes of the receipt, not a partial summary. |
+| Non-novelty | The summary exclusively reuses `ClassificationStatus`. |
+| Pure Rust | No `unsafe`, no FFI, and no new dependency. |
+| No hidden I/O | Execution reads no file, no environment variable, and no network. |
 
-## Tests de sortie
+## Exit tests
 
-La phase est terminée lorsque :
+The phase is finished when:
 
-- deux exécutions du même plan produisent des reçus identiques ;
-- deux graines distinctes produisent des empreintes distinctes ;
-- le rejeu d’un reçu intact concorde ;
-- le rejeu détecte une altération du reçu ;
-- l’encodage couvre chaque variante de relation, de statut, de porte et de
-  contre-exemple ;
-- la matrice CI du workspace reste verte sur le MSRV déclaré.
+- two executions of the same plan produce identical receipts;
+- two distinct seeds produce distinct fingerprints;
+- replaying an intact receipt agrees;
+- replay detects tampering with the receipt;
+- the encoding covers every relation, status, gate, and
+  counterexample variant;
+- the workspace CI matrix stays green on the declared MSRV.
 
-## Hors périmètre
+## Out of scope
 
-- import ou export de courbes arbitraires ;
-- lecture d’adresses Bitcoin, de clés ou d’encodages de points ;
-- récupération de secrets ;
-- connexion à une blockchain ;
-- prétention de découverte ou de preuve à partir du reçu ;
-- désérialisation d’un reçu provenant d’une source non fiable.
+- importing or exporting arbitrary curves;
+- reading Bitcoin addresses, keys, or point encodings;
+- secret recovery;
+- connecting to a blockchain;
+- claiming discovery or proof from the receipt;
+- deserializing a receipt coming from an untrusted source.

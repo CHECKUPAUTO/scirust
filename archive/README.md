@@ -1,17 +1,16 @@
-# archive/ — code retiré de l'arbre de compilation
+# archive/ — code removed from the compilation tree
 
-Politique du dépôt : **100 % du code sous `*/src/` est compilé, câblé et
-testé**. Ce répertoire conserve, hors build, des sources historiques qui
-ne satisfont pas ce contrat, avec leur état exact. Rien ici n'est compilé
-par le workspace ; tout y est récupérable (et l'historique git fait foi).
+Repository policy: **100 % of the code under `*/src/` is compiled, wired and
+tested**. This directory keeps, out of the build, historical sources that do
+not satisfy this contract, with their exact state. Nothing here is compiled by
+the workspace; everything is recoverable (and the git history is authoritative).
 
-| Origine | Contenu | État constaté | Pour le faire revivre |
+| Origin | Content | State found | To bring it back to life |
 |---|---|---|---|
-| `scirust-gpu/src/*.rs` (8 fichiers) | kernels WGSL (wgpu), matmul cuBLAS (cudarc), tenseur GPU, quant GPU | jamais déclarés en `mod` ; dépendances `wgpu`/`cudarc` absentes du workspace ; API `scirust-core` a dérivé depuis | ajouter les deps optionnelles, déclarer les modules derrière `cfg(feature)`, réaligner sur l'API actuelle, valider contre l'oracle CPU |
-| `scirust-simd/neon.rs` | kernels NEON | duplicat abandonné — les kernels NEON actifs vivent dans `scirust-simd/src/dispatch.rs` (testés sur aarch64) | n/a (préférer dispatch.rs) |
-| `scirust-simd/sve.rs` | kernels SVE | utilise des intrinsics `sv*` indisponibles dans `std::arch` ; ne compile pas | attendre la stabilisation SVE de Rust, ou passer en asm inline comme `scirust_simd::sve::sve_vector_length_elements` |
-| `scirust-core/quant/` (« Pilier 5 ») | int8/int4/bf16 SIMD | brouillon non câblé contenant des kernels **incorrects** (masque `0x7F` sur valeurs signées, recombinaison de lanes erronée, corruption du bit de signe bf16) ; duplique le chemin int8 **validé** (`scirust-core/src/quantization.rs` + binaires d'audit `scirust-runtime`) | repartir du chemin validé ; toute reprise exige des tests d'équivalence bit-exacte contre le scalaire |
+| `scirust-gpu/src/*.rs` (8 files) | WGSL kernels (wgpu), cuBLAS matmul (cudarc), GPU tensor, GPU quant | never declared as `mod`; `wgpu`/`cudarc` dependencies absent from the workspace; the `scirust-core` API has drifted since | add the optional deps, declare the modules behind `cfg(feature)`, realign on the current API, validate against the CPU oracle |
+| `scirust-simd/neon.rs` | NEON kernels | abandoned duplicate — the active NEON kernels live in `scirust-simd/src/dispatch.rs` (tested on aarch64) | n/a (prefer dispatch.rs) |
+| `scirust-simd/sve.rs` | SVE kernels | uses `sv*` intrinsics unavailable in `std::arch`; does not compile | wait for Rust's SVE stabilization, or switch to inline asm like `scirust_simd::sve::sve_vector_length_elements` |
+| `scirust-core/quant/` ("Pillar 5") | int8/int4/bf16 SIMD | unwired draft containing **incorrect** kernels (0x7F mask on signed values, erroneous lane recombination, bf16 sign-bit corruption); duplicates the **validated** int8 path (`scirust-core/src/quantization.rs` + `scirust-runtime` audit binaries) | restart from the validated path; any resumption requires bit-exact equivalence tests against the scalar |
 
-Décision documentée dans `scirust_complete_audit_report.md` (mise à jour
-fiabilisation) : conformité « tout est câblé » + interdiction de la
-duplication non validée.
+Decision documented in `scirust_complete_audit_report.md` (reliability update):
+"everything is wired" compliance + ban on unvalidated duplication.

@@ -1,175 +1,177 @@
-# SciRust — Feuille de route « adoption industrielle »
+# SciRust — "Industrial Adoption" Roadmap
 
-Propositions d'implémentation classées par valeur pour un industriel,
-fondées sur ce que SciRust possède déjà et que PyTorch/Burn/Candle n'ont
-pas : **déterminisme bit-exact mesuré, auditabilité totale (pur Rust,
-zéro FFI), quantization int8 bit-exacte embarquée, et un analyseur
-d'ownership (SOM)**. La stratégie n'est pas de concourir sur les TFLOPS :
-c'est de posséder le créneau « IA certifiable et reproductible ».
+Implementation proposals ranked by value for an industrial adopter,
+based on what SciRust already has that PyTorch/Burn/Candle do not:
+**measured bit-exact determinism, total auditability (pure Rust,
+zero FFI), embedded bit-exact int8 quantization, and an ownership
+analyzer (SOM)**. The strategy is not to compete on TFLOPS:
+it is to own the "certifiable and reproducible AI" niche.
 
-Chaque proposition précise : le client visé, le livrable, et la
-définition de fini (toujours : gates verts + oracle + doc).
+Each proposal specifies: the target customer, the deliverable, and the
+definition of done (always: green gates + oracle + docs).
 
 ---
 
-## P0 — Le socle de confiance (débloque tout le reste)
+## P0 — The trust foundation (unlocks everything else)
 
-### P0.1 Inférence porteuse de preuve (« Proof-Carrying Inference »)
-- **Client** : finance (audit modèles), médical/aéro (traçabilité),
-  assurance, conformité IA (EU AI Act art. 12 — journalisation).
-- **Quoi** : étendre `scirust-runtime` pour que chaque inférence émette
-  un **certificat** : hash du manifeste d'architecture, hash SRT1 des
-  poids, hash des entrées, empreinte 64-bit des sorties (déjà
-  existante), seed, versions. Vérifieur indépendant
-  `scirust-verify <certificat> <artefacts>` qui rejoue et compare
-  bit à bit. Les briques existent (`proof_bundle`, fingerprint) — il
-  manque le format stable + le vérifieur + la doc contractuelle.
-- **Fini quand** : un tiers reproduit une inférence sur une autre
-  machine x86/aarch64 et le vérifieur dit MATCH, en CI.
+### P0.1 Proof-Carrying Inference
+- **Customer**: finance (model auditing), medical/aerospace (traceability),
+  insurance, AI compliance (EU AI Act art. 12 — logging).
+- **What**: extend `scirust-runtime` so that every inference emits a
+  **certificate**: hash of the architecture manifest, SRT1 hash of the
+  weights, hash of the inputs, 64-bit fingerprint of the outputs (already
+  existing), seed, versions. Independent verifier
+  `scirust-verify <certificate> <artifacts>` that replays and compares
+  bit for bit. The building blocks exist (`proof_bundle`, fingerprint) —
+  what is missing is the stable format + the verifier + the contractual
+  documentation.
+- **Done when**: a third party reproduces an inference on another
+  x86/aarch64 machine and the verifier says MATCH, in CI.
 
-### P0.2 Release engineering : v1.0 outillée
-- **Client** : tout acheteur — personne n'embarque un dépôt sans
+### P0.2 Release engineering: tooled v1.0
+- **Customer**: every buyer — nobody embeds a repository without
   versions.
-- **Quoi** : tags semver + `cargo-dist` ou releases GitHub avec binaires
-  (`som-analyze`, vérifieur), CHANGELOG tenu (créé), politique MSRV
-  affichée, **SBOM** (CycloneDX via `cargo-sbom`/`cargo auditable`)
-  attaché à chaque release — l'argument « supply chain 100 % Rust,
-  Cargo.lock committé, cargo-deny en CI » devient vérifiable d'un clic.
-- **Fini quand** : `v0.14.0` taguée avec binaires + SBOM + notes.
+- **What**: semver tags + `cargo-dist` or GitHub releases with binaries
+  (`som-analyze`, verifier), maintained CHANGELOG (created), stated MSRV
+  policy, **SBOM** (CycloneDX via `cargo-sbom`/`cargo auditable`)
+  attached to each release — the "100 % Rust supply chain,
+  committed Cargo.lock, cargo-deny in CI" argument becomes verifiable at
+  one click.
+- **Done when**: `v0.14.0` tagged with binaries + SBOM + release notes.
 
-### P0.3 Story « stable » : sortir du nightly pour les consommateurs
-- **Client** : équipes d'industrialisation (politiques internes
-  interdisent souvent nightly).
-- **Quoi** : `portable-simd` et les extensions d'architecture de
-  `scirust-simd` (`nightly-simd`) sont les seules dépendances nightly du
-  cœur. Les rendre réellement optionnelles de bout en bout et prouver en
-  CI un build **stable** de `scirust-core` (+ SOM, déjà compatible
-  stable via `syn`) avec le dispatch runtime AVX2/NEON existant
-  (intrinsics stables). Job CI `stable-build` dédié.
-- **Fini quand** : `cargo +stable test -p scirust-core -p scirust-som-*`
-  vert en CI.
+### P0.3 "Stable" story: getting off nightly for consumers
+- **Customer**: industrialization teams (internal policies often
+  forbid nightly).
+- **What**: `portable-simd` and the architecture extensions of
+  `scirust-simd` (`nightly-simd`) are the only nightly dependencies of the
+  core. Make them truly optional end to end and prove in
+  CI a **stable** build of `scirust-core` (+ SOM, already stable-compatible
+  via `syn`) with the existing runtime AVX2/NEON dispatch
+  (stable intrinsics). Dedicated `stable-build` CI job.
+- **Done when**: `cargo +stable test -p scirust-core -p scirust-som-*`
+  is green in CI.
 
-## P1 — Les produits qui font signer
+## P1 — The products that get signatures
 
-### P1.1 « SciRust Edge Pack » : int8 déterministe industrialisé
-- **Client** : embarqué/IoT/automobile — c'est la capacité la plus
-  différenciante déjà **validée** (int8 bit-exact, NEON ×10, QSR1).
-- **Quoi** : transformer les 19 binaires d'audit en un produit : CLI
-  `scirust-quantize <model.srt1>` → artefact QSR1 + rapport d'écart
-  (bit-exact ou bornes), exemple cross-compilé aarch64 + taille binaire
-  mesurée (`no_std`-friendly pour `scirust-embedded` à terme), guide
-  « du float au int8 certifié en 30 minutes ».
-- **Fini quand** : un README de 1 page reproduit la chaîne complète sur
-  le MNIST du dépôt, avec les hashes attendus publiés.
+### P1.1 "SciRust Edge Pack": industrialized deterministic int8
+- **Customer**: embedded/IoT/automotive — this is the most
+  differentiating capability already **validated** (bit-exact int8, NEON ×10, QSR1).
+- **What**: turn the 19 audit binaries into a product: CLI
+  `scirust-quantize <model.srt1>` → QSR1 artifact + deviation report
+  (bit-exact or bounds), cross-compiled aarch64 example + measured binary
+  size (`no_std`-friendly for `scirust-embedded` in the future), guide
+  "from float to certified int8 in 30 minutes".
+- **Done when**: a 1-page README reproduces the full chain on the
+  repository's MNIST, with the expected hashes published.
 
-### P1.2 SOM comme linter CI : `cargo som`
-- **Client** : toute équipe Rust (au-delà du ML !) — porte d'entrée
-  commerciale la plus large du dépôt.
-- **Quoi** : empaqueter `som-analyze` en sous-commande cargo
-  (`cargo-som`) + GitHub Action (`som-action`) : sortie SARIF pour
-  l'onglet Security de GitHub, budget de fautes par PR, et le rapport
-  pédagogique par token (déjà fait) en artefact. Étendre le frontend
-  aux branches `if/else` (jointure conservatrice : état = pire des deux
-  branches) — c'est la limite la plus visible aujourd'hui.
-- **Fini quand** : l'action tourne sur ce dépôt même et commente une PR.
+### P1.2 SOM as a CI linter: `cargo som`
+- **Customer**: any Rust team (beyond ML!) — the broadest commercial
+  entry point of the repository.
+- **What**: package `som-analyze` as a cargo subcommand
+  (`cargo-som`) + GitHub Action (`som-action`): SARIF output for
+  GitHub's Security tab, fault budget per PR, and the pedagogical
+  per-token report (already done) as an artifact. Extend the frontend
+  to `if/else` branches (conservative join: state = worst of the two
+  branches) — that is the most visible limitation today.
+- **Done when**: the action runs on this very repository and comments on a PR.
 
-### P1.3 Benchmarks publics contre Burn/Candle/tch
-- **Client** : décideurs techniques en phase d'évaluation.
-- **Quoi** : `examples/benchmarks` réintégré au workspace en job CI
-  nightly informatif ; matrice (matmul, conv, MNIST epoch, inférence
-  int8) × (SciRust, Burn, Candle) × (x86 AVX2, aarch64 NEON), publiée
-  dans `docs/BENCHMARKS.md` avec la méthodologie. Assumer les défaites
-  en vitesse brute ; afficher les victoires (déterminisme, variance
-  nulle, empreinte, build 100 % Rust).
-- **Fini quand** : chiffres reproductibles par `cargo bench` documenté.
+### P1.3 Public benchmarks against Burn/Candle/tch
+- **Customer**: technical decision-makers in the evaluation phase.
+- **What**: `examples/benchmarks` reintegrated into the workspace as an
+  informative nightly CI job; matrix (matmul, conv, MNIST epoch, int8
+  inference) × (SciRust, Burn, Candle) × (x86 AVX2, aarch64 NEON), published
+  in `docs/BENCHMARKS.md` with the methodology. Own the defeats
+  in raw speed; showcase the wins (determinism, zero variance,
+  fingerprint, 100 % Rust build).
+- **Done when**: figures reproducible via documented `cargo bench`.
 
-## P2 — Profondeur technique (différenciation durable)
+## P2 — Technical depth (durable differentiation)
 
-### P2.1 Mode « déterminisme certifié » du training
-- **FAIT** : `DataParallelTrainer::train_batch_threaded(n_threads, ..)`
-  exécute les workers sur N threads OS (vol de tâches via compteur
-  atomique) mais écrit chaque résultat dans son slot indexé par worker et
-  réduit toujours dans l'ordre worker `0,1,…,n-1`. L'addition flottante
-  n'étant pas associative, une réduction « au fil des terminaisons »
-  dépendrait de l'ordonnanceur ; celle-ci non → résultat **bit-identique
-  pour 1/2/4/8 threads** et identique au séquentiel. Tests CI :
-  `train_batch_threaded_is_thread_count_invariant` (contributions
-  délibérément sensibles à l'ordre, ±1e16) +
-  `parallel_tape_training_is_deterministic_across_threads` (vrai backward
-  autograd). À notre connaissance, SciRust est le seul framework DL
-  **auto-contenu** (pile 100 % Rust auditable, zéro FFI dans le chemin de
-  calcul) à livrer cette garantie testée en CI avec, en plus, l'int8
-  déterministe embarqué et les pièces d'audit. Travaux voisins : RepDL
-  (Microsoft, 2025, arXiv:2510.09180) fournit la reproductibilité bit-à-bit
-  **cross-platform** d'un sous-ensemble float32 de PyTorch par arrondi
-  correct — garantie plus forte sur cet axe pour f32, mais en surcouche d'un
-  TCB C++/Python, sans basse précision ni pièces d'audit.
-- **FAIT (boucle complète)** : `multi_step_training_is_thread_count_invariant`
-  — une vraie boucle SGD multi-pas (modèle linéaire partagé, shards par
-  worker, perte MSE, autograd réel) produit une trajectoire de poids
-  **bit-identique pour 1/2/4 threads**. L'invariance d'un batch se compose
-  donc sur tout l'entraînement (la garantie ne dépend pas du nombre de
-  couches). Le « benchmark de scaling » est volontairement omis (le temps
-  mural n'est pas déterministe — non testable en CI).
+### P2.1 "Certified determinism" mode for training
+- **DONE**: `DataParallelTrainer::train_batch_threaded(n_threads, ..)`
+  runs the workers on N OS threads (work stealing via atomic
+  counter) but writes each result into its own worker-indexed slot and
+  always reduces in worker order `0,1,…,n-1`. Since floating-point
+  addition is not associative, a "as-finished" reduction would depend on
+  the scheduler; this one does not → result **bit-identical
+  for 1/2/4/8 threads** and identical to the sequential one. CI tests:
+  `train_batch_threaded_is_thread_count_invariant` (deliberately
+  order-sensitive contributions, ±1e16) +
+  `parallel_tape_training_is_deterministic_across_threads` (real backward
+  autograd). To our knowledge, SciRust is the only **self-contained**
+  DL framework (100 % auditable Rust stack, zero FFI in the compute
+  path) delivering this CI-tested guarantee, with, in addition, embedded
+  deterministic int8 and the audit pieces. Related work: RepDL
+  (Microsoft, 2025, arXiv:2510.09180) provides bit-for-bit **cross-platform**
+  reproducibility of a float32 subset of PyTorch via correct
+  rounding — a stronger guarantee on that axis for f32, but as a layer on top of a
+  C++/Python TCB, without low precision nor audit pieces.
+- **DONE (full loop)**: `multi_step_training_is_thread_count_invariant`
+  — a real multi-step SGD loop (shared linear model, shards per
+  worker, MSE loss, real autograd) produces a weight trajectory
+  **bit-identical for 1/2/4 threads**. Batch invariance therefore composes
+  over the whole training run (the guarantee does not depend on the number of
+  layers). The "scaling benchmark" is deliberately omitted (wall-clock
+  time is not deterministic — not testable in CI).
 
-### P2.2 GPU : trancher et recâbler proprement
-- **FAIT (étape 1 — trancher)** : suppression des stubs GPU mensongers
-  (`gemm_f32` renvoyait des zéros) ; `scirust-gpu` expose un backend CPU
-  de référence testé + des chemins device honnêtes (`Unavailable`).
-- **FAIT (étape 2 — recâbler wgpu)** : vrai GEMM WGSL derrière la feature
-  `wgpu`, exécuté sur adaptateur Vulkan, **validé contre l'oracle CPU**
-  (tolérance flottante documentée) et **testé en CI** sur Vulkan logiciel
-  (Mesa lavapipe) — « pas de claim sans test » respecté. `cargo deny`
-  passe sur l'arbre de deps wgpu. Dépendance optionnelle (les 8 gates par
-  défaut ne la compilent pas).
-- **FAIT (étape 3 — tape autograd)** : `WgpuEngine` implémente le hook
-  `GpuEngine` du `Tape` ; `Var::matmul_gpu` exécute **forward ET backward**
-  (`dA = g·Bᵀ`, `dB = Aᵀ·g`) sur le GPU, device/pipeline mis en cache.
-  Validé bout-en-bout contre la tape CPU (forward + 2 gradients) sur
-  lavapipe. Chemin opt-in (feature + `matmul_gpu`) → garantie bit-exacte
-  par défaut intacte.
-- **FAIT (étape 4 — Conv2d)** : les GEMM im2col de Conv2d (forward `W·col`,
-  backward `dW = dout·colᵀ`, `dInput = Wᵀ·dout`) passent par l'engine via
-  `Tape::gemm_ab` (chemin transpose natif), validés bout-en-bout contre la
-  Conv2d CPU sur lavapipe. im2col/col2im restent CPU pour l'instant.
-- **Reste** : garder les activations en VRAM entre couches (éviter
-  l'aller-retour CPU par op) + im2col/col2im sur GPU (pipelines archivés en
-  référence) ; plus d'ops (elementwise, réductions). Le backend bf16/cuBLASLt
-  est désormais disponible derrière la feature `cuda` avec chargement dynamique
-  et repli `Unavailable` sans runtime ; il reste à ajouter un runner CUDA matériel
-  pour la parité device et les régressions de performance.
+### P2.2 GPU: cut cleanly and rewire properly
+- **DONE (step 1 — cutting)**: removal of the dishonest GPU stubs
+  (`gemm_f32` returned zeros); `scirust-gpu` now exposes a tested reference
+  CPU backend + honest device paths (`Unavailable`).
+- **DONE (step 2 — rewiring wgpu)**: real WGSL GEMM behind the `wgpu`
+  feature, executed on a Vulkan adapter, **validated against the CPU oracle**
+  (documented floating-point tolerance) and **tested in CI** on software
+  Vulkan (Mesa lavapipe) — "no claim without test" respected. `cargo deny`
+  passes on the wgpu dependency tree. Optional dependency (the 8 default
+  gates do not compile it).
+- **DONE (step 3 — autograd tape)**: `WgpuEngine` implements the `GpuEngine`
+  hook of the `Tape`; `Var::matmul_gpu` executes **both forward AND backward**
+  (`dA = g·Bᵀ`, `dB = Aᵀ·g`) on the GPU, device/pipeline cached.
+  Validated end to end against the CPU tape (forward + 2 gradients) on
+  lavapipe. Opt-in path (feature + `matmul_gpu`) → the bit-exact guarantee
+  by default stays intact.
+- **DONE (step 4 — Conv2d)**: the im2col GEMMs of Conv2d (forward `W·col`,
+  backward `dW = dout·colᵀ`, `dInput = Wᵀ·dout`) go through the engine via
+  `Tape::gemm_ab` (native transpose path), validated end to end against
+  CPU Conv2d on lavapipe. im2col/col2im remain CPU for now.
+- **Remaining**: keep activations in VRAM between layers (avoid the
+  CPU round-trip per op) + im2col/col2im on GPU (reference-archived
+  pipelines); more ops (elementwise, reductions). The bf16/cuBLASLt backend
+  is now available behind the `cuda` feature with dynamic loading
+  and `Unavailable` fallback without a runtime; what remains is to add a hardware CUDA runner
+  for device parity and performance regressions.
 
-### P2.3 SOM précision rustc (HIR/MIR)
-- L'oracle `syn` actuel reste le mode conservateur réellement livré.
-- **Reste** : concevoir une passe MIR d'extraction ownership/emprunts (NLL,
-  types résolus) produisant le **format de rapport SOM**, avec transformations
-  vérifiées et gate CI bloquant. L'ancien driver d'analyse, qui annonçait des
-  transformations sans modifier le MIR, a été supprimé.
+### P2.3 SOM at rustc precision (HIR/MIR)
+- The current `syn` oracle remains the conservative mode actually shipped.
+- **Remaining**: design an ownership/borrow extraction MIR pass (NLL,
+  resolved types) producing the **SOM report format**, with verified
+  transformations and a blocking CI gate. The old analysis driver, which
+  announced transformations without modifying the MIR, has been removed.
 
-### P2.4 Tenseur N-D unifié
-- Fusionner `tensor::TensorND` (déjà dans core) avec la tape 2D :
-  prérequis aux ambitions compilateur (shape inference au-delà de
-  rows/cols), à faire **avant** tout IR de training.
-- **FAIT (fondation — primitives d'inférence de forme)** : `TensorND`
-  expose `broadcast_shape`, `matmul_shape`, `broadcast_to` (+ pont
+### P2.4 Unified N-D tensor
+- Merge `tensor::TensorND` (already in core) with the 2D tape:
+  prerequisite for the compiler ambitions (shape inference beyond
+  rows/cols), to be done **before** any training IR.
+- **DONE (foundation — shape inference primitives)**: `TensorND`
+  exposes `broadcast_shape`, `matmul_shape`, `broadcast_to` (+ bridge
   `from/to_tensor_2d`). 12 tests.
-- **FAIT (autograd N-D capable)** : `autodiff::nd` exprime désormais une
-  **attention multi-tête complète** `softmax(Q·Kᵀ/√d)·V` sur `(têtes, seq, d)`
-  — via `bmm` (matmul batché broadcast), `transpose_last2`, `softmax`
-  (axe final, backward Jacobien), `mul`/`add`/`sub`/`relu`/`sum` — le tout
-  **gradient-checké** (différences finies). C'est précisément ce que la tape
-  2D ne sait pas faire ⇒ la N-D est le **sur-ensemble capable**. La 2D reste
-  le défaut de production **par choix d'architecture** (coexistence, cf.
-  `GROWTH_PLAN.md`), pas un TODO ; la réécriture en bloc de `reverse.rs` n'est
-  pas souhaitable — on migre par incréments testés.
+- **DONE (N-D-capable autograd)**: `autodiff::nd` now expresses
+  **full multi-head attention** `softmax(Q·Kᵀ/√d)·V` on `(heads, seq, d)`
+  — via `bmm` (batched broadcast matmul), `transpose_last2`, `softmax`
+  (last axis, Jacobian backward), `mul`/`add`/`sub`/`relu`/`sum` — all of it
+  **gradient-checked** (finite differences). This is precisely what the 2D
+  tape cannot do ⇒ N-D is the **capable superset**. 2D remains
+  the production default **by architectural choice** (coexistence, cf.
+  `GROWTH_PLAN.md`), not a TODO; rewriting `reverse.rs` wholesale is
+  not desirable — we migrate in tested increments.
 
-## Ce qu'on ne propose PAS (anti-objectifs)
-- Courir après les TFLOPS de PyTorch/TensorRT : créneau perdu d'avance
-  et hors philosophie.
-- Multiplier les crates : la valeur vient de la profondeur des
-  garanties, pas de la surface. (`events-*`, `edge`, `bridge`
-  restent gelées tant qu'un client ne les tire pas.)
+## What we do NOT propose (anti-goals)
+- Chasing PyTorch/TensorRT TFLOPS: a lost niche from the start
+  and against the philosophy.
+- Multiplying crates: value comes from the depth of
+  the guarantees, not the surface area. (`events-*`, `edge`, `bridge`
+  remain frozen until a customer pulls them.)
 
-## Ordre d'exécution recommandé
-P0.2 (1 j) → P0.3 (2-3 j) → P0.1 (1 sem) → P1.2 (1 sem) →
-P1.1 (1-2 sem) → P1.3 (continu) → P2.x selon traction.
+## Recommended execution order
+P0.2 (1 d) → P0.3 (2-3 d) → P0.1 (1 wk) → P1.2 (1 wk) →
+P1.1 (1-2 wks) → P1.3 (ongoing) → P2.x depending on traction.

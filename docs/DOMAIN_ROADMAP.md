@@ -1,270 +1,268 @@
-# SciRust — Domaines industriels à ouvrir (feuille de route de marché)
+# SciRust — Industrial domains to open (market roadmap)
 
-Complément de `INDUSTRIAL_ROADMAP.md` (go-to-market) et `INDUSTRIAL_VERTICALS.md`
-(implémentation des verticaux déjà en cours : PdM, estimation, sûreté OT). Ici :
-le résultat d'une recherche de marché ciblée sur les secteurs **régulés** où le
-déterminisme bit-exact et l'auditabilité totale de SciRust constituent un
-avantage *mesurable*, pas seulement un argument marketing — et qui ne sont
-**pas** déjà couverts par les crates existantes (`scirust-signal`,
+Complement to `INDUSTRIAL_ROADMAP.md` (go-to-market) and `INDUSTRIAL_VERTICALS.md`
+(implementation of the verticals already under way: PdM, estimation, OT safety). Here:
+the result of targeted market research on the **regulated** sectors where
+SciRust's bit-exact determinism and total auditability constitute a
+*measurable* advantage, not just a marketing argument — and which are
+**not** already covered by the existing crates (`scirust-signal`,
 `scirust-opcua`, `scirust-mqtt`, `scirust-pdm`, `scirust-mlops`,
 `scirust-func-safety`, `scirust-estimation`, `scirust-nav`, `scirust-water`,
 `scirust-ids`, `scirust-hvac`, `scirust-bms`, `scirust-biomed`, `scirust-grid`,
 `scirust-shm`, `scirust-spc`, `scirust-robotics`, `scirust-metrology`,
 `scirust-reliability`).
 
-## Doctrine (identique à `INDUSTRIAL_VERTICALS.md`)
+## Doctrine (identical to `INDUSTRIAL_VERTICALS.md`)
 
-1. Rust pur, zéro FFI, déterminisme bit-exact (PRNG germé, ordre de réduction fixe).
-2. Aucune affirmation sans test — un oracle honnête, pas un stub.
-3. Le différenciateur est toujours une **garantie** : reproductibilité,
-   traçabilité hash-chaînée, borne certifiée, conformité à une norme nommée.
-4. Chaque nouveau domaine doit passer par le connecteur unique décrit en fin de
-   document (`scirust-mcp`) — un domaine ajouté devient immédiatement pilotable
-   par un agent (le SLM `scirust-sciagent`, un LLM externe, ou un script), sans
-   glue code spécifique.
+1. Pure Rust, zero FFI, bit-exact determinism (seeded PRNG, fixed reduction order).
+2. No claim without a test — an honest oracle, not a stub.
+3. The differentiator is always a **guarantee**: reproducibility,
+   hash-chained traceability, certified bound, compliance with a named standard.
+4. Each new domain must go through the single connector described at the end of
+   this document (`scirust-mcp`) — an added domain immediately becomes drivable
+   by an agent (the `scirust-sciagent` SLM, an external LLM, or a script), without
+   specific glue code.
 
-## Pourquoi ces secteurs : le point commun documenté
+## Why these sectors: the documented common denominator
 
-La littérature de chaque secteur régulé documente le **même** point de
-friction avec l'outillage dominant (Python/NumPy/SciPy, MATLAB/Simulink, ML
-« boîte noire ») : la non-associativité du flottant, le threading BLAS non
-déterministe et le manque de traçabilité cassent la reproductibilité exigée
-par leurs propres normes.
+The literature of every regulated sector documents the **same** friction
+point with the dominant tooling (Python/NumPy/SciPy, MATLAB/Simulink, "black-box"
+ML): floating-point non-associativity, non-deterministic BLAS threading and the
+lack of traceability break the reproducibility required by
+their own standards.
 
-- Intel documente l'absence de garantie bit-exacte même à nombre de threads
-  fixe (non-associativité + FMA + réordonnancement compilateur).
-- MathWorks documente que la correspondance simulation ⇄ code généré
-  (SIL/PIL) n'est garantie qu'« à une tolérance près », d'où l'obligation
-  ISO 26262 de tests MIL/SIL/PIL/HIL redondants.
-- Des bugs de threading OpenBLAS ont produit des résultats silencieusement
-  faux (issue publique openblas#1844) ; scikit-learn documente lui-même ne
-  pas contrôler le déterminisme du threading BLAS sous-jacent.
-- DO-178C (aéronautique) et IEC 62304 Edition 2 (dispositifs médicaux) butent
-  explicitement sur le ML entraîné : la traçabilité exigée « suppose un
-  comportement déterministe » qu'un réseau entraîné ne garantit pas — d'où
-  les nouveaux cadres EASA (AI Concept Paper) et FDA/IMDRF (GMLP, PCCP) qui
-  demandent explicitement de la transparence algorithmique.
+- Intel documents the absence of a bit-exact guarantee even at a fixed thread
+  count (non-associativity + FMA + compiler reordering).
+- MathWorks documents that the simulation ⇄ generated-code correspondence
+  (SIL/PIL) is only guaranteed "within tolerance", hence the ISO 26262
+  obligation of redundant MIL/SIL/PIL/HIL tests.
+- OpenBLAS threading bugs have produced silently
+  wrong results (public issue openblas#1844); scikit-learn itself documents
+  not controlling the determinism of the underlying BLAS threading.
+- DO-178C (aeronautics) and IEC 62304 Edition 2 (medical devices) run
+  explicitly into trained ML: the required traceability "assumes
+  deterministic behavior" that a trained network does not guarantee — hence
+  the new EASA (AI Concept Paper) and FDA/IMDRF (GMLP, PCCP) frameworks that
+  explicitly demand algorithmic transparency.
 
-C'est exactement le créneau que `docs/GROWTH_PLAN.md` revendique déjà
-(« IA certifiable, reproductible et auditable ») — les domaines ci-dessous
-sont où ce créneau a la demande la plus documentée.
+This is exactly the niche that `docs/GROWTH_PLAN.md` already claims
+("certifiable, reproducible and auditable AI") — the domains below
+are where this niche has the most documented demand.
 
-## Domaines classés par force de la preuve trouvée
+## Domains ranked by strength of the evidence found
 
-### D1 · Sûreté fonctionnelle des procédés (IEC 61511/61508 — SIS) — ✅ fait
-- **Client** : pétrochimie, chimie fine, raffinage — systèmes instrumentés de
-  sécurité (SIS).
-- **Pourquoi maintenant** : l'attaque Triton/Trisis (2017) a reflashé la
-  logique de sécurité d'un Triconex Schneider sans être détectée avant un
-  déclenchement accidentel — le cas d'école pour une logique de sécurité
-  *non auditable*.
-- **Algorithmes** : calcul PFDavg/SIL par architecture de vote (1oo1, 1oo2,
-  2oo2, 2oo3, 1oo3), intervalles de test de preuve (inversion numérique via
-  `scirust-solvers::roots::bisection`), matrices cause-à-effet, journal
-  hash-chaîné de la logique de vote (SHA-256, sur le modèle de
+### D1 · Process functional safety (IEC 61511/61508 — SIS) — ✅ done
+- **Customer**: petrochemical, fine chemical, refining — safety-instrumented
+  systems (SIS).
+- **Why now**: the Triton/Trisis attack (2017) re-flashed the safety
+  logic of a Schneider Triconex without being detected until an accidental
+  trip — the textbook case for *non-auditable* safety logic.
+- **Algorithms**: PFDavg/SIL calculation per voting architecture (1oo1, 1oo2,
+  2oo2, 2oo3, 1oo3), proof test intervals (numerical inversion via
+  `scirust-solvers::roots::bisection`), cause-and-effect matrices, hash-chained
+  log of the voting logic (SHA-256, modeled on
   `scirust-mcp::audit`/`scirust-discovery::audit`).
-- **Livré** : `scirust-reliability` (déjà présent, complété par les
-  architectures 2oo2/1oo3 manquantes) pour le calcul quantitatif, et le
-  nouveau `scirust-sis` pour la couche systèmes (boucle SIF complète,
-  simulation de vote à injection de pannes, matrices cause-à-effet,
-  dimensionnement d'intervalle de test, journal d'audit) — exposé comme
-  outils MCP (`sis_verify_sif_loop`, `sis_size_proof_test_interval`). Voir
+- **Delivered**: `scirust-reliability` (already present, completed with the
+  missing 2oo2/1oo3 architectures) for the quantitative computation, and the
+  new `scirust-sis` for the systems layer (full SIF loop,
+  voting simulation with fault injection, cause-and-effect matrices,
+  test interval sizing, audit log) — exposed as
+  MCP tools (`sis_verify_sif_loop`, `sis_size_proof_test_interval`). See
   `scirust-sis/README.md`.
-- **Taille** : petite à moyenne — le chemin le plus rapide vers un produit
-  différenciant « audit-grade ».
+- **Size**: small to medium — the fastest path to a differentiating
+  "audit-grade" product.
 
-### D2 · Protection réseau électrique & estimation d'état (IEC 61850, NERC CIP, IEEE C37.118) — ✅ fait
-- **Pourquoi maintenant** : le rapport post-mortem du blackout nord-américain
-  de 2003 pointe un estimateur d'état dont la défaillance n'a pas pu être
-  reconstituée ; les protocoles GOOSE/Sampled Values de l'IEC 61850 sont
-  démontrés usurpables (littérature académique citée).
-  `scirust-grid` existait déjà (fréquence/RoCoF/synchrophaseurs/THD) mais
-  sans la couche estimation d'état / protection.
-- **Algorithmes** : estimation d'état par moindres carrés pondérés (WLS,
-  solution fermée `x̂=(HᵀWH)⁻¹HᵀWz` via `scirust-solvers`), détection de
-  mauvaises données (test du χ² global + plus grand résidu normalisé,
-  Abur & Expósito §5.3-5.4), logique de relais de distance à
-  caractéristique mho multi-zones (IEEE C37.113 §5.2).
-- **Livré** : `scirust-grid::state_estimation` (`wls_state_estimate`,
-  `chi_squared_test`, `largest_normalized_residual_test`, vérifié contre un
-  exemple 3-nœuds calculé indépendamment) et
-  `scirust-grid::distance_relay` (`DistanceRelay`, comparateur mho
-  `mho_operates`, zones à portée/retard configurables). Reste hors périmètre
-  volontairement : estimation d'état AC non-linéaire itérative (Newton-Raphson
-  sur `h(x)` non-linéaire — le solveur `scirust-solvers::nonlinear` le
-  permettrait mais n'est pas câblé ici), et les seuils du test du χ² restent
-  à la charge de l'appelant (pas de réimplémentation de l'inverse de la
-  fonction gamma incomplète, comme `scirust-multivariate`).
-- **Taille** : moyenne — s'appuie sur l'estimation déjà présente.
+### D2 · Electric grid protection & state estimation (IEC 61850, NERC CIP, IEEE C37.118) — ✅ done
+- **Why now**: the post-mortem report of the 2003 North American
+  blackout points to a state estimator whose failure could not be
+  reconstructed; the GOOSE/Sampled Values protocols of IEC 61850 are
+  demonstrably spoofable (cited academic literature).
+  `scirust-grid` already existed (frequency/RoCoF/synchrophasors/THD) but
+  without the state-estimation / protection layer.
+- **Algorithms**: weighted least squares state estimation (WLS,
+  closed-form solution `x̂=(HᵀWH)⁻¹HᵀWz` via `scirust-solvers`), bad-data
+  detection (global χ² test + largest normalized residual,
+  Abur & Expósito §5.3-5.4), distance relay logic with
+  multi-zone mho characteristic (IEEE C37.113 §5.2).
+- **Delivered**: `scirust-grid::state_estimation` (`wls_state_estimate`,
+  `chi_squared_test`, `largest_normalized_residual_test`, verified against an
+  independently computed 3-node example) and
+  `scirust-grid::distance_relay` (`DistanceRelay`, mho comparator
+  `mho_operates`, zones with configurable reach/delay). Deliberately left out
+  of scope: iterative non-linear AC state estimation (Newton-Raphson
+  on non-linear `h(x)` — the `scirust-solvers::nonlinear` solver would
+  allow it but is not wired here), and the χ² test thresholds remain
+  the caller's responsibility (no reimplementation of the incomplete
+  gamma function inverse, as in `scirust-multivariate`).
+- **Size**: medium — builds on the estimation already present.
 
-### D3 · Dispositifs médicaux à boucle fermée (IEC 62304 Ed.2, FDA SaMD/GMLP/PCCP) — ✅ fait (techniques ; pas un dispositif)
-- **Pourquoi maintenant** : la future édition d'IEC 62304 ajoute un cycle de
-  vie dédié à l'IA/ML précisément parce qu'un modèle adaptatif ne rentre pas
-  dans le modèle déterministe historique de la norme.
-  `scirust-biomed` existait déjà (traitement de signal) ; l'ouverture ici
-  était le **contrôle** (dosage), pas seulement l'analyse de signal.
-- **Algorithmes** : PID à anti-windup conditionnel (classe de contrôleur des
-  systèmes hybrides de 1ère génération type Medtronic 670G/770G), suivi
-  d'insuline active (IOB, décroissance exponentielle), supervision par
-  seuils (suspension sur glycémie basse + variante prédictive, sortie de
-  mode automatique — le principe documenté publiquement de "Suspend on
-  Low"/SmartGuard), et un filtre de sécurité **Control Barrier Function**
-  (Ames et al., IEEE TAC 2017) résolu en forme close (CBF-QP à 1 variable
-  de décision) — l'alternative certifiable au réglage ad hoc de garde-fous
-  citée dans la doctrine du domaine.
-- **Livré** : `scirust-biomed::control` (`pid`, `iob`, `insulin_safety`,
-  `barrier`). **Explicitement pas livré, par doctrine anti-survente** :
-  aucune courbe IOB clinique (Walsh/OpenAPS/LoopKit — le module utilise une
-  décroissance mono-exponentielle générique), aucun modèle physiologique
-  validé (Bergman/UVA-Padova — le CBF utilise un modèle affine à 1
-  compartiment), aucun MPC (les systèmes récents — Tandem Control-IQ,
-  Omnipod 5, CamAPS FX — en utilisent, hors périmètre), aucune traçabilité
-  PCCP ni bornes IBP/CROWN. Ce qui est livré est la *technique* de contrôle
-  certifiable (PID + CBF-QP + supervision), pas un algorithme de dosage
-  homologable — chaque module de code porte cet avertissement en tête.
-- **Taille** : moyenne à grande (exigences réglementaires lourdes) — un
-  dispositif réel resterait un travail de partenariat clinique/réglementaire,
-  pas un sprint solo.
+### D3 · Closed-loop medical devices (IEC 62304 Ed.2, FDA SaMD/GMLP/PCCP) — ✅ done (techniques; not a device)
+- **Why now**: the future edition of IEC 62304 adds a dedicated AI/ML
+  lifecycle precisely because an adaptive model does not fit into the
+  standard's historical deterministic model.
+  `scirust-biomed` already existed (signal processing); the opening here
+  was **control** (dosing), not just signal analysis.
+- **Algorithms**: PID with conditional anti-windup (the controller class of
+  1st-generation hybrid systems such as Medtronic 670G/770G), active-insulin
+  tracking (IOB, exponential decay), threshold-based
+  supervision (suspension on low glucose + predictive variant, exit from
+  automatic mode — the publicly documented "Suspend on Low"/SmartGuard
+  principle), and a **Control Barrier Function** safety filter
+  (Ames et al., IEEE TAC 2017) solved in closed form (CBF-QP with 1 decision
+  variable) — the certifiable alternative to ad-hoc guardrail tuning
+  cited in the domain doctrine.
+- **Delivered**: `scirust-biomed::control` (`pid`, `iob`, `insulin_safety`,
+  `barrier`). **Explicitly not delivered, per the anti-overpromising doctrine**:
+  no clinical IOB curve (Walsh/OpenAPS/LoopKit — the module uses a
+  generic mono-exponential decay), no validated physiological model
+  (Bergman/UVA-Padova — the CBF uses a 1-compartment affine model), no MPC
+  (recent systems — Tandem Control-IQ, Omnipod 5, CamAPS FX — use it, out of
+  scope), no PCCP traceability nor IBP/CROWN bounds. What is delivered is the
+  *technique* of certifiable control (PID + CBF-QP + supervision), not an
+  approvable dosing algorithm — each code module carries this warning at its head.
+- **Size**: medium to large (heavy regulatory requirements) — a real
+  device would remain a clinical/regulatory partnership effort,
+  not a solo sprint.
 
-### D4 · Aéronautique — lois de commande de vol & fatigue structurelle (DO-178C/DO-333) — ✅ fait (comptage de fatigue ; lois de commande = partenariat)
-- **Pourquoi maintenant** : la traçabilité DO-178C suppose un comportement
-  déterministe entrée→sortie ; c'est documenté comme rompu par la
-  non-associativité flottante et par tout composant ML embarqué.
-- **Algorithmes** : comptage rainflow (ASTM E1049-85 §5.4.4) pour la durée
-  de vie en fatigue, règle de Palmgren-Miner pour le cumul de dommage.
-- **Livré** : `scirust-fatigue` (`rainflow`, `miner`) — port de l'algorithme
-  à pile de la norme, vérifié contre la bibliothèque de référence PyPI
-  `rainflow` (implémentation ASTM E1049-85 dédiée) sur deux séquences
-  indépendantes, valeur par valeur (plage/moyenne/compte/indices).
-  **Explicitement pas livré** : la numérique de lois de commande de vol à
-  virgule fixe déterministe et les bornes certifiées pour un composant
-  appris — cette partie reste, comme documenté ci-dessous, un travail de
-  certification aéronautique nécessitant un partenariat, pas un sprint
-  solo.
-- **Taille** : grande — expertise de certification aéronautique nécessaire
-  pour la partie lois de commande ; à traiter comme un partenariat plutôt
-  qu'un sprint solo.
+### D4 · Aeronautics — flight control laws & structural fatigue (DO-178C/DO-333) — ✅ done (fatigue counting; flight control laws = partnership)
+- **Why now**: DO-178C traceability assumes deterministic
+  input→output behavior; it is documented as broken by
+  floating-point non-associativity and by any embedded ML component.
+- **Algorithms**: rainflow counting (ASTM E1049-85 §5.4.4) for fatigue
+  lifetime, Palmgren-Miner rule for damage accumulation.
+- **Delivered**: `scirust-fatigue` (`rainflow`, `miner`) — port of the
+  standard's stack-based algorithm, verified against the PyPI reference
+  library `rainflow` (dedicated ASTM E1049-85 implementation) on two independent
+  sequences, value by value (range/mean/count/indices).
+  **Explicitly not delivered**: the deterministic fixed-point numerical
+  flight control laws and the certified bounds for a learned
+  component — that part remains, as documented below, an aeronautical
+  certification effort requiring a partnership, not a solo
+  sprint.
+- **Size**: large — aeronautical certification expertise required
+  for the flight-control part; to be treated as a partnership rather
+  than a solo sprint.
 
-### D5 · Maritime autonome & classification DNV (IMO MASS Code 2026, DNV AROS, IACS UR E26/E27) — ✅ fait (primitives)
-- **Pourquoi maintenant** : le nouveau code MASS (obligatoire, 2026) exige que
-  les décisions autonomes restent « explicables et auditables » sans méthode
-  de vérification encore consensuelle dans l'industrie — une fenêtre
-  d'opportunité pour poser un standard de référence.
-- **Algorithmes** : classification géométrique de rencontre COLREG
-  (rencontre de face/croisement/rattrapage à partir du relèvement relatif,
-  Règles 13-15), évaluation du risque de collision par CPA/TCPA
-  (trajectoires rectilignes), allocation de poussée par pseudo-inverse
-  pondérée pour le positionnement dynamique (DP).
-- **Livré** : `scirust-maritime` (`colregs`, `cpa_tcpa`,
-  `thrust_allocation`), vérifié contre un exemple travaillé CPA/TCPA
-  indépendant (deux navires, TCPA≈54.5 min, CPA≈3.41 nm) et une
-  configuration DP à 4 propulseurs sur-actionnée (comparée à la
-  pseudo-inverse de Moore-Penrose numpy). **Explicitement pas livré** : la
-  logique de statut réglementaire complète des Règles 11-18 (voile vs
-  propulsion mécanique, capacité de manœuvre restreinte), la boucle de
-  commande DP complète (observateur, modèle de référence, PID/MPC 3-DDL —
-  ce crate prend la force généralisée désirée en entrée), et la
-  stabilité/tenue à la mer (hors périmètre, pas abordée).
-- **Taille** : moyenne.
+### D5 · Autonomous maritime & DNV classification (IMO MASS Code 2026, DNV AROS, IACS UR E26/E27) — ✅ done (primitives)
+- **Why now**: the new MASS code (mandatory, 2026) requires that
+  autonomous decisions remain "explainable and auditable" with no
+  industry-consensus verification method yet — a window of
+  opportunity to set a reference standard.
+- **Algorithms**: COLREG geometric encounter classification
+  (head-on/crossing/overtaking from the relative bearing,
+  Rules 13-15), collision risk assessment via CPA/TCPA
+  (straight-line trajectories), weighted pseudo-inverse thrust
+  allocation for dynamic positioning (DP).
+- **Delivered**: `scirust-maritime` (`colregs`, `cpa_tcpa`,
+  `thrust_allocation`), verified against an independent worked CPA/TCPA
+  example (two vessels, TCPA≈54.5 min, CPA≈3.41 nm) and an
+  over-actuated 4-thruster DP configuration (compared to the numpy
+  Moore-Penrose pseudo-inverse). **Explicitly not delivered**: the full
+  regulatory status logic of Rules 11-18 (sail vs
+  mechanical propulsion, restricted maneuverability), the complete DP
+  control loop (observer, reference model, PID/MPC 3-DOF —
+  this crate takes the desired generalized force as input), and
+  stability/seakeeping (out of scope, not addressed).
+- **Size**: medium.
 
-### D6 · Contrôle « run-to-run » en fabrication de semi-conducteurs (SEMI E10/E58/E116) — ✅ fait
-- **Pourquoi maintenant** : le contrôleur R2R réinjecte directement la sortie
-  du contrôle statistique de procédé (FDC/métrologie virtuelle) dans la
-  recette du run suivant — une dérive numérique silencieuse coûte des
-  plaquettes ; les normes d'audit y sont proches du 21 CFR Part 11 déjà géré
-  par `scirust-func-safety::golden_batch`.
-- **Algorithmes** : contrôle EWMA run-to-run (Sachs, Hu & Ingolfsson 1995),
-  FDC multivarié T²/SPE par PCA (Kourti & MacGregor 1995) — réutilise la SVD
-  générale de `scirust-solvers` plutôt que de la redupliquer.
-- **Livré** : `scirust-fab` (`r2r::EwmaR2rController` vérifié contre un
-  exemple travaillé et une preuve de convergence géométrique ;
-  `pca::Pca` avec `t2`/`spe` complémentaires, vérifiés contre trois cas
-  numpy — point en régime, rupture de corrélation captée par SPE, excursion
-  le long de la corrélation connue captée par T²). `scirust_spc` (déjà
-  existant : `EwmaChart`, `HotellingT2`, règles de Western Electric)
-  couvrait déjà le SPC univarié/multivarié de base — ce crate ajoute la
-  couche *contrôle* (R2R) et *PCA* par-dessus, sans dupliquer l'existant.
-- **Taille** : grande (surface statistique large) — la brique de base est
-  livrée ; sélection automatique de `k`/seuils UCL restent à la charge de
-  l'appelant (voir la limite honnête dans `scirust-fab::pca`).
+### D6 · Run-to-run control in semiconductor manufacturing (SEMI E10/E58/E116) — ✅ done
+- **Why now**: the R2R controller feeds the output of statistical
+  process control (FDC/virtual metrology) directly back into the
+  next run's recipe — a silent numerical drift costs
+  wafers; the audit standards there are close to the 21 CFR Part 11 already
+  handled by `scirust-func-safety::golden_batch`.
+- **Algorithms**: EWMA run-to-run control (Sachs, Hu & Ingolfsson 1995),
+  multivariate FDC T²/SPE via PCA (Kourti & MacGregor 1995) — reuses the general
+  SVD from `scirust-solvers` rather than reduplicating it.
+- **Delivered**: `scirust-fab` (`r2r::EwmaR2rController` verified against a
+  worked example and a geometric convergence proof;
+  `pca::Pca` with complementary `t2`/`spe`, verified against three numpy
+  cases — steady-state point, correlation break captured by SPE, excursion
+  along the known correlation captured by T²). `scirust_spc` (already
+  existing: `EwmaChart`, `HotellingT2`, Western Electric rules)
+  already covered basic univariate/multivariate SPC — this crate adds the
+  *control* (R2R) and *PCA* layer on top, without duplicating the existing.
+- **Size**: large (broad statistical surface) — the base brick is
+  delivered; automatic `k`/UCL threshold selection remain the
+  caller's responsibility (see the honest limitation in `scirust-fab::pca`).
 
-### D7 · Agriculture de précision — conformité & traçabilité (ISO 25119, ISO 18497, ISOBUS/ISO 11783) — ✅ fait (partiellement, par doctrine anti-survente)
-- **Pourquoi maintenant** : un cas documenté montre que les mêmes données de
-  rendement, passées dans QGIS / Agro-Map / Farm Works, produisent des cartes
-  de rendement *différentes* — une rupture de reproductibilité concrète et
-  publiée. Les registres phytosanitaires et le MRV carbone exigent de plus en
-  plus une trace horodatée inviolable.
-- **Algorithmes** : filtres d'aberrants global + local (Sudduth & Drummond
-  2007, l'outil de référence USDA-ARS "Yield Editor"), interpolation IDW
-  explicite, modèle des paramètres de risque ISO 25119-2 (Sévérité/
-  Exposition/Contrôlabilité).
-- **Livré** : `scirust-agtech` (`outlier_filter`, `idw`) — pipeline de
-  nettoyage de carte de rendement déterministe et auditable, vérifié par un
-  cas construit où un filtre global ne peut *structurellement* pas
-  distinguer un point légitime d'une anomalie de même valeur alors que le
-  filtre local le peut. `agpl` expose le modèle de données des trois
-  paramètres de risque ISO 25119-2 (vérifié contre le texte normatif
-  — aperçus iTeh Standards des éditions 2010/2019, tableaux 1-3).
-  **Explicitement pas livré, par doctrine anti-survente** : la fonction de
-  décision `S×E×C → AgPL` elle-même (le graphe de risque de la Figure
-  1, §6.3.7) n'apparaît dans aucune source ouverte vérifiable trouvée — la
-  seule reproduction secondaire disponible (Mitka 2018) contredit le texte
-  normatif vérifié (invente un niveau "S4", réduit la sortie à 3
-  catégories) et a été jugée non fiable. Coder une topologie de graphe de
-  sécurité fonctionnelle *devinée* serait pire que ne rien coder — voir
-  `scirust-agtech::agpl` pour le détail. De même non livrés : catégories
-  d'architecture SRP/CS (Annexe A) et niveau SRL, dont les tables de
-  correspondance n'ont pas pu être vérifiées ; journal hash-chaîné de
-  traitement phytosanitaire (hors périmètre de cette passe).
-- **Taille** : moyenne.
+### D7 · Precision agriculture — compliance & traceability (ISO 25119, ISO 18497, ISOBUS/ISO 11783) — ✅ done (partially, per the anti-overpromising doctrine)
+- **Why now**: a documented case shows that the same yield
+  data, run through QGIS / Agro-Map / Farm Works, produces *different* yield
+  maps — a concrete and published reproducibility break. Phytosanitary
+  registers and carbon MRV increasingly require an
+  inviolable timestamped trace.
+- **Algorithms**: global + local outlier filters (Sudduth & Drummond
+  2007, the USDA-ARS "Yield Editor" reference tool), explicit IDW
+  interpolation, ISO 25119-2 risk parameter model (Severity/
+  Exposure/Controllability).
+- **Delivered**: `scirust-agtech` (`outlier_filter`, `idw`) — a deterministic,
+  auditable yield-map cleaning pipeline, verified by a
+  constructed case where a global filter *structurally* cannot
+  distinguish a legitimate point from a same-valued anomaly while the
+  local filter can. `agpl` exposes the data model of the three
+  ISO 25119-2 risk parameters (verified against the normative text
+  — iTeh Standards previews of the 2010/2019 editions, tables 1-3).
+  **Explicitly not delivered, per the anti-overpromising doctrine**: the
+  `S×E×C → AgPL` decision function itself (the risk graph of Figure
+  1, §6.3.7) appears in no verifiable open source found — the
+  only secondary reproduction available (Mitka 2018) contradicts the verified
+  normative text (invents an "S4" level, reduces the output to 3
+  categories) and was judged unreliable. Coding a *guessed* functional safety
+  graph topology would be worse than coding nothing — see
+  `scirust-agtech::agpl` for the detail. Likewise not delivered: the SRP/CS
+  architecture categories (Annex A) and the SRL level, whose
+  correspondence tables could not be verified; hash-chained phytosanitary
+  treatment log (out of scope for this pass).
+- **Size**: medium.
 
-### D8 · Nucléaire — protection de réacteur (IEC 61513/60880/62138) — ✅ fait (primitive de vote ; licensing = partenariat)
-- **Pourquoi maintenant** : l'AIEA et la littérature académique citent la
-  défaillance de cause commune logicielle entre canaux redondants comme un
-  point de licensing non résolu ; aucune plateforme ouverte de ce niveau
-  n'existe aujourd'hui.
-- **Algorithmes** : logique de vote 2-sur-4 avec dérivation de canal
-  (IEC 61513 §6.2.3.5) — un canal en maintenance/surveillance réduit `N`
-  sans changer `M`.
-- **Livré** : `scirust-sis::reactor_trip` (`architecture_with_bypass`,
-  `pfd_avg_during_bypass`), construit entièrement sur les primitives déjà
-  vérifiées de `scirust-sis::voting::Architecture` et
-  `scirust_reliability::pfd_moon` (2oo4 y compris) — pas de nouvelle
-  formule non vérifiée. **Explicitement pas livré, par doctrine
-  anti-survente** : la méthodologie de calcul de seuil ISA-67.04
+### D8 · Nuclear — reactor protection (IEC 61513/60880/62138) — ✅ done (voting primitive; licensing = partnership)
+- **Why now**: the IAEA and the cited academic literature name
+  common-cause software failure across redundant channels as an
+  unresolved licensing point; no open platform of this level
+  exists today.
+- **Algorithms**: 2-out-of-4 voting logic with channel bypass
+  (IEC 61513 §6.2.3.5) — a channel in maintenance/surveillance reduces `N`
+  without changing `M`.
+- **Delivered**: `scirust-sis::reactor_trip` (`architecture_with_bypass`,
+  `pfd_avg_during_bypass`), built entirely on the already-verified
+  primitives of `scirust-sis::voting::Architecture` and
+  `scirust_reliability::pfd_moon` (2oo4 included) — no new
+  unverified formula. **Explicitly not delivered, per the anti-overpromising
+  doctrine**: the ISA-67.04 threshold calculation methodology
   (Analytical Limit → Trip Set Point via SRSS → Nominal Trip Set Point →
-  Limiting Trip Setpoint) et les exigences de repli sur défaillance en
-  mode commun de NUREG-0800 BTP 7-19 — recherchées et documentées, mais
-  non portées en code faute d'une vérification jugée suffisante pour du
-  code de sécurité nucléaire dans cette passe.
-- **Taille** : LOC modeste, mais expertise de licensing très élevée — à
-  n'aborder qu'en partenariat avec un exploitant/intégrateur qualifié.
+  Limiting Trip Setpoint) and the NUREG-0800 BTP 7-19 common-mode
+  failure fallback requirements — researched and documented, but
+  not ported into code for lack of verification judged sufficient for
+  nuclear safety code in this pass.
+- **Size**: modest LOC, but very high licensing expertise — to be
+  approached only in partnership with a qualified operator/integrator.
 
-*(Le ferroviaire EN 50128/50716 et les mines ISO 17757 ont aussi été
-étudiés : la douleur documentée y est la complexité de vérification/model
-checking, pas la reproductibilité numérique — moins spécifiquement alignée
-avec l'ADN déterminisme/auditabilité de SciRust ; à revisiter si un
-partenaire sectoriel se présente.)*
+*(Rail EN 50128/50716 and mining ISO 17757 were also
+studied: the documented pain there is verification/model-checking
+complexity, not numerical reproducibility — less specifically aligned
+with SciRust's determinism/auditability DNA; to be revisited if a
+sector partner shows up.)*
 
-## Ce qui rend tous ces domaines exécutables sans explosion de code
+## What makes all these domains executable without code explosion
 
-Le point commun de ces huit domaines n'est pas un algorithme unique : c'est
-qu'ils exigent tous (a) une brique numérique solide (moindres carrés,
-eigen/SVD, optimisation sous contraintes, filtrage), déjà renforcée dans
-cette itération (`scirust-solvers` — voir `CHANGELOG.md`), et (b) un moyen
-standard de brancher ces briques sur l'infrastructure réelle d'un client
-(capteurs, automates, historiens) et sur un agent qui orchestre le tout.
-C'est le rôle des deux nouvelles crates de cette itération :
+The common point of these eight domains is not a single algorithm: it is
+that they all require (a) a solid numerical brick (least squares,
+eigen/SVD, constrained optimization, filtering), already strengthened in
+this iteration (`scirust-solvers` — see `CHANGELOG.md`), and (b) a standard
+way to plug those bricks into a client's real infrastructure
+(sensors, PLCs, historians) and onto an agent that orchestrates it all.
+That is the role of the two new crates of this iteration:
 
-- **`scirust-mcp`** — expose toute capacité SciRust (solveur, PdM, signal,
-  discovery) comme outil [Model Context Protocol](https://modelcontextprotocol.io)
-  standard, appelable par `scirust-sciagent` ou par n'importe quel agent
-  externe, avec schéma JSON et journal d'audit hash-chaîné par appel. Un
-  nouveau domaine n'a qu'à enregistrer ses outils dans le registre existant.
-- **`scirust-discovery`** — trouve, de façon sûre et consentie (modèle de
-  zones/conduits IEC 62443, découverte native aux protocoles plutôt que scan
-  générique), le matériel industriel réellement présent sur le réseau d'un
-  client, pour que l'agent sache *à quoi* connecter ces outils.
+- **`scirust-mcp`** — exposes any SciRust capability (solver, PdM, signal,
+  discovery) as a standard [Model Context Protocol](https://modelcontextprotocol.io)
+  tool, callable by `scirust-sciagent` or by any external
+  agent, with JSON schema and a hash-chained audit log per call. A
+  new domain only has to register its tools in the existing registry.
+- **`scirust-discovery`** — finds, safely and with consent (IEC 62443
+  zone/conduit model, protocol-native discovery rather than generic
+  scanning), the industrial hardware actually present on a client's
+  network, so the agent knows *what* to connect those tools to.
 
-Voir `scirust-mcp/README.md` et `scirust-discovery/README.md` pour le détail
-technique et les sources citées.
+See `scirust-mcp/README.md` and `scirust-discovery/README.md` for the technical
+detail and the cited sources.

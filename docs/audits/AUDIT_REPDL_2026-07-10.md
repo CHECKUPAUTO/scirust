@@ -1,220 +1,214 @@
-# Audit de couverture — RepDL (Microsoft) vs SciRust
+# Coverage audit — RepDL (Microsoft) vs SciRust
 
-> Date : 2026-07-10 · Branche : `claude/repdl-scirust-audit-81gcb8`
-> Objet : vérifier que SciRust couvre les fonctionnalités de
-> [microsoft/RepDL](https://github.com/microsoft/RepDL) (bibliothèque
-> semi-concurrente), fermer les écarts fermables, et garantir **zéro risque de
-> copyright** dans la démarche.
-
----
-
-## 1. Synthèse exécutive
-
-**Verdict : couverture fonctionnelle quasi complète, dans un régime de
-garanties différent et documenté.** Sur les 23 éléments d'API publique de
-RepDL, SciRust en couvrait déjà 18 avant cet audit (opérations, couches,
-gradients, optimiseur, exemples entraînables). Trois écarts réels et
-fermables sont **fermés par cette PR** (AMSGrad, hachage SHA-256 de
-tenseurs/paramètres, exp/ln par promotion `f64`). Deux éléments sont
-**non applicables par conception** (conversion de modules PyTorch) ou
-**couverts par composition** (réductions 4D).
-
-**Risque copyright : nul.**
-- Aucun code de RepDL n'existe dans ce dépôt (§3) ; les seules occurrences de
-  « RepDL » sont des citations documentaires (positionnement scientifique,
-  volet 108).
-- Le présent audit a été mené sur **spécification uniquement** : surface
-  d'API, README et résumé arXiv ; les trois implémentations ajoutées dérivent
-  d'algorithmes publiés (Reddi et al. 2018 ; FIPS 180-4 via la crate `sha2`
-  déjà en dépendance ; promotion double — technique folklorique), pas du code
-  de RepDL.
-
-Le seul axe où RepDL reste objectivement plus fort — reproductibilité f32
-**inter-plates-formes** par arrondi correct — était déjà identifié et acté
-comme travail futur dans `paper/RELATED_WORK.md` (volet 108). Cette PR y fait
-un pas honnête (§6.3) sans sur-promettre.
+> Date: 2026-07-10 · Branch: `claude/repdl-scirust-audit-81gcb8`
+> Subject: verify that SciRust covers the features of
+> [microsoft/RepDL](https://github.com/microsoft/RepDL) (semi-concurrent
+> library), close the closable gaps, and guarantee **zero copyright risk** in
+> the process.
 
 ---
 
-## 2. Fiche RepDL (état au 2026-07-10)
+## 1. Executive summary
 
-| Champ | Valeur |
+**Verdict: near-complete functional coverage, in a different and documented
+guarantee regime.** Of the 23 public API elements of RepDL, SciRust already
+covered 18 before this audit (operations, layers, gradients, optimizer,
+trainable examples). Three real, closable gaps are **closed by this PR**
+(AMSGrad, SHA-256 hashing of tensors/parameters, exp/ln via `f64` promotion).
+Two elements are **not applicable by design** (conversion of PyTorch modules)
+or **covered by composition** (4D reductions).
+
+**Copyright risk: nil.**
+- No RepDL code exists in this repository (§3); the only occurrences of
+  "RepDL" are documentary citations (scientific positioning, workstream 108).
+- This audit was conducted on **specification only**: API surface, README and
+  arXiv abstract; the three added implementations derive from published
+  algorithms (Reddi et al. 2018; FIPS 180-4 via the `sha2` crate already a
+  dependency; double promotion — folkloric technique), not from RepDL code.
+
+The only axis where RepDL remains objectively stronger — f32
+**cross-platform** reproducibility via correct rounding — was already
+identified and recorded as future work in `paper/RELATED_WORK.md`
+(workstream 108). This PR makes an honest step toward it (§6.3) without
+over-promising.
+
+---
+
+## 2. RepDL fact sheet (state as of 2026-07-10)
+
+| Field | Value |
 |---|---|
-| Dépôt | github.com/microsoft/RepDL (≈13 commits, projet de recherche) |
-| Licence | **MIT** |
-| Référence | Xie, Zhang & Chen, *RepDL: Bit-level Reproducible Deep Learning Training and Inference*, arXiv:2510.09180 (2025) |
-| Nature | Surcouche **PyTorch** (Python) + backends C++ (OpenMP) et CUDA |
-| Promesse | Résultats **bit-identiques inter-plates-formes** (entraînement et inférence), f32 uniquement |
-| Techniques | (a) ordre des opérations flottantes figé (sommations séquentielles, GEMM à ordre d'accumulation fixe, `fmaf`) ; (b) évitement des instructions non-IEEE-754 ; (c) fonctions mathématiques « correctement arrondies » par **promotion en double** (`exp`, `log`, `sqrt` calculés en f64 puis arrondis en f32) |
-| Limites revendiquées | « Only a subset of functions and modules is available » ; pas de basse précision (bf16/int8) ; rapport sans évaluation chiffrée |
+| Repository | github.com/microsoft/RepDL (≈13 commits, research project) |
+| License | **MIT** |
+| Reference | Xie, Zhang & Chen, *RepDL: Bit-level Reproducible Deep Learning Training and Inference*, arXiv:2510.09180 (2025) |
+| Nature | **PyTorch** (Python) wrapper + C++ (OpenMP) and CUDA backends |
+| Promise | **Bit-identical cross-platform results** (training and inference), f32 only |
+| Techniques | (a) fixed floating-point operation order (sequential summations, fixed-accumulation-order GEMM, `fmaf`); (b) avoidance of non-IEEE-754 instructions; (c) "correctly rounded" math functions via **double promotion** (`exp`, `log`, `sqrt` computed in f64 then rounded to f32) |
+| Claimed limits | "Only a subset of functions and modules is available"; no low precision (bf16/int8); report without numerical evaluation |
 
-Surface d'API publique complète :
+Complete public API surface:
 
-- `repdl.ops` : `mm` (transposes optionnelles), `div`, `sqrt`, `softmax`,
+- `repdl.ops`: `mm` (optional transposes), `div`, `sqrt`, `softmax`,
   `sum1d`, `sum2d_dim0`, `sum2d_dim1`, `sum4d_dim023`, `conv2d`,
   `conv2d_grad_input`, `conv2d_grad_kernel`, `cross_entropy`
-- `repdl.func` (avec backward autograd) : `expand_as`, `mean1d`,
+- `repdl.func` (with backward autograd): `expand_as`, `mean1d`,
   `mean2d_dim0`, `mean4d_dim023`
-- `repdl.nn` : `Linear`, `Conv2d`, `BatchNorm1d`, `BatchNorm2d`,
-  `CrossEntropyLoss` (+ `nn.functional` correspondants)
-- `repdl.optim` : `Adam` (option AMSGrad)
-- `repdl.from_torch_module(m)` : conversion récursive d'un module PyTorch
-- `repdl.utils` : `get_hash` / `print_hash` (SHA-256 d'un tenseur ou des
-  paramètres d'un module — l'outil de vérification de la reproductibilité)
+- `repdl.nn`: `Linear`, `Conv2d`, `BatchNorm1d`, `BatchNorm2d`,
+  `CrossEntropyLoss` (+ corresponding `nn.functional`)
+- `repdl.optim`: `Adam` (AMSGrad option)
+- `repdl.from_torch_module(m)`: recursive conversion of a PyTorch module
+- `repdl.utils`: `get_hash` / `print_hash` (SHA-256 of a tensor or of a
+  module's parameters — the reproducibility-verification tool)
 
-## 3. Méthodologie et propriété intellectuelle
+## 3. Methodology and intellectual property
 
-**Sources consultées** : page du dépôt, README, arborescence, inventaires
-d'API (signatures + sémantique en prose), résumé arXiv. Les algorithmes des
-backends ont été caractérisés **en prose** (ordre d'accumulation, promotion
-double) pour situer la classe de garantie — aucun code n'a été recopié,
-traduit ni adapté.
+**Sources consulted**: repository page, README, tree, API inventories
+(signatures + semantics in prose), arXiv abstract. The backend algorithms
+were characterized **in prose** (accumulation order, double promotion) to
+locate the guarantee class — no code was copied, translated or adapted.
 
-**Constat sur le dépôt SciRust** (recherche exhaustive) :
+**Finding on the SciRust repository** (exhaustive search):
 
-- `grep -ri "repdl|sum2d_dim|sum4d_dim|mean4d_dim|from_torch_module"` sur tout
-  l'arbre : **0 correspondance dans le code source**. Les 7 fichiers touchés
-  sont tous documentaires (`README.md`, `CHANGELOG.md`, `LIVESTATE.md`,
+- `grep -ri "repdl|sum2d_dim|sum4d_dim|mean4d_dim|from_torch_module"` over the
+  whole tree: **0 match in source code**. The 7 touched files are all
+  documentary (`README.md`, `CHANGELOG.md`, `LIVESTATE.md`,
   `paper/RELATED_WORK.md`, `paper/PAPER_PLAN.md`, `docs/INDUSTRIAL_ROADMAP.md`,
-  `docs/DOSSIER_FINANCEURS.md`) et relèvent de la **citation scientifique**
-  (autorisée et souhaitable — c'est le travail d'honnêteté du volet 108).
-- Les implémentations SciRust préexistantes (GEMM, conv2d im2col/col2im,
-  sommation Demmel–Nguyen/Shewchuk, Kahan, PCG…) sont architecturalement
-  différentes de RepDL et antérieures à cet audit : **aucun risque d'œuvre
-  dérivée**.
+  `docs/DOSSIER_FINANCEURS.md`) and fall under **scientific citation**
+  (allowed and desirable — it is the honesty work of workstream 108).
+- The pre-existing SciRust implementations (GEMM, conv2d im2col/col2im,
+  Demmel–Nguyen/Shewchuk summation, Kahan, PCG…) are architecturally
+  different from RepDL and predate this audit: **no derivative-work risk**.
 
-**Positions de licence** : RepDL est sous MIT — une réutilisation de code
-serait *légale* moyennant conservation de la notice de copyright Microsoft,
-mais elle créerait une obligation d'attribution dans un dépôt PolyForm
-Noncommercial et un risque de confusion. **Politique retenue (zéro risque) :
-ne jamais copier ni traduire de code RepDL ; ne réimplémenter que depuis des
-specs/papiers publics.** Cette PR s'y conforme ; toute contribution future
-touchant la reproductibilité devrait suivre la même règle.
+**License positions**: RepDL is MIT-licensed — reusing code would be *legal*
+provided the Microsoft copyright notice is preserved, but it would create an
+attribution obligation in a PolyForm Noncommercial repository and a
+confusion risk. **Policy retained (zero risk): never copy or translate RepDL
+code; reimplement only from public specs/papers.** This PR complies; any
+future contribution touching reproducibility should follow the same rule.
 
-## 4. Matrice de couverture, élément par élément
+## 4. Coverage matrix, element by element
 
-Statuts : ✅ couvert · ✅➕ couvert par composition · 🆕 fermé par cette PR ·
-Ⓝ non applicable par conception.
+Statuses: ✅ covered · ✅➕ covered by composition · 🆕 closed by this PR ·
+Ⓝ not applicable by design.
 
-| API RepDL | Équivalent SciRust | Statut | Preuve |
+| RepDL API | SciRust equivalent | Status | Proof |
 |---|---|---|---|
-| `ops.mm` (transA/transB) | `Var::matmul` + `Op::MatMul` ; GEMM à drapeaux de transposition (interne) | ✅ | `scirust-core/src/autodiff/reverse.rs:31-43,412,868-892,1253` |
-| `ops.div` | `Op::Div` / `Op::DivBroadcast` (autograd) — la division IEEE-754 est correctement arrondie par le standard | ✅ | `reverse.rs:606,610,1065,1202` |
-| `ops.sqrt` | `Op::Sqrt` (autograd) — `sqrt` IEEE-754 correctement arrondie par le standard (RepDL passe par f64, résultat identique) | ✅ | `reverse.rs:620,1410` |
-| `ops.softmax` | `Op::Softmax` (+ `LogSoftmax`) 2-D, et softmax dernier axe sur la tape N-D | ✅ | `reverse.rs:383,649,1648` ; `nd.rs:190` |
+| `ops.mm` (transA/transB) | `Var::matmul` + `Op::MatMul`; GEMM with transposition flags (internal) | ✅ | `scirust-core/src/autodiff/reverse.rs:31-43,412,868-892,1253` |
+| `ops.div` | `Op::Div` / `Op::DivBroadcast` (autograd) — IEEE-754 division is correctly rounded by the standard | ✅ | `reverse.rs:606,610,1065,1202` |
+| `ops.sqrt` | `Op::Sqrt` (autograd) — IEEE-754 `sqrt` correctly rounded by the standard (RepDL goes through f64, identical result) | ✅ | `reverse.rs:620,1410` |
+| `ops.softmax` | `Op::Softmax` (+ `LogSoftmax`) 2-D, and last-axis softmax on the N-D tape | ✅ | `reverse.rs:383,649,1648`; `nd.rs:190` |
 | `ops.sum1d` | `Op::Sum` | ✅ | `reverse.rs:639,1534` |
 | `ops.sum2d_dim0/dim1` | `Op::SumAxis(axis ∈ {0,1})` | ✅ | `reverse.rs:640,1539` |
-| `ops.sum4d_dim023` | composition `transpose().reshape([C, N·H·W])` + réduction axe 1 (usage réel : stats par canal de BatchNorm2d) | ✅➕ | `scirust-core/src/nn/batch_norm_2d.rs:86-113` |
-| `ops.conv2d` | `Op::Conv2dForward` (+ `ConvTranspose2d`) | ✅ | `reverse.rs:724-736` ; `nn/conv2d.rs:120` |
-| `ops.conv2d_grad_input` | backward `Conv2dForward` : `dcol = Wᵀ·dout` puis `col2im` | ✅ | `reverse.rs:2188-2193` |
-| `ops.conv2d_grad_kernel` | backward `Conv2dForward` : `dw = dout·colᵀ` | ✅ | `reverse.rs:2184-2186` ; test `test_conv_grad.rs:11-102` |
-| `ops.cross_entropy` | log-softmax stable + NLL (one-hot et indices) | ✅ | `nn/loss/cross_entropy.rs:27,63` |
-| `func.expand_as` | `Op::Broadcast` (backward = réduction) sur le régime 2-D de la tape | ✅➕ | `reverse.rs:644,1620,3142` |
+| `ops.sum4d_dim023` | composition `transpose().reshape([C, N·H·W])` + axis-1 reduction (real use: per-channel BatchNorm2d statistics) | ✅➕ | `scirust-core/src/nn/batch_norm_2d.rs:86-113` |
+| `ops.conv2d` | `Op::Conv2dForward` (+ `ConvTranspose2d`) | ✅ | `reverse.rs:724-736`; `nn/conv2d.rs:120` |
+| `ops.conv2d_grad_input` | `Conv2dForward` backward: `dcol = Wᵀ·dout` then `col2im` | ✅ | `reverse.rs:2188-2193` |
+| `ops.conv2d_grad_kernel` | `Conv2dForward` backward: `dw = dout·colᵀ` | ✅ | `reverse.rs:2184-2186`; test `test_conv_grad.rs:11-102` |
+| `ops.cross_entropy` | stable log-softmax + NLL (one-hot and indices) | ✅ | `nn/loss/cross_entropy.rs:27,63` |
+| `func.expand_as` | `Op::Broadcast` (backward = reduction) on the tape's 2-D regime | ✅➕ | `reverse.rs:644,1620,3142` |
 | `func.mean1d` | `Var::mean` / `MeanAxis` | ✅ | `reverse.rs:641,1544` |
 | `func.mean2d_dim0` | `Var::mean_axis(0)` | ✅ | `reverse.rs:3156` |
-| `func.mean4d_dim023` | composition (cf. `sum4d_dim023`) | ✅➕ | `batch_norm_2d.rs:101-103` |
+| `func.mean4d_dim023` | composition (see `sum4d_dim023`) | ✅➕ | `batch_norm_2d.rs:101-103` |
 | `nn.Linear` | `nn::Linear` (autograd, state_dict) | ✅ | `nn/linear.rs:69-137` |
 | `nn.Conv2d` | `nn::Conv2d` | ✅ | `nn/conv2d.rs` |
 | `nn.BatchNorm1d` | `nn::BatchNorm` (train/eval, running stats) | ✅ | `nn/batch_norm.rs:49-134` |
 | `nn.BatchNorm2d` | `nn::BatchNorm2d` (train/eval, running stats) | ✅ | `nn/batch_norm_2d.rs:54-120` |
-| `nn.CrossEntropyLoss` | `nn::loss::CrossEntropyLoss` (gradient vérifié = softmax − cible) | ✅ | `nn/loss/cross_entropy.rs:179-207` |
-| `optim.Adam` | `autodiff::optim::Adam` (betas, eps, weight decay, bias correction) + `NdAdam`/AdamW | ✅ | `autodiff/optim.rs` ; `nn/nd_optim.rs` |
-| `optim.Adam(amsgrad=True)` | **ajouté** : `Adam::with_amsgrad()` (max historique du 2ᵉ moment, bias-corrigé) + 2 tests (oracle de convergence, propriété anti-pic) | 🆕 | `autodiff/optim.rs` (cette PR) |
-| `utils.get_hash`/`print_hash` | **ajouté** : `scirust_runtime::hash::{sha256_hex_f32, sha256_hex_tensor, sha256_hex_state_dict}` (encodage LE indépendant de la plate-forme, clés triées) + 5 tests | 🆕 | `scirust-runtime/src/hash.rs` (cette PR) |
-| `from_torch_module` | Ⓝ SciRust n'est pas une surcouche PyTorch — équivalents : lecteur **safetensors** (poids HF/PyTorch), format SRT1 déterministe, export/import ONNX-JSON, `state_dict`/`load_state_dict` par couche | Ⓝ | `scirust-core/src/io/safetensors.rs:138` ; `scirust-runtime/src/lib.rs` ; `scirust-onnx/src/lib.rs:295` |
-| Transcendantales par promotion f64 (`exp2d`, `log1d`) | **ajouté** : `reproducible::{exp_via_f64, ln_via_f64}` — même classe de technique, documentation honnête de la classe de garantie | 🆕 | `scirust-core/src/reproducible.rs` (cette PR) |
+| `nn.CrossEntropyLoss` | `nn::loss::CrossEntropyLoss` (gradient verified = softmax − target) | ✅ | `nn/loss/cross_entropy.rs:179-207` |
+| `optim.Adam` | `autodiff::optim::Adam` (betas, eps, weight decay, bias correction) + `NdAdam`/AdamW | ✅ | `autodiff/optim.rs`; `nn/nd_optim.rs` |
+| `optim.Adam(amsgrad=True)` | **added**: `Adam::with_amsgrad()` (running max of the 2nd moment, bias-corrected) + 2 tests (convergence oracle, anti-spike property) | 🆕 | `autodiff/optim.rs` (this PR) |
+| `utils.get_hash`/`print_hash` | **added**: `scirust_runtime::hash::{sha256_hex_f32, sha256_hex_tensor, sha256_hex_state_dict}` (platform-independent LE encoding, sorted keys) + 5 tests | 🆕 | `scirust-runtime/src/hash.rs` (this PR) |
+| `from_torch_module` | Ⓝ SciRust is not a PyTorch wrapper — equivalents: **safetensors** reader (HF/PyTorch weights), deterministic SRT1 format, ONNX-JSON export/import, per-layer `state_dict`/`load_state_dict` | Ⓝ | `scirust-core/src/io/safetensors.rs:138`; `scirust-runtime/src/lib.rs`; `scirust-onnx/src/lib.rs:295` |
+| Transcendentals via f64 promotion (`exp2d`, `log1d`) | **added**: `reproducible::{exp_via_f64, ln_via_f64}` — same technique class, honest documentation of the guarantee class | 🆕 | `scirust-core/src/reproducible.rs` (this PR) |
 
-Les exemples `mnist_classifier` et `cifar10_classifier` entraînent réellement
-des modèles avec ces briques (boucles forward/backward/step complètes,
-critère de précision > 90 % sur MNIST) — l'équivalent du
-`examples/mnist_training.py` de RepDL.
+The `mnist_classifier` and `cifar10_classifier` examples genuinely train
+models with these building blocks (complete forward/backward/step loops,
+>90 % accuracy criterion on MNIST) — the equivalent of RepDL's
+`examples/mnist_training.py`.
 
-## 5. Axe déterminisme — garanties comparées
+## 5. Determinism axis — compared guarantees
 
-C'est ici que les deux projets diffèrent réellement (constat conforme au
-positionnement déjà acté dans `paper/RELATED_WORK.md`) :
+This is where the two projects really differ (a finding consistent with the
+position already recorded in `paper/RELATED_WORK.md`):
 
-| Garantie | RepDL | SciRust |
+| Guarantee | RepDL | SciRust |
 |---|---|---|
-| f32 bit-exact **inter-plates-formes** (CPU↔GPU, x86↔ARM) | ✅ (sa raison d'être ; non évalué chiffré dans son rapport) | ❌ assumé hors périmètre pour la voie f32 (`scirust-runtime/README.md:34-35`) ; **travail futur acté** |
-| f32 bit-exact **intra-architecture**, invariant au nombre de threads | (implicite) | ✅ testé : fingerprint identique sur 1/2/4/8/16/64 threads, 0 divergence sur 5 120 logits (`tests/fingerprint_thread_invariance.rs`, rapport §6.2) |
-| Basse précision déterministe (int8/int16/fixed-point) **cross-platform par construction** | ❌ hors périmètre | ✅ GEMM int8/int16/Q16/Q32/Zq, NEON == scalaire bit-exact (`quantization.rs:1959`), GPU == CPU bit-exact voies entières (`scirust-gpu/src/deterministic_gpu.rs`) |
-| Sommation reproductible indépendante de l'ordre | ordre séquentiel figé (dépend du parcours) | ✅ plus fort : somme **correctement arrondie du multiensemble** (Demmel–Nguyen + Shewchuk), bit-identique sous permutation (`reproducible.rs`) |
-| Réductions parallèles à ordre fixe | OpenMP, ordre figé | ✅ agrégation en ordre de worker/rang, testée bit-exacte (`data_parallel.rs`, `distributed.rs`) |
-| Vérification par empreinte (hash) | `get_hash` SHA-256 | 🆕 `runtime::hash` (cette PR) + FNV-1a existant + chaîne d'attestation SHA-256 (`attest.rs`) |
-| Vérifiabilité au-delà du hash | ❌ | ✅ Freivalds/GF(p) (`vinfer.rs`), enveloppe d'erreur DiFR (`difr.rs`) — sans équivalent RepDL |
-| TCB | PyTorch + libtorch (millions de lignes C++) | 100 % Rust auditable, zéro FFI dans le chemin de calcul |
+| f32 bit-exact **cross-platform** (CPU↔GPU, x86↔ARM) | ✅ (its raison d'être; not numerically evaluated in its report) | ❌ assumed out of scope for the f32 path (`scirust-runtime/README.md:34-35`); **recorded future work** |
+| f32 bit-exact **intra-architecture**, invariant to thread count | (implicit) | ✅ tested: identical fingerprint on 1/2/4/8/16/64 threads, 0 divergence over 5,120 logits (`tests/fingerprint_thread_invariance.rs`, report §6.2) |
+| Low-precision deterministic (int8/int16/fixed-point) **cross-platform by construction** | ❌ out of scope | ✅ int8/int16/Q16/Q32/Zq GEMM, NEON == scalar bit-exact (`quantization.rs:1959`), GPU == CPU bit-exact integer paths (`scirust-gpu/src/deterministic_gpu.rs`) |
+| Order-independent reproducible summation | fixed sequential order (depends on traversal) | ✅ stronger: **correctly rounded sum of the multiset** (Demmel–Nguyen + Shewchuk), bit-identical under permutation (`reproducible.rs`) |
+| Parallel reductions with fixed order | OpenMP, fixed order | ✅ worker/rank-order aggregation, tested bit-exact (`data_parallel.rs`, `distributed.rs`) |
+| Fingerprint (hash) verification | `get_hash` SHA-256 | 🆕 `runtime::hash` (this PR) + existing FNV-1a + SHA-256 attestation chain (`attest.rs`) |
+| Verifiability beyond the hash | ❌ | ✅ Freivalds/GF(p) (`vinfer.rs`), DiFR error envelope (`difr.rs`) — no RepDL equivalent |
+| TCB | PyTorch + libtorch (millions of C++ lines) | 100 % auditable Rust, zero FFI in the compute path |
 
-Points de vigilance connus et inchangés (déjà tracés ailleurs) : le job CI
-aarch64 ne fait que `cargo check` (l'exécution ARM réelle vit sur Jetson,
-hors CI) ; les réductions SIMD/GPU **flottantes** restent égales-en-tolérance
-au scalaire, pas bit-exactes — seule la voie entière l'est.
+Known and unchanged watch points (already tracked elsewhere): the aarch64 CI
+job only runs `cargo check` (real ARM execution lives on Jetson, outside CI);
+the SIMD/GPU **floating-point** reductions remain equal-within-tolerance to
+the scalar, not bit-exact — only the integer path is.
 
-## 6. Écarts fermés par cette PR
+## 6. Gaps closed by this PR
 
-### 6.1 `Adam::with_amsgrad()` — parité `optim.Adam(amsgrad=True)`
-Buffer `v_max` (max historique du 2ᵉ moment, bias-corrigé comme `v`),
-implémenté d'après Reddi, Kale & Kumar (ICLR 2018). Deux tests : oracle de
-convergence sur quadratique, et propriété définitoire (après un pic de
-gradient, les pas AMSGrad restent < 10 % des pas Adam).
+### 6.1 `Adam::with_amsgrad()` — parity with `optim.Adam(amsgrad=True)`
+`v_max` buffer (running max of the 2nd moment, bias-corrected like `v`),
+implemented from Reddi, Kale & Kumar (ICLR 2018). Two tests: convergence
+oracle on a quadratic, and the defining property (after a gradient spike,
+AMSGrad steps stay < 10 % of Adam steps).
 
-### 6.2 `scirust_runtime::hash` — parité `utils.get_hash`/`print_hash`
-Empreintes SHA-256 hex de slices f32, de tenseurs (forme incluse) et de
-`state_dict` complets (clés triées ⇒ indépendant de l'ordre d'insertion).
-Encodage little-endian des bits IEEE-754 ⇒ empreinte identique sur toute
-plate-forme pour des données bit-identiques. C'est l'outil qui permet à un
-utilisateur de *constater* la reproductibilité (deux machines, même hash).
+### 6.2 `scirust_runtime::hash` — parity with `utils.get_hash`/`print_hash`
+Hex SHA-256 fingerprints of f32 slices, of tensors (shape included) and of
+complete `state_dict`s (sorted keys ⇒ independent of insertion order).
+Little-endian encoding of the IEEE-754 bits ⇒ identical fingerprint on any
+platform for bit-identical data. This is the tool that lets a user *observe*
+reproducibility (two machines, same hash).
 
-### 6.3 `reproducible::{exp_via_f64, ln_via_f64}` — parité `exp2d`/`log1d`
-Même classe de technique que RepDL (promotion en double). La documentation
-énonce la classe de garantie sans sur-promettre : fidèlement arrondi (et
-correctement arrondi hors cas de dilemme du fabricant de tables), déterministe
-sur un binaire donné, identité inter-plates-formes très probable mais non
-prouvée — les transcendantales correctement arrondies *prouvées* en Rust pur
-restent le travail futur acté au volet 108.
+### 6.3 `reproducible::{exp_via_f64, ln_via_f64}` — parity with `exp2d`/`log1d`
+Same technique class as RepDL (double promotion). The documentation states
+the guarantee class without over-promising: faithfully rounded (and correctly
+rounded outside table-maker's-dilemma cases), deterministic on a given
+binary, cross-platform identity very likely but not proven — provably
+correctly rounded transcendentals in pure Rust remain the future work
+recorded in workstream 108.
 
-## 7. Écarts non retenus (justifiés)
+## 7. Gaps not retained (justified)
 
-- **`sum4d_dim023` / `mean4d_dim023` en op dédiée** : le besoin réel (stats
-  par canal de BatchNorm2d) est couvert par composition
-  (`batch_norm_2d.rs:86-113`). Une op fusionnée serait une optimisation de
-  performance, pas un manque fonctionnel.
-- **`expand_as` N-D général** : le régime 2-D de la tape est couvert par
-  `Op::Broadcast` ; la tape N-D n'en a pas eu besoin à ce jour.
-- **`from_torch_module`** : non applicable — SciRust est un framework
-  autonome, pas une surcouche PyTorch ; l'import de poids externes passe par
+- **`sum4d_dim023` / `mean4d_dim023` as a dedicated op**: the real need
+  (per-channel BatchNorm2d statistics) is covered by composition
+  (`batch_norm_2d.rs:86-113`). A fused op would be a performance
+  optimization, not a functional gap.
+- **General N-D `expand_as`**: the tape's 2-D regime is covered by
+  `Op::Broadcast`; the N-D tape has not needed it to date.
+- **`from_torch_module`**: not applicable — SciRust is a standalone
+  framework, not a PyTorch wrapper; external weight import goes through
   safetensors.
-- **AMSGrad sur `NdAdam`** : non ajouté (le `NdAdam` vise AdamW pour les
-  décodeurs N-D) ; à faire si un besoin transformer l'exige.
+- **AMSGrad on `NdAdam`**: not added (the `NdAdam` targets AdamW for N-D
+  decoders); to do if a transformer use case requires it.
 
-## 8. Recommandations
+## 8. Recommendations
 
-1. **P1 — politique IP écrite** : consigner (fait ici, §3) la règle « aucune
-   copie/traduction de code RepDL ; réimplémentation sur specs publiques
-   uniquement » pour tout travail futur sur la reproductibilité.
-2. **P2 — brancher les nouvelles briques** : publier le hash
-   `sha256_hex_state_dict` dans les pièces d'audit existantes (protocole de
-   test, rapports Jetson) à côté des fingerprints FNV ; envisager
-   `exp_via_f64` dans le softmax de la tape si la portabilité f32 devient un
-   objectif produit.
-3. **P2 — CI ARM native** : le jour où un runner aarch64 est disponible,
-   exécuter (pas seulement `cargo check`) les tests d'invariance et comparer
-   les empreintes x86/ARM des voies entières — transformerait « bit-exact
-   cross-platform par construction » en « …et testé en CI ».
+1. **P1 — written IP policy**: record (done here, §3) the rule "no
+   copy/translation of RepDL code; reimplementation on public specs only"
+   for all future reproducibility work.
+2. **P2 — wire up the new building blocks**: publish the
+   `sha256_hex_state_dict` hash in the existing audit artifacts (test
+   protocol, Jetson reports) alongside the FNV fingerprints; consider
+   `exp_via_f64` in the tape's softmax if f32 portability becomes a product
+   goal.
+3. **P2 — native ARM CI**: the day an aarch64 runner is available, run (not
+   just `cargo check`) the invariance tests and compare the x86/ARM
+   fingerprints of the integer paths — would turn "bit-exact cross-platform
+   by construction" into "…and tested in CI".
 
 ---
 
-## Post-scriptum (même jour, même PR)
+## Post-script (same day, same PR)
 
-Suite de la recommandation du §5 : la **voie f32 portable** a été implémentée
-dans la foulée — `scirust-core/src/portable_f32.rs` (`exp_f32`, `ln_f32`,
-`softmax_f32`, `dot_f32`, `gemm_f32`), Rust pur sans libm, uniquement des
-opérations IEEE-754 de base en ordre fixe ⇒ **bit-exact inter-plates-formes
-par construction** (fidèlement arrondi ; l'arrondi correct *prouvé* reste
-hors claim). Les goldens bit-à-bit et les empreintes FNV du balayage complet
-de l'espace f32 sont commis dans les tests : ce sont les contrats à vérifier
-sur ARM. Implémentation clean-room (réduction d'argument + séries de
-Taylor/atanh — méthodes mathématiques publiques ; aucun code fdlibm/musl/RepDL
-consulté). Ceci ferme, dans le régime « par construction », le dernier axe où
-RepDL était plus fort ; la preuve d'arrondi correct et l'exécution ARM en CI
-restent les deux étapes suivantes.
+Following up on the §5 recommendation: the **portable f32 path** was
+implemented on the spot — `scirust-core/src/portable_f32.rs` (`exp_f32`,
+`ln_f32`, `softmax_f32`, `dot_f32`, `gemm_f32`), pure Rust without libm, only
+basic IEEE-754 operations in fixed order ⇒ **bit-exact cross-platform by
+construction** (faithfully rounded; *proven* correct rounding remains outside
+the claim). The bitwise goldens and FNV fingerprints of the full f32-space
+sweep are committed in the tests: these are the contracts to verify on ARM.
+Clean-room implementation (argument reduction + Taylor/atanh series — public
+mathematical methods; no fdlibm/musl/RepDL code consulted). This closes, in
+the "by construction" regime, the last axis where RepDL was stronger; the
+correct-rounding proof and ARM execution in CI remain the next two steps.

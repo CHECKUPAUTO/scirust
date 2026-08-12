@@ -1,29 +1,29 @@
-# SciRust — Guide d'intégration SIMD + Matrix Views
+# SciRust — SIMD + Matrix Views integration guide
 
-## Résumé des changements
+## Summary of changes
 
-| Fichier | Rôle |
+| File | Role |
 |---|---|
-| `scirust-simd/src/portable.rs` | Kernels SIMD portables via `std::simd` |
-| `scirust-core/src/matrix/view.rs` | `MatrixView` / `MatrixViewMut` sans allocation |
-| `scirust-core/src/matrix/backend.rs` | Trait `SimdBackend` + implémentations |
-| `examples/simd_views_demo/` | Démo end-to-end |
-| `examples/benchmarks/benches/simd_bench.rs` | Benchmarks Criterion |
+| `scirust-simd/src/portable.rs` | Portable SIMD kernels via `std::simd` |
+| `scirust-core/src/matrix/view.rs` | `MatrixView` / `MatrixViewMut` without allocation |
+| `scirust-core/src/matrix/backend.rs` | `SimdBackend` trait + implementations |
+| `examples/simd_views_demo/` | End-to-end demo |
+| `examples/benchmarks/benches/simd_bench.rs` | Criterion benchmarks |
 
 ---
 
-## Étapes d'intégration
+## Integration steps
 
-### 1. Activer nightly pour std::simd
+### 1. Enable nightly for std::simd
 
 ```toml
-# rust-toolchain.toml (racine)
+# rust-toolchain.toml (root)
 [toolchain]
 channel    = "nightly"
 components = ["rustfmt", "clippy", "rustc-dev"]
 ```
 
-### 2. Ajouter la feature dans les Cargo.toml
+### 2. Add the feature in the Cargo.toml files
 
 ```toml
 # scirust-simd/Cargo.toml
@@ -39,7 +39,7 @@ portable-simd = ["scirust-simd/portable-simd"]
 scirust-simd = { path = "../scirust-simd" }
 ```
 
-### 3. Copier les fichiers
+### 3. Copy the files
 
 ```bash
 cp scirust-simd/src/portable.rs          <repo>/scirust-simd/src/portable.rs
@@ -47,15 +47,15 @@ cp scirust-core/src/matrix/view.rs       <repo>/scirust-core/src/matrix/view.rs
 cp scirust-core/src/matrix/backend.rs   <repo>/scirust-core/src/matrix/backend.rs
 ```
 
-### 4. Exposer les modules
+### 4. Expose the modules
 
-Dans `scirust-simd/src/lib.rs`, ajouter :
+In `scirust-simd/src/lib.rs`, add:
 ```rust
 pub mod portable;
 pub use portable::simd_ops;
 ```
 
-Dans `scirust-core/src/lib.rs`, ajouter :
+In `scirust-core/src/lib.rs`, add:
 ```rust
 pub mod matrix {
     pub mod view;
@@ -63,64 +63,64 @@ pub mod matrix {
 }
 ```
 
-### 5. Build et tests
+### 5. Build and tests
 
 ```bash
-# Stable — kernels scalaires
+# Stable — scalar kernels
 cargo test
 
-# Nightly + SIMD portable
+# Nightly + portable SIMD
 cargo test  --features portable-simd
 cargo bench --features portable-simd
 
-# Démo complète
+# Full demo
 cargo run --package simd_views_demo --features scirust-core/portable-simd
 ```
 
 ---
 
-## Architecture du trait SimdBackend
+## SimdBackend trait architecture
 
 ```
 SimdBackend (trait)
-├── ScalarBackend       — stable, toujours dispo
-├── PortableSimdBackend — nightly std::simd (AVX2/NEON/SVE auto)
+├── ScalarBackend       — stable, always available
+├── PortableSimdBackend — nightly std::simd (AVX2/NEON/SVE automatic)
 └── BlasBackend  — matrixmultiply / netlib
 ```
 
-Le choix de backend se fait à la compilation via `best_backend()`.
-À terme, un `enum Backend` permettra la sélection à l'exécution.
+The backend choice is made at compile time via `best_backend()`.
+Eventually, a `Backend` enum will allow runtime selection.
 
 ---
 
-## Performances attendues (estimation)
+## Expected performance (estimate)
 
-| Opération | n | Scalar | SIMD portable | Gain |
+| Operation | n | Scalar | Portable SIMD | Gain |
 |---|---|---|---|---|
-| `dot_f32` | 65 536 | ~120 µs | ~18 µs | **6–7×** |
-| `saxpy_f32` | 262 144 | ~400 µs | ~60 µs | **6–7×** |
-| `relu_f32` | 1 048 576 | ~1.5 ms | ~200 µs | **7–8×** |
+| `dot_f32` | 65,536 | ~120 µs | ~18 µs | **6–7×** |
+| `saxpy_f32` | 262,144 | ~400 µs | ~60 µs | **6–7×** |
+| `relu_f32` | 1,048,576 | ~1.5 ms | ~200 µs | **7–8×** |
 | `sgemm_f32` | 128×128 | ~4 ms | ~600 µs | **6×** |
 
-*Mesuré sur x86_64 avec AVX2. Sur ARM (Apple M-series) avec NEON les gains sont similaires.*
+*Measured on x86_64 with AVX2. On ARM (Apple M-series) with NEON the gains are similar.*
 
 ---
 
-## Prochaines étapes roadmap
+## Next roadmap steps
 
-1. **BlasBackend** — déléguer `sgemm` à `matrixmultiply` pour les grandes matrices
-2. **MatrixView col-major** — transposition sans copie pour LAPACK interop
-3. **Reverse-mode autodiff** — intégrer les vues dans le graphe de calcul
-4. **JIT cache** — réutiliser les kernels SIMD compilés entre appels
+1. **BlasBackend** — delegate `sgemm` to `matrixmultiply` for large matrices
+2. **Column-major MatrixView** — copy-free transpose for LAPACK interop
+3. **Reverse-mode autodiff** — integrate the views into the computation graph
+4. **JIT cache** — reuse compiled SIMD kernels between calls
 
 ---
 
-## Notes sur std::simd
+## Notes on std::simd
 
-`std::simd` (aka `portable_simd`) est **stabilisé progressivement** depuis
-Rust 1.77+. Les types `f32x8`, `f64x4` et les méthodes `.mul_add()`,
-`.simd_max()`, `.reduce_sum()` sont disponibles sur nightly sans
-`#[target_feature]` — le compilateur émet automatiquement les instructions
-AVX2 / SSE4 / NEON / SVE selon la cible.
+`std::simd` (a.k.a. `portable_simd`) is **progressively stabilized** since
+Rust 1.77+. The types `f32x8`, `f64x4` and the methods `.mul_add()`,
+`.simd_max()`, `.reduce_sum()` are available on nightly without
+`#[target_feature]` — the compiler automatically emits the AVX2 / SSE4 / NEON / SVE
+instructions according to the target.
 
-Avantage clé : un seul source, pas de `cfg(target_arch)` par branche.
+Key advantage: a single source, no `cfg(target_arch)` per branch.

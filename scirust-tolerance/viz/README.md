@@ -1,29 +1,29 @@
-# Visualisations — `scirust-tolerance`
+# Visualizations — `scirust-tolerance`
 
-Pages HTML autonomes (aucune dépendance réseau, thème clair/sombre) qui
-rendent visibles les concepts du tolérancement inertiel.
+Self-contained HTML pages (no network dependency, light/dark theme) that make
+the concepts of inertial tolerancing visible.
 
-## `inertia_cone.html` — Le cône d'inertie
+## `inertia_cone.html` — The inertia cone
 
-Outil interactif du **cône d'inertie** de Pillet. Un lot est jugé par sa
-distance à la cible dans le plan `(δ, σ)` — l'inertie `I = √(δ² + σ²)` — et
-non par sa marge à l'intervalle de tolérance.
+Interactive tool for Pillet's **inertia cone**. A batch is judged by its
+distance to the target in the `(δ, σ)` plane — the inertia `I = √(δ² + σ²)` —
+and not by its margin to the tolerance interval.
 
-- **Plan (δ, σ)** — la carte d'acceptation (vue de dessus du cône) : le
-  demi-disque d'inertie `I ≤ I_max` (Cpi ≥ 1) superposé au triangle
-  d'acceptation `Cpk ≥ 1` de la méthode classique. On y voit d'un coup d'œil
-  qu'un lot très précis mais décentré, ou centré mais dispersé, peut sortir du
-  cône alors que le Cpk le tolérerait.
-- **Cône 3D** — le graphe `z = I(δ, σ)` est un cône de révolution ; accepter
-  `I ≤ I_max` revient à le couper par un plan horizontal. Glisser pour pivoter.
-- **Distribution** — la densité `N(μ, σ)` du lot vis-à-vis de `[LSL, USL]` et
-  de la cible, queues hors-spec ombrées.
-- **Lecture directe** — `I`, `I_max`, `Cpi`, `Cpm`, `Cp`, `Cpk` et la
-  non-conformité en ppm, recalculés en glissant le point de lot ou les
-  curseurs (IT, Cp visé, μ, σ).
+- **(δ, σ) plane** — the acceptance map (top view of the cone): the inertia
+  half-disc `I ≤ I_max` (Cpi ≥ 1) superimposed on the acceptance triangle
+  `Cpk ≥ 1` of the classical method. At a glance one sees that a very precise
+  but off-center batch, or a centered but dispersed one, can fall outside the
+  cone even though Cpk would tolerate it.
+- **3D cone** — the graph `z = I(δ, σ)` is a cone of revolution; accepting
+  `I ≤ I_max` amounts to cutting it with a horizontal plane. Drag to rotate.
+- **Distribution** — the batch density `N(μ, σ)` with respect to `[LSL, USL]`
+  and the target, out-of-spec tails shaded.
+- **Direct reading** — `I`, `I_max`, `Cpi`, `Cpm`, `Cp`, `Cpk` and the
+  non-conformance in ppm, recalculated while dragging the batch point or the
+  sliders (IT, target Cp, μ, σ).
 
-Les formules reprennent exactement celles de la crate : `InertiaCone`,
-`Inertia`, `capability::cpi` — voir `scirust-tolerance/src/`.
+The formulas reproduce exactly those of the crate: `InertiaCone`,
+`Inertia`, `capability::cpi` — see `scirust-tolerance/src/`.
 
-Ouvrir le fichier dans un navigateur (`file://…/inertia_cone.html`), aucune
-compilation ni serveur requis.
+Open the file in a browser (`file://…/inertia_cone.html`), no compilation or
+server required.

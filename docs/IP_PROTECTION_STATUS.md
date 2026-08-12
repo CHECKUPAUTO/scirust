@@ -29,7 +29,7 @@ contractual, plus the substantial similarity of the copied source itself.
 | #493 | Ops runbook + root-publication script + EULA clause | `docs/PROVENANCE_OPERATIONS.md`, `scripts/publish-provenance-root.sh`, `LICENSING.md` |
 | #494 | Release guard: refuse demo roots | `scripts/check-production-root.sh` |
 | #497 | EULA clause rewritten for EU law | `LICENSING.md` |
-| #498 | French clause (Toubon) + GDPR privacy notice EN/FR | `LICENSING.fr.md`, `docs/PRIVACY_NOTICE.md`, `docs/PRIVACY_NOTICE.fr.md` |
+| #498 | GDPR privacy notice (EN template; French version where applicable to the relevant offer, service, or customer documentation) | `docs/PRIVACY_NOTICE.md`, `LICENSING.md` |
 
 ## What each mechanism is (and is not)
 

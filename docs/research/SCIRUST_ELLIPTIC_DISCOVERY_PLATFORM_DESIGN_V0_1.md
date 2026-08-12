@@ -1,94 +1,94 @@
-# Plateforme de découverte elliptique — conception v0.1
+# Elliptic discovery platform — design v0.1
 
-## Statut
+## Status
 
-- Type : document de conception et d’audit ; aucun code de production n’est ajouté par ce livrable.
-- Dépôt : Memorithm/scirust.
-- Branche de travail : `research/elliptic-discovery-platform`.
-- Base distante auditée : `origin/master` à `3d6615c8e4784149d0b8b97e9f58631edf5e6f90` (2026-08-01).
-- État initial de cette branche : propre après création depuis `origin/master`.
+- Type: design and audit document; no production code is added by this deliverable.
+- Repository: Memorithm/scirust.
+- Working branch: `research/elliptic-discovery-platform`.
+- Audited remote base: `origin/master` at `3d6615c8e4784149d0b8b97e9f58631edf5e6f90` (2026-08-01).
+- Initial state of this branch: clean after creation from `origin/master`.
 
-Cette plateforme a pour seul objet la recherche mathématique reproductible sur des courbes
-elliptiques jouets, des instances générées localement et des jeux de recherche explicitement
-autorisés. Elle ne doit jamais accepter, dériver, rechercher ou comparer une adresse Bitcoin,
-une clé publique tierce, une cible blockchain réelle, ni une donnée qui en tient lieu.
+This platform has as its sole purpose reproducible mathematical research on toy
+elliptic curves, locally generated instances, and explicitly authorized research
+sets. It must never accept, derive, search for, or compare a Bitcoin address,
+a third-party public key, a real blockchain target, or any data standing in for them.
 
-Une relation testée est une hypothèse. Elle ne peut pas être décrite comme une découverte
-nouvelle sans franchir les portes de validation définies dans « Protocole de falsification ».
+A tested relation is a hypothesis. It cannot be described as a new discovery
+without passing the validation gates defined in "Falsification Protocol".
 
-## Méthode d’audit et conventions du workspace
+## Audit method and workspace conventions
 
-L’audit a porté notamment sur :
+The audit covered in particular:
 
-- `scirust-hypercrypto` et sa documentation de recherche ;
-- `scirust-symbolic` ;
-- `scirust-neuro-symbolic` ;
-- `scirust-solvers` ;
-- `scirust-evo` ;
-- `scirust-core` ;
-- les voisins directement nécessaires à la décision : `scirust-modalg`, `scirust-sim` et
+- `scirust-hypercrypto` and its research documentation;
+- `scirust-symbolic`;
+- `scirust-neuro-symbolic`;
+- `scirust-solvers`;
+- `scirust-evo`;
+- `scirust-core`;
+- the neighbors directly needed for the decision: `scirust-modalg`, `scirust-sim`, and
   `scirust-algogen`.
 
-Les conventions observées à la racine sont : Rust édition 2021 pour la majorité des crates
-existants, MSRV 1.89, résolveur Cargo v2, outil de CI `nightly-2026-07-02`, `rustfmt`
-(maximum 100 colonnes) et Clippy avec `-D warnings`. Les commandes de référence sont
-documentées dans [CONTRIBUTING.md](../../CONTRIBUTING.md) et dans
+The conventions observed at the root are: Rust edition 2021 for the majority of existing
+crates, MSRV 1.89, Cargo resolver v2, CI toolchain `nightly-2026-07-02`, `rustfmt`
+(maximum 100 columns), and Clippy with `-D warnings`. The reference commands are
+documented in [CONTRIBUTING.md](../../CONTRIBUTING.md) and in
 [.github/workflows/ci.yml](../../.github/workflows/ci.yml).
 
-La future implémentation doit être Rust pur, sans FFI, et son propre crate doit porter
-`#![forbid(unsafe_code)]`. Une dépendance ne sera ajoutée qu’après avoir vérifié qu’une
-abstraction existante ne couvre pas le besoin.
+The future implementation must be pure Rust, without FFI, and its own crate must carry
+`#![forbid(unsafe_code)]`. A dependency will only be added after verifying that no
+existing abstraction covers the need.
 
-## État Git initial observé
+## Initial Git state observed
 
-| Vérification | Commande exécutée | Résultat observé |
+| Check | Command executed | Result observed |
 |---|---|---|
-| Récupération de la branche distante | `git fetch origin --prune` | `origin/master` a avancé de `25f272a` à `3d6615c`. |
-| Création isolée | `git worktree add -b research/elliptic-discovery-platform … origin/master` | Branche créée au commit `3d6615c`, avec suivi de `origin/master`. |
-| État du worktree créé | `git status --short --branch` | `## research/elliptic-discovery-platform...origin/master`, sans fichier modifié. |
-| Cohérence initiale du diff | `git diff --check` | Succès, aucune sortie. |
+| Fetch of the remote branch | `git fetch origin --prune` | `origin/master` advanced from `25f272a` to `3d6615c`. |
+| Isolated creation | `git worktree add -b research/elliptic-discovery-platform … origin/master` | Branch created at commit `3d6615c`, tracking `origin/master`. |
+| State of the created worktree | `git status --short --branch` | `## research/elliptic-discovery-platform...origin/master`, with no modified file. |
+| Initial diff consistency | `git diff --check` | Success, no output. |
 
-Les worktrees préexistants contenant des modifications non liées ont été préservés. Toutes les
-modifications de ce travail se limitent au worktree isolé ci-dessus.
+Preexisting worktrees containing unrelated modifications were preserved. All
+modifications of this work are limited to the isolated worktree above.
 
-## Lecture de scirust-hypercrypto
+## Reading of scirust-hypercrypto
 
-Le crate [scirust-hypercrypto](../../scirust-hypercrypto/) est un harnais de falsification
-expérimental pour une construction hypercomplexe de permutation à clés. Son README et
-[sa spécification v0.1](../../scirust-hypercrypto/docs/research/SCIRUST_HYPERCRYPTO_SPEC_V0_1.md)
-délimitent explicitement une cible de recherche, non un primitive cryptographique de production.
+The crate [scirust-hypercrypto](../../scirust-hypercrypto/) is an experimental falsification
+harness for a hypercomplex keyed permutation construction. Its README and
+[its v0.1 specification](../../scirust-hypercrypto/docs/research/SCIRUST_HYPERCRYPTO_SPEC_V0_1.md)
+explicitly delimit a research target, not a production cryptographic primitive.
 
-Ses qualités réutilisables sont méthodologiques, non structurelles :
+Its reusable qualities are methodological, not structural:
 
-- analyse déterministe, algèbre exacte et contrôles négatifs ;
-- couverture explicitement annotée `Exhaustive` ou `Sampled { count, seed }` dans
-  [analysis/util.rs](../../scirust-hypercrypto/src/analysis/util.rs) ;
-- verdicts et indicateurs de contrôle dans
-  [analysis/battery.rs](../../scirust-hypercrypto/src/analysis/battery.rs) ;
-- rapports canoniques et empreintes SHA-256 dans
-  [analysis/report.rs](../../scirust-hypercrypto/src/analysis/report.rs) ;
-- dépendance directe à `scirust-modalg` pour l’algèbre exacte.
+- deterministic analysis, exact algebra, and negative controls;
+- coverage explicitly annotated `Exhaustive` or `Sampled { count, seed }` in
+  [analysis/util.rs](../../scirust-hypercrypto/src/analysis/util.rs);
+- verdicts and control indicators in
+  [analysis/battery.rs](../../scirust-hypercrypto/src/analysis/battery.rs);
+- canonical reports and SHA-256 fingerprints in
+  [analysis/report.rs](../../scirust-hypercrypto/src/analysis/report.rs);
+- direct dependency on `scirust-modalg` for exact algebra.
 
-Sa façade `algebra.rs` ré-exporte des entiers de mots modulaires, quaternions, octonions et
-matrices modulaires propres à son domaine. Ajouter des courbes elliptiques à cette façade
-mélangerait deux objets de recherche sans invariant partagé, ferait croire à une composante
-cryptographique opérationnelle, et forcerait une dépendance inversée artificielle.
+Its `algebra.rs` facade re-exports modular word integers, quaternions, octonions, and
+modular matrices specific to its domain. Adding elliptic curves to this facade
+would mix two research objects without a shared invariant, would suggest an operational
+cryptographic component, and would force an artificial inverted dependency.
 
-## Décision d’architecture
+## Architecture decision
 
-**Décision : créer ultérieurement un nouveau crate générique
-`scirust-elliptic-discovery`; ne pas étendre `scirust-hypercrypto`.**
+**Decision: later create a new generic crate
+`scirust-elliptic-discovery`; do not extend `scirust-hypercrypto`.**
 
-| Option | Avantage | Problème déterminant | Décision |
+| Option | Advantage | Decisive problem | Decision |
 |---|---|---|---|
-| Étendre `scirust-hypercrypto` | Réutilisation apparente des rapports de falsification | Domaine, API et objectif cryptographique expérimental incompatibles ; couplage trompeur | Écartée |
-| Étendre `scirust-modalg` | Réutilisation maximale de l’arithmétique | `modalg` est une bibliothèque algébrique générique ; y placer l’orchestration d’expériences, le catalogue et les garde-fous créerait un mélange de couches | Écartée |
-| Nouveau `scirust-elliptic-discovery` | Périmètre, sécurité et reproductibilité explicites ; dépendances minimes vers les fondations existantes | Nouveau manifeste et tests à maintenir | Retenue |
+| Extend `scirust-hypercrypto` | Apparent reuse of falsification reports | Incompatible domain, API, and experimental cryptographic purpose; misleading coupling | Rejected |
+| Extend `scirust-modalg` | Maximal reuse of the arithmetic | `modalg` is a generic algebraic library; placing experiment orchestration, the catalog, and the guardrails there would create a mixing of layers | Rejected |
+| New `scirust-elliptic-discovery` | Explicit scope, safety, and reproducibility; minimal dependencies toward the existing foundations | New manifest and tests to maintain | Retained |
 
-Le nouveau crate sera un consommateur fin de `scirust-modalg`, pas un remplacement. Il pourra
-reprendre les idées de rapport de `scirust-hypercrypto`, sans import de son API métier.
+The new crate will be a thin consumer of `scirust-modalg`, not a replacement. It may
+reuse the reporting ideas of `scirust-hypercrypto`, without importing its business API.
 
-Le manifeste proposé, à n’ajouter qu’en phase 1, est :
+The proposed manifest, to be added only in phase 1, is:
 
     [package]
     name = "scirust-elliptic-discovery"
@@ -101,53 +101,52 @@ Le manifeste proposé, à n’ajouter qu’en phase 1, est :
     scirust-modalg = { path = "../scirust-modalg" }
     scirust-sim = { path = "../scirust-sim", default-features = false }
 
-Aucune dépendance externe nouvelle n’est prévue. `scirust-sim` ne serait utilisé que pour son
-générateur déterministe à état explicite ; aucun tirage flottant ne ferait partie d’un calcul
-algébrique ou d’une décision de validité.
+No new external dependency is planned. `scirust-sim` would only be used for its
+deterministic generator with explicit state; no floating-point draw would be part of an
+algebraic computation or a validity decision.
 
-## Inventaire des composants réutilisables
+## Inventory of reusable components
 
-| Besoin | Composant existant | Évaluation et emploi prévu |
+| Need | Existing component | Assessment and planned use |
 |---|---|---|
-| Entiers multi-précision exacts | `scirust-modalg::bigint::BigInt` | Entier signé arbitraire, opérations exactes, PGCD et conversion décimale. À réserver aux bornes ou certificats qui dépassent `u64`. |
-| Théorie des nombres et module premier | `scirust-modalg::numtheory` | `is_prime` déterministe sur `u64`, `pow_mod`, `mulmod`, `inv_mod`, factorisation et diviseurs. Fondation à réutiliser pour \(\mathbb F_p\). |
-| Corps finis et polynômes | `scirust-modalg::poly::Poly`, `extfield::ExtField` | Polynômes canoniques sur \(\mathrm{GF}(p)\), test d’irréductibilité, extensions et Frobenius exacts. Réutilisables pour une tentative de justification symbolique ; v0.1 des courbes reste sur \(\mathbb F_p\). |
-| Calcul symbolique | `scirust-symbolic` | Expressions, différentiation et simplification présentes, mais constantes et évaluation en `f64`. Ne convient ni à la base algébrique ni à une preuve. Aucun lien direct prévu. |
-| Raisonnement neuro-symbolique | `scirust-neuro-symbolic` | CSP/SAT/Datalog/e-graph disponibles, mais domaines entiers ou flottants, conteneurs hashés et absence de certificats de corps fini. Inspiration de conception seulement. |
-| Solveurs | `scirust-solvers` | Racines polynomiales et interface unifiée majoritairement en `f64`. Inadapté aux égalités exactes dans \(\mathbb F_p\). Aucun lien direct prévu. |
-| Recherche évolutionnaire | `scirust-evo` | Routines déterministes sous graine, mais génotypes et fitness en `f64`, avec `rand`/Rayon. Peut inspirer une phase exploratoire séparée, jamais valider une relation. |
-| Reproductibilité | `scirust-sim::SplitMix64` | Générateur pur Rust public, graine explicite et vecteurs de référence. Candidat direct, limité à l’échantillonnage non algébrique. |
-| Empreintes et rejouabilité | `scirust-algogen` et `scirust-hypercrypto` | Identité canonique, archive de campagne et rapports ordonnés sont des précédents de conception. Ne pas dépendre d’`algogen` car ses programmes sont flottants. |
-| Réductions reproductibles | `scirust-core::reproducible` | Vise les réductions flottantes reproductibles ; hors besoin pour la base exacte. `scirust-core` contient aussi des zones `unsafe` et des backends FFI/BLAS ; aucun lien direct. |
+| Exact multi-precision integers | `scirust-modalg::bigint::BigInt` | Arbitrary signed integer, exact operations, GCD, and decimal conversion. To be reserved for bounds or certificates that exceed `u64`. |
+| Number theory and prime modulus | `scirust-modalg::numtheory` | Deterministic `is_prime` on `u64`, `pow_mod`, `mulmod`, `inv_mod`, factorization, and divisors. Foundation to reuse for \(\mathbb F_p\). |
+| Finite fields and polynomials | `scirust-modalg::poly::Poly`, `extfield::ExtField` | Canonical polynomials over \(\mathrm{GF}(p)\), irreducibility test, extensions, and exact Frobenius. Reusable for an attempted symbolic justification; v0.1 of the curves stays on \(\mathbb F_p\). |
+| Symbolic computation | `scirust-symbolic` | Expressions, differentiation, and simplification are present, but constants and evaluation are in `f64`. Suitable neither for the algebraic base nor for a proof. No direct link planned. |
+| Neuro-symbolic reasoning | `scirust-neuro-symbolic` | CSP/SAT/Datalog/e-graph are available, but over integer or floating-point domains, hashed containers, and no finite-field certificates. Design inspiration only. |
+| Solvers | `scirust-solvers` | Polynomial roots and unified interface mostly in `f64`. Unsuitable for exact equalities in \(\mathbb F_p\). No direct link planned. |
+| Evolutionary search | `scirust-evo` | Deterministic routines under a seed, but genotypes and fitness in `f64`, with `rand`/Rayon. May inspire a separate exploratory phase, never validate a relation. |
+| Reproducibility | `scirust-sim::SplitMix64` | Public pure-Rust generator, explicit seed, and reference vectors. Direct candidate, limited to non-algebraic sampling. |
+| Fingerprints and replayability | `scirust-algogen` and `scirust-hypercrypto` | Canonical identity, campaign archive, and ordered reports are design precedents. Do not depend on `algogen` because its programs are floating-point. |
+| Reproducible reductions | `scirust-core::reproducible` | Targets reproducible floating-point reductions; outside the need for the exact base. `scirust-core` also contains `unsafe` areas and FFI/BLAS backends; no direct link. |
 
-Les observations importantes sont les suivantes :
+The important observations are the following:
 
-1. `scirust-modalg` couvre déjà les primitives exactes utiles. Il serait risqué de réécrire un
-   inverse modulaire, une factorisation ou un test de primalité.
-2. Aucun composant audité ne fournit aujourd’hui une arithmétique complète de courbes
-   elliptiques jouets sur \(\mathbb F_p\), avec énumération, ordre, catalogue de symétries et
-   falsification certifiée.
-3. Les composants symboliques, solveurs et évolutionnaires audités emploient des flottants.
-   Ils ne doivent pas participer à l’établissement d’une égalité, d’un contre-exemple ou d’un
-   statut de découverte.
-4. `scirust-core` est une dépendance trop large pour ce sous-système : son inventaire inclut
-   des chemins `unsafe`, des appels système et des backends optionnels. Cela violerait le
-   périmètre Rust pur/aucune FFI de ce crate.
+1. `scirust-modalg` already covers the useful exact primitives. Rewriting a modular
+   inverse, a factorization, or a primality test would be risky.
+2. No audited component today provides complete toy elliptic curve arithmetic over
+   \(\mathbb F_p\), with enumeration, order, symmetry catalog, and certified falsification.
+3. The audited symbolic, solver, and evolutionary components use floating point.
+   They must not participate in establishing an equality, a counterexample, or a
+   discovery status.
+4. `scirust-core` is too broad a dependency for this subsystem: its inventory includes
+   `unsafe` paths, system calls, and optional backends. That would violate the
+   pure-Rust/no-FFI scope of this crate.
 
-## Risques de duplication et parades
+## Duplication risks and countermeasures
 
-| Risque | Parade obligatoire |
+| Risk | Mandatory countermeasure |
 |---|---|
-| Réimplémenter \(\mathbb F_p\) au-dessus d’opérations naïves et diverger de `modalg` | Une mince façade de type peut déléguer les opérations à `numtheory`; tests croisés sur le domaine jouet. |
-| Créer un second PRNG maison | Réutiliser `scirust-sim::SplitMix64` ou documenter pourquoi une API existante est insuffisante. Graine, algorithme et version font partie du rapport. |
-| Dupliquer les rapports de HyperCrypto sans ordre canonique | Reprendre le principe : structures ordonnées, encodage de longueur explicite, empreinte du corpus et du programme de recherche. |
-| Confondre recherche de motif et preuve | Séparer strictement générateur de candidats, falsificateur, classificateur et tentative de preuve. |
-| Étendre implicitement le domaine à des clés réelles | Des types dédiés `ToyPrime`, `ToyCurve` et `LocalResearchCase`; aucune API de décodage SEC 1, adresse, clé publique ou RPC. |
-| Dépendre de `scirust-core`, `symbolic`, `solvers` ou `evo` pour accélérer v0.1 | Interdit tant qu’un audit de sûreté, d’exactitude et de MSRV ne justifie pas une interface discrète et exacte. |
+| Reimplementing \(\mathbb F_p\) over naive operations and diverging from `modalg` | A thin type facade can delegate operations to `numtheory`; cross-tests over the toy domain. |
+| Creating a second homegrown PRNG | Reuse `scirust-sim::SplitMix64` or document why an existing API is insufficient. Seed, algorithm, and version are part of the report. |
+| Duplicating HyperCrypto's reports without canonical order | Adopt the principle: ordered structures, explicit-length encoding, fingerprint of the corpus and of the research program. |
+| Confusing pattern search with proof | Strictly separate candidate generator, falsifier, classifier, and proof attempt. |
+| Implicitly extending the domain to real keys | Dedicated types `ToyPrime`, `ToyCurve`, and `LocalResearchCase`; no SEC 1 decoding, address, public key, or RPC API. |
+| Depending on `scirust-core`, `symbolic`, `solvers`, or `evo` to speed up v0.1 | Forbidden until a safety, correctness, and MSRV audit justifies a discrete and exact interface. |
 
-## Modèle algébrique minimal
+## Minimal algebraic model
 
-La phase initiale se limite aux courbes courtes de Weierstrass sur un corps premier jouet :
+The initial phase is limited to short Weierstrass curves over a toy prime field:
 
 \[
 E_{a,b}/\mathbb F_p : y^2 = x^3 + ax + b,
@@ -155,42 +154,42 @@ E_{a,b}/\mathbb F_p : y^2 = x^3 + ax + b,
 \qquad 4a^3 + 27b^2 \not\equiv 0 \pmod p.
 \]
 
-Le domaine v0.1 est borné à \(5 \le p \le 4093\). Cette limite rend l’énumération exacte
-praticable, ne prétend pas représenter une courbe de production et ne doit pas être relevée
-sans nouvelle analyse de coût et de protocole.
+The v0.1 domain is bounded to \(5 \le p \le 4093\). This limit makes exact enumeration
+practicable, does not claim to represent a production curve, and must not be raised
+without new cost and protocol analysis.
 
-Les futurs types publics doivent être intentionnellement étroits :
+The future public types must be intentionally narrow:
 
-- `ToyPrime` : premier vérifié, impair, dans la borne de recherche ;
-- `Fp` : résidu canonique \([0,p-1]\), sans flottant ;
-- `ToyCurve` : paramètres \((p,a,b)\) avec discriminant non nul ;
-- `ToyPoint` : point à l’infini ou coordonnées validées sur **sa propre** `ToyCurve` ;
-- `LocalResearchCase` : graine, domaine, source locale et autorisation explicite ;
-- `ExperimentId` : empreinte canonique du manifeste, de la graine et du corpus.
+- `ToyPrime`: verified, odd prime within the research bound;
+- `Fp`: canonical residue \([0,p-1]\), without floating point;
+- `ToyCurve`: parameters \((p,a,b)\) with nonzero discriminant;
+- `ToyPoint`: point at infinity or coordinates validated on **its own** `ToyCurve`;
+- `LocalResearchCase`: seed, domain, local source, and explicit authorization;
+- `ExperimentId`: canonical fingerprint of the manifest, seed, and corpus.
 
-Aucun de ces types ne doit implémenter un parseur de clé publique, une désérialisation SEC 1,
-un import d’adresse, une URL de chaîne, un client réseau ou une conversion implicite depuis des
-octets externes.
+None of these types must implement a public key parser, a SEC 1 deserialization,
+an address import, a chain URL, a network client, or an implicit conversion from external
+bytes.
 
-### Arithmétique et énumération exactes
+### Exact arithmetic and enumeration
 
-1. Vérifier `p` avec le test déterministe de `scirust-modalg`.
-2. Réduire `a` et `b` de façon canonique, puis refuser le discriminant nul.
-3. Construire une table ordonnée \(r \mapsto [y]\) de tous les \(y^2 \bmod p\).
-4. Parcourir les \(x\) croissants, calculer \(x^3+ax+b\), et émettre les solutions dans
-   l’ordre \((x,y)\), précédées du point à l’infini.
-5. Poser \(\#E(\mathbb F_p)\) égal au nombre de points ainsi énumérés. La borne de Hasse est un
-   contrôle de cohérence, jamais un substitut à l’énumération.
-6. Calculer l’ordre d’un point \(P\) en partant de \(\#E\), en factorisant ce nombre avec
-   `scirust-modalg`, puis en divisant par chaque facteur seulement si
+1. Verify `p` with the deterministic test of `scirust-modalg`.
+2. Reduce `a` and `b` canonically, then reject a zero discriminant.
+3. Build an ordered table \(r \mapsto [y]\) of all \(y^2 \bmod p\).
+4. Walk over increasing \(x\), compute \(x^3+ax+b\), and emit the solutions in
+   \((x,y)\) order, preceded by the point at infinity.
+5. Set \(\#E(\mathbb F_p)\) equal to the number of points thus enumerated. The Hasse bound is a
+   consistency check, never a substitute for enumeration.
+6. Compute the order of a point \(P\) starting from \(\#E\), factoring that number with
+   `scirust-modalg`, then dividing by each factor only if
    \((\#E/q)P=\mathcal O\).
 
-L’addition, le doublement, l’inverse et les cas particuliers (\(\mathcal O\), opposés,
-tangente verticale) seront testés contre cette énumération exhaustive. Les inverses de
-dénominateurs sont fournis par l’arithmétique modulaire existante ; aucun calcul réel, aucune
-tolérance et aucun logarithme discret ne sont nécessaires.
+Addition, doubling, the inverse, and the special cases (\(\mathcal O\), opposites,
+vertical tangent) will be tested against this exhaustive enumeration. Denominator
+inverses are provided by the existing modular arithmetic; no real computation, no
+tolerance, and no discrete logarithm are needed.
 
-## Architecture proposée du futur crate
+## Proposed architecture of the future crate
 
     scirust-elliptic-discovery/
       src/
@@ -216,188 +215,188 @@ tolérance et aucun logarithme discret ne sont nécessaires.
         counterexamples.rs
         reproducibility.rs
 
-Les modules sont orientés dans un seul sens : `scope` et `field` fondent `curve`;
-`curve` fonde `enumerate` et `orders`; les candidats n’accèdent qu’aux invariants
-immuables ; le falsificateur et le classificateur produisent un rapport mais ne modifient ni le
-corpus ni le catalogue.
+The modules are oriented in a single direction: `scope` and `field` ground `curve`;
+`curve` grounds `enumerate` and `orders`; candidates only access immutable
+invariants; the falsifier and the classifier produce a report but modify neither the
+corpus nor the catalog.
 
-## Langage de recherche et classification
+## Research language and classification
 
-Un candidat est une expression typée, bornée et entièrement exacte sur des points et des scalaires.
-Le noyau initial comprend : identité, négation, addition, doublement, multiplication scalaire
-par un entier borné, coordonnées valides, \(j\), discriminant, ordre de point et cardinal du
-groupe. Les opérateurs partiels retournent `Undefined` plutôt que d’inventer une valeur.
+A candidate is a typed, bounded, and entirely exact expression over points and scalars.
+The initial kernel includes: identity, negation, addition, doubling, scalar multiplication
+by a bounded integer, valid coordinates, \(j\), discriminant, point order, and group
+cardinality. Partial operators return `Undefined` rather than inventing a value.
 
-Chaque résultat porte l’un des statuts suivants :
+Each result carries one of the following statuses:
 
-| Statut | Sens |
+| Status | Meaning |
 |---|---|
-| `Refuted` | Un contre-exemple canonique est archivé. |
-| `Known` | Correspond à une propriété du catalogue, avec référence. |
-| `RepresentationArtifact` | Disparaît après normalisation de représentation ou changement de coordonnées/encodage. |
-| `NeedsLiteratureReview` | Motif persistant mais hors catalogue suffisamment vérifié. |
-| `Inconclusive` | Couverture insuffisante ou résultat non déterminable. |
-| `CandidateUnclassified` | A franchi toutes les portes automatiques, mais n’est **pas** une découverte nouvelle. |
+| `Refuted` | A canonical counterexample is archived. |
+| `Known` | Matches a catalog property, with reference. |
+| `RepresentationArtifact` | Disappears after representation normalization or coordinate/encoding change. |
+| `NeedsLiteratureReview` | Persistent pattern but outside a sufficiently verified catalog. |
+| `Inconclusive` | Insufficient coverage or non-determinable result. |
+| `CandidateUnclassified` | Passed all automatic gates, but is **not** a new discovery. |
 
-Il n’existe volontairement aucun statut `New` ou `Discovered`. Une conclusion humaine
-éventuelle exige une revue de littérature et une preuve ou justification indépendante.
+There is deliberately no `New` or `Discovered` status. Any eventual human
+conclusion requires a literature review and an independent proof or justification.
 
-## Catalogue initial de propriétés connues
+## Initial catalog of known properties
 
-Le moteur doit reconnaître et exclure au minimum les familles suivantes avant de classer un
-motif comme candidat non classifié.
+The engine must recognize and exclude at least the following families before classifying a
+pattern as an unclassified candidate.
 
-| Famille connue | Signature exacte ou testable | Classification |
+| Known family | Exact or testable signature | Classification |
 |---|---|---|
-| Négation et identité | \(-(x,y)=(x,-y)\), \(P+(-P)=\mathcal O\), \(-\mathcal O=\mathcal O\) | `Known` |
-| Linéarité de groupe | \(m(nP)=(mn)P\), associativité, divisibilité de l’ordre | `Known` |
-| Automorphismes \(j=0\) | Pour \(E:y^2=x^3+b\), \((x,y)\mapsto(\zeta x,y)\) si \(\zeta^3=1\) | `Known` |
-| Racines cubiques de l’unité | \(\zeta^3=1\), \(\zeta\ne1\), seulement lorsque le corps contient la racine non triviale | `Known` ou conditionnelle |
-| Cas \(j=1728\) voisin | Automorphismes supplémentaires de \(y^2=x^3+ax\) lorsque le corps contient les constantes requises | `Known` |
-| Endomorphismes de type GLV | Relation \(\phi(P)=[\lambda]P\) provenant d’un endomorphisme connu et de son polynôme minimal | `Known` ; jamais présenté comme nouveau |
-| Changements de coordonnées | Isomorphisme \(x=u^2x', y=u^3y'\) et transformation correspondante de \(a,b\) | `RepresentationArtifact` ou `Known` |
-| Twists et classes de \(j\) | Même invariant \(j\) sans identité automatique de groupe de points | `Known`; éviter les conclusions transversales abusives |
-| Symétries d’encodage | Choix de signe de \(y\), point à l’infini, ordre ou forme de coordonnées | `RepresentationArtifact` |
-| Artefacts de sous-corpus | Motif vrai seulement pour \(j=0\), une congruence de \(p\), ou un ordre fixé | `RepresentationArtifact` ou `Refuted` après partition indépendante |
+| Negation and identity | \(-(x,y)=(x,-y)\), \(P+(-P)=\mathcal O\), \(-\mathcal O=\mathcal O\) | `Known` |
+| Group linearity | \(m(nP)=(mn)P\), associativity, order divisibility | `Known` |
+| \(j=0\) automorphisms | For \(E:y^2=x^3+b\), \((x,y)\mapsto(\zeta x,y)\) if \(\zeta^3=1\) | `Known` |
+| Cube roots of unity | \(\zeta^3=1\), \(\zeta\ne1\), only when the field contains the nontrivial root | `Known` or conditional |
+| Nearby \(j=1728\) case | Additional automorphisms of \(y^2=x^3+ax\) when the field contains the required constants | `Known` |
+| GLV-type endomorphisms | Relation \(\phi(P)=[\lambda]P\) arising from a known endomorphism and its minimal polynomial | `Known`; never presented as new |
+| Coordinate changes | Isomorphism \(x=u^2x', y=u^3y'\) and the corresponding transformation of \(a,b\) | `RepresentationArtifact` or `Known` |
+| Twists and \(j\) classes | Same invariant \(j\) without automatic point-group identity | `Known`; avoid abusive cross-cutting conclusions |
+| Encoding symmetries | Choice of sign of \(y\), point at infinity, order, or coordinate form | `RepresentationArtifact` |
+| Sub-corpus artifacts | Pattern true only for \(j=0\), a congruence of \(p\), or a fixed order | `RepresentationArtifact` or `Refuted` after independent partition |
 
-L’automorphisme \(j=0\) se vérifie directement :
+The \(j=0\) automorphism is verified directly:
 \((\zeta x)^3+b=\zeta^3x^3+b=x^3+b\).
-L’existence de racines cubiques non triviales, les classes exceptionnelles \(j=0\) et
-\(j=1728\), et les twists devront être marqués comme conditions de corpus, non comme
-exceptions découvertes. Les références de base sont [Silverman, Arithmetic of Elliptic Curves](https://www.math.brown.edu/johsilve/AECHome.html)
-et la documentation des [courbes elliptiques sur corps finis de SageMath](https://doc.sagemath.org/html/en/reference/arithmetic_curves/sage/schemes/elliptic_curves/ell_finite_field.html).
+The existence of nontrivial cube roots, the exceptional classes \(j=0\) and
+\(j=1728\), and the twists must be marked as corpus conditions, not as
+discovered exceptions. The base references are [Silverman, Arithmetic of Elliptic Curves](https://www.math.brown.edu/johsilve/AECHome.html)
+and the documentation of [SageMath elliptic curves over finite fields](https://doc.sagemath.org/html/en/reference/arithmetic_curves/sage/schemes/elliptic_curves/ell_finite_field.html).
 
-Les endomorphismes GLV sont une technique connue d’accélération de multiplication scalaire, pas
-un signal de structure inédite ; voir [Gallant, Lambert et Vanstone, CRYPTO 2001](https://link.springer.com/chapter/10.1007/3-540-44647-8_11).
-Les représentations comprimées doivent être traitées comme des encodages : SEC 1 décrit les
-formats de représentation de points, et non une nouvelle symétrie algébrique
-([SEC 1 v2](https://www.secg.org/sec1-v2.pdf)). Le v0.1 n’implémentera toutefois aucun de ces
+GLV endomorphisms are a known scalar multiplication acceleration technique, not
+a signal of novel structure; see [Gallant, Lambert, and Vanstone, CRYPTO 2001](https://link.springer.com/chapter/10.1007/3-540-44647-8_11).
+Compressed representations must be treated as encodings: SEC 1 describes
+point representation formats, not a new algebraic symmetry
+([SEC 1 v2](https://www.secg.org/sec1-v2.pdf)). v0.1 will nevertheless not implement any of these
 formats.
 
-## Protocole de falsification
+## Falsification protocol
 
-Une relation ne franchit les portes suivantes que dans cet ordre :
+A relation crosses the following gates only in this order:
 
-1. **G0 — Domaine autorisé.** Chaque cas est `LocalResearchCase`, étiqueté jouet et généré
-   localement ; tout autre type d’entrée est impossible à représenter dans l’API.
-2. **G1 — Base exacte.** L’évaluation utilise seulement des entiers, \(\mathbb F_p\) et les lois
-   de groupe vérifiées ; aucune valeur flottante ni heuristique ne décide le verdict.
-3. **G2 — Exhaustivité petite.** Tester toutes les courbes non singulières et tous les points
-   nécessaires sur le corpus exhaustif défini ci-dessous.
-4. **G3 — Jeu indépendant.** Tester un corpus séparé, déterminé par une graine et un manifeste
-   distincts ; ne jamais choisir l’échantillon après avoir vu le candidat.
-5. **G4 — Contre-exemple.** Énumérer les entrées dans un ordre canonique et archiver le premier
-   contre-exemple \((p,a,b,\text{tuple de points},\text{expression})\), s’il existe.
-6. **G5 — Catalogue.** Comparer la relation et ses normalisations au catalogue ci-dessus,
-   notamment sous négation, isomorphismes et encodages.
-7. **G6 — Montée en taille et justification.** Passer l’échelle définie ci-dessous, puis tenter
-   une identité polynomiale exacte, un certificat de calcul fini ou une justification
-   symbolique. Un échec garde le statut `CandidateUnclassified` ou `Inconclusive`.
+1. **G0 — Authorized domain.** Every case is `LocalResearchCase`, labeled toy and generated
+   locally; any other input type is impossible to represent in the API.
+2. **G1 — Exact base.** Evaluation uses only integers, \(\mathbb F_p\), and the verified group
+   laws; no floating-point value or heuristic decides the verdict.
+3. **G2 — Small exhaustiveness.** Test all nonsingular curves and all necessary
+   points on the exhaustive corpus defined below.
+4. **G3 — Independent set.** Test a separate corpus, determined by a distinct seed and manifest;
+   never choose the sample after seeing the candidate.
+5. **G4 — Counterexample.** Enumerate the inputs in a canonical order and archive the first
+   counterexample \((p,a,b,\text{tuple de points},\text{expression})\), if one exists.
+6. **G5 — Catalog.** Compare the relation and its normalizations against the catalog above,
+   notably under negation, isomorphisms, and encodings.
+7. **G6 — Scale-up and justification.** Pass the scale defined below, then attempt
+   an exact polynomial identity, a finite computation certificate, or a symbolic
+   justification. A failure keeps the `CandidateUnclassified` or `Inconclusive` status.
 
-Les contrôles négatifs obligatoires comprennent : une formule de négation volontairement fausse,
-un doublement avec signe erroné, une propriété valide seulement à \(j=0\) présentée à tort comme
-universelle, une symétrie de signe d’encodage, et une expression surajustée au corpus
-d’apprentissage. Ils doivent être réfutés par le falsificateur.
+The mandatory negative controls include: a deliberately false negation formula,
+a doubling with the wrong sign, a property valid only at \(j=0\) wrongly presented as
+universal, an encoding sign symmetry, and an expression overfitted to the training
+corpus. They must be refuted by the falsifier.
 
-Les résultats de G2 et G3 sont distincts. Une propriété qui passe G2 mais échoue G3 est
-`Refuted`; une propriété qui ne reçoit pas de couverture suffisante est `Inconclusive`.
-Aucune réussite expérimentale, même exhaustive sur la borne jouet, ne vaut une généralisation
-hors de son domaine.
+The results of G2 and G3 are distinct. A property that passes G2 but fails G3 is
+`Refuted`; a property that does not receive sufficient coverage is `Inconclusive`.
+No experimental success, even exhaustive over the toy bound, amounts to a generalization
+outside its domain.
 
-## Corpus déterministes
+## Deterministic corpora
 
-| Ensemble | Construction | Objet |
+| Set | Construction | Purpose |
 |---|---|---|
-| `ExhaustiveSmall` | Tous les \((a,b)\) non singuliers pour \(p\in\{5,7,11,13\}\), tous les points et tous les tuples dans le budget déclaré | Falsification complète sur petite taille |
-| `IndependentHoldout` | Primes \(17\) à \(97\), partitions déterministes par graine, courbes locales et points énumérés exactement | Validation indépendante |
-| `ScaleLadder` | \(p\in\{127,251,509,1021,2039,4093\}\), toutes les courbes sélectionnées par manifeste, énumération exacte des points ; tuples d’arité élevée sous couverture explicitement chiffrée | Étude de montée en taille |
+| `ExhaustiveSmall` | All nonsingular \((a,b)\) for \(p\in\{5,7,11,13\}\), all points and all tuples within the declared budget | Complete falsification at small size |
+| `IndependentHoldout` | Primes \(17\) to \(97\), deterministic seed-based partitions, local curves and exactly enumerated points | Independent validation |
+| `ScaleLadder` | \(p\in\{127,251,509,1021,2039,4093\}\), all curves selected by manifest, exact point enumeration; high-arity tuples under explicitly counted coverage | Scale-up study |
 
-Le rapport doit contenir, pour chaque ensemble : algorithme de sélection, graine, version du
-crate, bornes, nombre de courbes examinées, nombre de points/tuples évalués, ordre de parcours,
-empreinte canonique et verdict. Toute parallélisation future doit produire le même premier
-contre-exemple et le même rapport qu’une exécution séquentielle.
+The report must contain, for each set: selection algorithm, seed, crate version,
+bounds, number of curves examined, number of points/tuples evaluated, traversal order,
+canonical fingerprint, and verdict. Any future parallelization must produce the same first
+counterexample and the same report as a sequential execution.
 
-## Invariants de sécurité, d’exactitude et de reproductibilité
+## Safety, correctness, and reproducibility invariants
 
-| Invariant | Exigence vérifiable |
+| Invariant | Verifiable requirement |
 |---|---|
-| Recherche autorisée uniquement | Aucune API n’accepte adresses, clés publiques, encodages SEC 1, endpoints réseau ou données blockchain. |
-| Instances locales | Toutes les courbes proviennent de paramètres jouets validés ou d’un générateur local avec graine. |
-| Exactitude | Aucun `f32`, `f64`, epsilon, racine numérique, hash map ordonnée implicitement ou tirage caché dans le chemin de verdict. |
-| Reproductibilité | Graine, version, manifeste, limites, ordre canonique et empreinte sont présents dans chaque rapport. |
-| Déterminisme | Les conteneurs de sortie sont ordonnés ; le premier contre-exemple est défini par ordre lexicographique. |
-| Pureté Rust | `#![forbid(unsafe_code)]`, aucune FFI, aucun backend BLAS, aucune E/S réseau. |
-| Transparence | Les hypothèses, contrôles négatifs, limites de couverture et échecs de preuve sont rapportés, jamais supprimés. |
-| Non-attribution | Les statuts ne comportent pas « nouveau » ; le catalogue connu est consulté avant tout candidat. |
+| Authorized research only | No API accepts addresses, public keys, SEC 1 encodings, network endpoints, or blockchain data. |
+| Local instances | All curves come from validated toy parameters or a local seed-based generator. |
+| Exactness | No `f32`, `f64`, epsilon, numerical root, implicitly ordered hash map, or hidden draw on the verdict path. |
+| Reproducibility | Seed, version, manifest, bounds, canonical order, and fingerprint are present in every report. |
+| Determinism | Output containers are ordered; the first counterexample is defined by lexicographic order. |
+| Rust purity | `#![forbid(unsafe_code)]`, no FFI, no BLAS backend, no network I/O. |
+| Transparency | Assumptions, negative controls, coverage limits, and proof failures are reported, never suppressed. |
+| Non-attribution | Statuses do not include "new"; the known catalog is consulted before any candidate. |
 
-## Feuille de route
+## Roadmap
 
-### Phase 0 — Audit et contrat de recherche
+### Phase 0 — Audit and research contract
 
-Terminer ce document, garder le dépôt sans changement de production, faire relire le périmètre
-et le catalogue. Critère de sortie : accord sur les types d’entrée interdits et les portes G0–G6.
+Finish this document, keep the repository without production changes, have the scope
+and the catalog reviewed. Exit criterion: agreement on the forbidden input types and the G0–G6 gates.
 
-### Phase 1 — Noyau exact minimal
+### Phase 1 — Minimal exact kernel
 
-Créer le crate, l’ajouter au workspace, implémenter `ToyPrime`, `Fp`, `ToyCurve`,
-`ToyPoint`, énumération et ordres, avec références croisées contre `scirust-modalg`.
-Critère de sortie : lois de groupe et corpus `ExhaustiveSmall` passent sans flottants.
+Create the crate, add it to the workspace, implement `ToyPrime`, `Fp`, `ToyCurve`,
+`ToyPoint`, enumeration, and orders, with cross-references against `scirust-modalg`.
+Exit criterion: group laws and the `ExhaustiveSmall` corpus pass without floating point.
 
-### Phase 2 — Harnais expérimental
+### Phase 2 — Experimental harness
 
-Ajouter manifeste canonique, corpus local, `SplitMix64` à graine explicite, rapport stable,
-empreinte et premier contre-exemple. Critère de sortie : deux exécutions identiques produisent
-des octets identiques.
+Add canonical manifest, local corpus, `SplitMix64` with explicit seed, stable report,
+fingerprint, and first counterexample. Exit criterion: two identical executions produce
+identical bytes.
 
-### Phase 3 — Catalogue et contrôles
+### Phase 3 — Catalog and controls
 
-Implémenter les règles de reconnaissance de négation, \(j=0\), racines cubiques, changements de
-coordonnées, artefacts d’encodage et GLV connu. Ajouter les contrôles négatifs. Critère de sortie :
-chaque contrôle est classé correctement.
+Implement the recognition rules for negation, \(j=0\), cube roots, coordinate
+changes, encoding artifacts, and known GLV. Add the negative controls. Exit criterion:
+each control is classified correctly.
 
-### Phase 4 — Génération de candidats et falsification
+### Phase 4 — Candidate generation and falsification
 
-Ajouter une grammaire finie typée, une recherche exhaustive à budget fixe, les partitions
-d’apprentissage/validation et la montée en taille. Critère de sortie : aucun candidat ne peut
-éviter G2–G6.
+Add a typed finite grammar, exhaustive search with a fixed budget, the training/validation
+partitions, and the scale-up. Exit criterion: no candidate can
+avoid G2–G6.
 
-### Phase 5 — Justification et revue
+### Phase 5 — Justification and review
 
-Ajouter les certificats/identités exacts faisables avec `modalg::poly`, une exportation de
-rapport lisible et une procédure de revue de littérature humaine. Critère de sortie : les
-rapports séparent formellement preuve, contre-exemple, propriété connue et hypothèse.
+Add the exact certificates/identities feasible with `modalg::poly`, a readable report
+export, and a human literature review procedure. Exit criterion:
+reports formally separate proof, counterexample, known property, and hypothesis.
 
-### Phase 6 — Exécution et rejeu locaux
+### Phase 6 — Local execution and replay
 
-Ajouter une frontière d’exécution sur `SearchPlan`, un reçu canonique complet et un rejeu
-strict qui détecte toute divergence. Aucun décodeur de données externes n’est ajouté. Critère
-de sortie : les mêmes plan et version produisent les mêmes octets, et toute altération du reçu
-est détectée. La spécification détaillée est
+Add an execution boundary over `SearchPlan`, a complete canonical receipt, and a strict replay
+that detects any divergence. No external data decoder is added. Exit
+criterion: the same plan and version produce the same bytes, and any tampering with the receipt
+is detected. The detailed specification is
 [`SCIRUST_ELLIPTIC_DISCOVERY_EXECUTION_REPLAY_V0_1.md`](SCIRUST_ELLIPTIC_DISCOVERY_EXECUTION_REPLAY_V0_1.md).
 
-### Phase 7 — Durcissement des bornes et des contrôles
+### Phase 7 — Hardening of bounds and controls
 
-Faire respecter opérationnellement le budget de falsification, borner la mémoire de génération
-par le budget de candidats, normaliser les symétries syntaxiques connues et exercer le contrôle
-conditionnel \(j=0\) avec une racine cubique valide. Critère de sortie : aucune relation n'est
-évaluée au-delà de son budget, les quatre variantes de relation sont atteignables et les lois
-connues ne dépendent pas de l'ordre de construction de leur arbre. La spécification détaillée
-est [`SCIRUST_ELLIPTIC_DISCOVERY_HARDENING_V0_1.md`](SCIRUST_ELLIPTIC_DISCOVERY_HARDENING_V0_1.md).
+Operationally enforce the falsification budget, bound the generation memory
+by the candidate budget, normalize the known syntactic symmetries, and exercise the conditional
+\(j=0\) control with a valid cube root. Exit criterion: no relation is
+evaluated beyond its budget, the four relation variants are reachable, and the known
+laws do not depend on the construction order of their tree. The detailed specification
+is [`SCIRUST_ELLIPTIC_DISCOVERY_HARDENING_V0_1.md`](SCIRUST_ELLIPTIC_DISCOVERY_HARDENING_V0_1.md).
 
-### Phase 8 — Orchestration de campagne locale
+### Phase 8 — Local campaign orchestration
 
-Relier les contrôles obligatoires, la recherche bornée, le reçu, les tentatives
-de justification et les revues humaines en attente dans un artefact canonique
-unique. Ajouter un rapport Markdown stable et un rejeu strict de la campagne
-complète. Critère de sortie : une campagne exécute les six contrôles dans
-l'ordre, conserve toutes les évaluations et détecte toute divergence sans
-jamais fabriquer une décision de revue ou un statut de nouveauté. La
-spécification détaillée est
+Connect the mandatory controls, the bounded search, the receipt, the justification
+attempts, and the pending human reviews in a single canonical artifact.
+Add a stable Markdown report and a strict replay of the complete campaign.
+Exit criterion: a campaign executes the six controls in
+order, keeps all evaluations, and detects any divergence without
+ever fabricating a review decision or a novelty status. The
+detailed specification is
 [`SCIRUST_ELLIPTIC_DISCOVERY_CAMPAIGN_ORCHESTRATION_V0_1.md`](SCIRUST_ELLIPTIC_DISCOVERY_CAMPAIGN_ORCHESTRATION_V0_1.md).
 
-## Validations à appliquer
+## Validations to apply
 
-Après l’ajout du crate, exécuter au minimum :
+After adding the crate, run at minimum:
 
     cargo +nightly-2026-07-02 fmt --all -- --check
     cargo +nightly-2026-07-02 clippy -p scirust-elliptic-discovery --all-targets --locked -- -D warnings
@@ -405,18 +404,18 @@ Après l’ajout du crate, exécuter au minimum :
     cargo +1.89.0 check -p scirust-elliptic-discovery --locked
     git diff --check
 
-Pour le présent livrable documentaire, la validation applicable est `git diff --check` et une
-inspection du diff. Dans l’environnement d’audit actuel, `cargo` et `rustup` ne sont pas
-installés dans `PATH`; aucune validation Cargo ne doit donc être présentée comme exécutée ou
-réussie.
+For the present documentary deliverable, the applicable validation is `git diff --check` and an
+inspection of the diff. In the current audit environment, `cargo` and `rustup` are not
+installed in `PATH`; therefore, no Cargo validation may be presented as executed or
+successful.
 
-## Références
+## References
 
-- [Documentation de contribution du workspace](../../CONTRIBUTING.md)
-- [CI du workspace](../../.github/workflows/ci.yml)
-- [Spécification HyperCrypto v0.1](../../scirust-hypercrypto/docs/research/SCIRUST_HYPERCRYPTO_SPEC_V0_1.md)
-- [Rapport de falsification HyperCrypto phase 1](../../scirust-hypercrypto/docs/research/SCIRUST_HYPERCRYPTO_FALSIFICATION_PHASE1.md)
+- [Workspace contribution documentation](../../CONTRIBUTING.md)
+- [Workspace CI](../../.github/workflows/ci.yml)
+- [HyperCrypto v0.1 specification](../../scirust-hypercrypto/docs/research/SCIRUST_HYPERCRYPTO_SPEC_V0_1.md)
+- [HyperCrypto phase 1 falsification report](../../scirust-hypercrypto/docs/research/SCIRUST_HYPERCRYPTO_FALSIFICATION_PHASE1.md)
 - [J. H. Silverman, The Arithmetic of Elliptic Curves](https://www.math.brown.edu/johsilve/AECHome.html)
-- [R. Gallant, R. Lambert et S. Vanstone, Faster Point Multiplication on Elliptic Curves with Efficient Endomorphisms](https://link.springer.com/chapter/10.1007/3-540-44647-8_11)
+- [R. Gallant, R. Lambert and S. Vanstone, Faster Point Multiplication on Elliptic Curves with Efficient Endomorphisms](https://link.springer.com/chapter/10.1007/3-540-44647-8_11)
 - [Standards for Efficient Cryptography, SEC 1 v2](https://www.secg.org/sec1-v2.pdf)
 - [SageMath — Elliptic curves over finite fields](https://doc.sagemath.org/html/en/reference/arithmetic_curves/sage/schemes/elliptic_curves/ell_finite_field.html)

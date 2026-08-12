@@ -184,7 +184,7 @@ mod tests {
 
     #[test]
     fn batched_multi_head_attention_scores() {
-        // The Documentation.md example: (b,h,i,d),(b,h,j,d) -> (b,h,i,j)
+        // The Documentation_EN.md example: (b,h,i,d),(b,h,j,d) -> (b,h,i,j)
         // Tiny case b=h=1, i=j=1, d=2: scores = Q·Kᵀ over d.
         let q = TensorND::new(vec![1.0, 2.0], vec![1, 1, 1, 2]);
         let k = TensorND::new(vec![3.0, 4.0], vec![1, 1, 1, 2]);

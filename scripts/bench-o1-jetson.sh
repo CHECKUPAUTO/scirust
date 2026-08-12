@@ -40,7 +40,7 @@
 #   run-N.md       sortie brute du banc (tableau Markdown, empreintes)
 #   tests.txt      résultats Q3 (NEON) et R4 (fingerprint multi-thread)
 # Coller le tableau médian dans paper/PAPER_PLAN.md §4 (ligne O1, volet
-# Jetson) et consigner une ligne dans LIVESTATE.md.
+# Jetson) et consigner une ligne dans docs/archive/LIVESTATE.md.
 #
 # CODE DE SORTIE : 0 = banc exécuté et tests natifs verts ; ≠ 0 sinon.
 # =============================================================================
@@ -159,5 +159,5 @@ fi
 echo
 echo "Bundle d'évidence : $OUT"
 echo "À reporter : tableau médian de run-*.md → paper/PAPER_PLAN.md §4 (O1,"
-echo "volet Jetson) + une ligne LIVESTATE.md (date, commit, modèle, chiffres)."
+echo "volet Jetson) + une ligne docs/archive/LIVESTATE.md (date, commit, modèle, chiffres)."
 exit "$status"
