@@ -1,11 +1,10 @@
-name: FLAT M28 Thor release evidence
+name: FLAT kernel generations Thor evidence
 
 on:
   pull_request:
     branches: [master]
     paths:
-      - "scirust-gpu/**"
-      - "docs/FLAT_M28_SCIRUST_BASELINE.md"
+      - ".github/scripts/prepare_flat_kernel_generations_candidate.py"
       - ".github/workflows/flat-m28-thor-release-evidence.yml"
   workflow_dispatch:
 
@@ -13,12 +12,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: flat-m28-thor-${{ github.event.pull_request.number || github.ref }}
+  group: flat-kernel-generations-thor-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  m28-thor:
-    name: SciRust multi-dispatch vs FLAT on physical Thor
+  generations-thor:
+    name: FLAT Q4 generations on physical Thor
     if: >
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
@@ -29,20 +28,22 @@ jobs:
       RUSTFLAGS: "-D warnings"
       SCIRUST_THOR_GPU_LOCK: /tmp/scirust-thor-gpu.lock
       SCIRUST_SOURCE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
-      SCIRUST_M28_WARMUPS: "3"
-      SCIRUST_M28_REPEATS: "9"
+      FLAT_CANDIDATE_REV: "f8e1be6a073596b446d298910eb04c122c7e29b0"
+      FLAT_M28_GENERATIONS_WARMUP: "3"
+      FLAT_M28_GENERATIONS_ITERATIONS: "12"
       WGPU_BACKEND: vulkan
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - name: Verify exact source revision
+      - name: Verify exact evidence source
         shell: bash
         run: |
           set -euo pipefail
           actual="$(git rev-parse HEAD)"
           echo "source_revision=$actual"
           test "$actual" = "$SCIRUST_SOURCE_REVISION"
+          sha256sum .github/scripts/prepare_flat_kernel_generations_candidate.py
       - name: Prepare executable temporary directory
         shell: bash
         run: |
@@ -54,26 +55,28 @@ jobs:
         with:
           toolchain: nightly-2026-07-02
           components: rustfmt, clippy
-      - name: Format
-        run: rustup run nightly-2026-07-02 cargo fmt --all -- --check
-      - name: Build M28 benchmark
+      - name: Materialize exact FLAT generation candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/prepare_flat_kernel_generations_candidate.py
+          grep -F "rev = \"$FLAT_CANDIDATE_REV\"" scirust-gpu/Cargo.toml
+          rustup run nightly-2026-07-02 cargo update -p flat-attention --precise "$FLAT_CANDIDATE_REV"
+          rustup run nightly-2026-07-02 cargo fmt --all
+          git diff --check
+          echo "candidate_flat_revision=$FLAT_CANDIDATE_REV"
+      - name: Build generation benchmark
         run: >-
           rustup run nightly-2026-07-02 cargo build --release --locked -p scirust-gpu
-          --features flat-attention --example flat_m28_naive_vs_fused
-      - name: Physical Thor paired benchmark
+          --features flat-attention --example flat_kernel_generations_candidate
+      - name: Physical Thor generation ranking
         shell: bash
         timeout-minutes: 330
         run: |
           set -euo pipefail
           command -v flock >/dev/null
-          if ! command -v nvidia-smi >/dev/null 2>&1; then
-            echo "::error::nvidia-smi is required to qualify the physical Thor state"
-            exit 1
-          fi
-          if ! command -v vulkaninfo >/dev/null 2>&1; then
-            echo "::error::vulkaninfo is required to qualify the physical Thor Vulkan adapter"
-            exit 1
-          fi
+          command -v nvidia-smi >/dev/null
+          command -v vulkaninfo >/dev/null
 
           exec 9>"$SCIRUST_THOR_GPU_LOCK"
           flock -x 9
@@ -102,11 +105,11 @@ jobs:
           deadline=$((SECONDS + 18000))
           while true; do
             if ! active="$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null)"; then
-              echo "::error::M28 cannot verify Thor compute occupancy"
+              echo "::error::cannot verify Thor compute occupancy"
               exit 1
             fi
             if [[ -z "${active//[[:space:]]/}" ]]; then
-              echo "Thor is idle and reserved; proceeding with M28 qualification."
+              echo "Thor is idle and reserved; proceeding with generation ranking."
               break
             fi
 
@@ -130,37 +133,36 @@ jobs:
             done <<< "$active"
 
             if [[ "$managed_training" != true ]]; then
-              echo "::error::Unknown GPU compute activity is active while M28 owns the SciRust reservation:"
+              echo "::error::Unknown GPU compute activity is active while generation ranking owns the SciRust reservation:"
               printf '%s\n' "$active"
               exit 1
             fi
             if (( SECONDS >= deadline )); then
-              echo "::error::Managed production training still owns the Thor after the five-hour M28 reservation window; benchmark was not run concurrently or fabricated:"
+              echo "::error::Managed production training still owns Thor after the five-hour reservation window; ranking was not run concurrently or fabricated:"
               printf '%s\n' "$active"
               exit 1
             fi
-
-            echo "Managed production training owns the Thor; M28 keeps the next-device reservation and waits without interruption."
+            echo "Managed production training owns Thor; generation ranking reserves the next idle boundary."
             sleep 60
           done
 
           echo "source_revision=$(git rev-parse HEAD)"
-          echo "benchmark_scope=resident_wgpu_same_context_upload_readback_excluded"
-          echo "warmups=$SCIRUST_M28_WARMUPS repeats=$SCIRUST_M28_REPEATS"
+          echo "candidate_flat_revision=$FLAT_CANDIDATE_REV"
+          echo "timing_scope=public_forward_including_upload_dispatch_readback"
 
           for seq in 128 512; do
             for dim in 64 128; do
-              echo "=== geometry seq_len=$seq head_dim=$dim ==="
-              out="$RUNNER_TEMP/flat-m28-thor-${seq}-${dim}.csv"
-              SCIRUST_M28_SEQ_LEN="$seq" \
-              SCIRUST_M28_HEAD_DIM="$dim" \
-              rustup run nightly-2026-07-02 cargo run --release --locked -p scirust-gpu \
-                --features flat-attention --example flat_m28_naive_vs_fused \
+              echo "=== geometry seq_len=$seq head_dim=$dim causal=true ==="
+              out="$RUNNER_TEMP/flat-generations-${seq}-${dim}.csv"
+              FLAT_M28_GENERATIONS_SEQ_LEN="$seq" \
+              FLAT_M28_GENERATIONS_HEAD_DIM="$dim" \
+              rustup run nightly-2026-07-02 cargo run --quiet --release --locked -p scirust-gpu \
+                --features flat-attention --example flat_kernel_generations_candidate \
                 | tee "$out"
-              grep -F "NVIDIA Tegra NVIDIA Thor,Vulkan," "$out" >/dev/null || {
-                echo "::error::M28 benchmark did not execute through Vulkan on the physical Thor WGPU adapter"
-                exit 1
-              }
+              test "$(wc -l < "$out")" -eq 5
+              grep -F "q4_portable,Q4Portable,NVIDIA Tegra NVIDIA Thor,Vulkan," "$out" >/dev/null
+              grep -F "q4_vec4_portable,Q4Vec4Portable,NVIDIA Tegra NVIDIA Thor,Vulkan," "$out" >/dev/null
+              grep -F "q4_vec4_double_buffered,Q4Vec4DoubleBuffered,NVIDIA Tegra NVIDIA Thor,Vulkan," "$out" >/dev/null
               grep -F ',none' "$out" >/dev/null
             done
           done
