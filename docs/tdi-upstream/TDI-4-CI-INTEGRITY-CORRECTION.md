@@ -1,55 +1,55 @@
-# TDI-4 — Correction d’intégrité CI avant évaluation
+# TDI-4 — CI integrity correction before evaluation
 
-## Statut
+## Status
 
-Cette correction est intervenue avant toute exécution complète de TDI-4
-et avant toute production de métrique ou de verdict TDI-4.
+This correction occurred before any complete TDI-4 execution and before any
+production of TDI-4 metric or verdict.
 
-## Échec observé
+## Observed failure
 
-Le gel initial TDI-4, au commit :
+The initial TDI-4 freeze, at commit:
 
 `30916731078e9fe04f35d30b5388d04f9ed12d65`
 
-a échoué dans le job CI `Preregistration integrity`.
+failed in the CI job `Preregistration integrity`.
 
-Le manifeste scientifique immuable TDI-3 signalait uniquement :
+The immutable TDI-3 scientific manifest reported only:
 
 `tdi-core/src/signature.rs: FAILED`
 
 ## Cause
 
-L’implémentation initiale de TDI-4 avait ajouté une méthode à
+The initial TDI-4 implementation had added a method to
 `tdi-core/src/signature.rs`.
 
-Ce fichier appartient au gel scientifique TDI-3. Une expérience ultérieure
-ne doit pas modifier un fichier couvert par ce manifeste historique.
+This file belongs to the TDI-3 scientific freeze. A subsequent experiment
+must not modify a file covered by this historical manifest.
 
 ## Correction
 
-`tdi-core/src/signature.rs` a été restauré exactement dans son état gelé
-par TDI-3.
+`tdi-core/src/signature.rs` was restored exactly to its state frozen by
+TDI-3.
 
-Le calcul de la cible conditionnelle TDI-4 est désormais localisé dans
-l’évaluateur TDI-4 :
+The computation of the TDI-4 conditional target is now located in the TDI-4
+evaluator:
 
-- le numérateur exact du déficit est calculé avec `BigUint` ;
-- le logarithme du numérateur et du dénominateur est déterminé à partir de
-  leur longueur binaire et de leurs 53 bits significatifs supérieurs ;
-- la cible reste `U = -log₂(1 - O₆)` ;
-- aucun arrondi préalable de `O₆` vers `1.0` n’est utilisé.
+- the exact numerator of the deficit is computed with `BigUint`;
+- the logarithm of the numerator and of the denominator is determined from
+  their binary length and their 53 leading significant bits;
+- the target remains `U = -log₂(1 - O₆)`;
+- no prior rounding of `O₆` toward `1.0` is used.
 
 ## Invariants
 
-Cette correction ne modifie pas :
+This correction does not modify:
 
-- le préenregistrement ;
-- les populations et leurs graines ;
-- les horizons ;
-- les variables explicatives ;
-- les modèles ;
-- `lambda` ;
-- le bootstrap ;
-- les critères TDI-4A et TDI-4B.
+- the preregistration;
+- the populations and their seeds;
+- the horizons;
+- the explanatory variables;
+- the models;
+- `lambda`;
+- the bootstrap;
+- the TDI-4A and TDI-4B criteria.
 
-Aucun résultat TDI-4 n’a été observé avant cette correction.
+No TDI-4 result was observed before this correction.

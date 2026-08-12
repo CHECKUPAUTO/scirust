@@ -1,296 +1,292 @@
-# TDI-3 — Préenregistrement du transfert inter-largeurs
+# TDI-3 — Preregistration of the cross-width transfer
 
-Date de gel : 12 juillet 2026.
+Freeze date: 12 July 2026.
 
 ## 1. Motivation
 
-TDI-2 a établi, sur des systèmes de largeur 3, qu’un profil de
-recouvrement distributionnel observé jusqu’à l’horizon 2 apporte une
-information prédictive supplémentaire par rapport à une baseline
-entropique et topologique appariée.
+TDI-2 established, on width-3 systems, that a distributional recovery
+profile observed up to horizon 2 provides additional predictive information
+relative to a matched entropic and topological baseline.
 
-Sur le holdout de largeur 4, TDI-2 a conservé un gain relatif de MSE, mais
-les prédictions absolues étaient très mal calibrées :
+On the width-4 holdout, TDI-2 retained a relative MSE gain, but the absolute
+predictions were very poorly calibrated:
 
-- R² fortement négatif ;
-- corrélation de rang négative ;
-- erreurs absolues élevées.
+- strongly negative R²;
+- negative rank correlation;
+- high absolute errors.
 
-TDI-3 teste explicitement si un apprentissage multi-largeurs et des
-caractéristiques normalisées permettent une généralisation inter-largeurs
-sans supprimer le signal incrémental TDI.
+TDI-3 explicitly tests whether multi-width training and normalized features
+enable cross-width generalization without removing the incremental TDI
+signal.
 
-## 2. Questions principales
+## 2. Main questions
 
-### TDI-3A — Généralisation multi-largeurs connue
+### TDI-3A — Known multi-width generalization
 
-Sur des systèmes inédits de largeurs 3 et 4, le challenger TDI améliore-t-il
-la prédiction du recouvrement à l’horizon 6 par rapport à une baseline
-appariée utilisant le même horizon d’observation ?
+On unseen systems of widths 3 and 4, does the TDI challenger improve the
+prediction of recovery at horizon 6 relative to a matched baseline using the
+same observation horizon?
 
-### TDI-3B — Transfert vers une largeur jamais observée
+### TDI-3B — Transfer to a never-observed width
 
-Un modèle entraîné uniquement sur les largeurs 3 et 4 conserve-t-il :
+Does a model trained only on widths 3 and 4 retain:
 
-- un gain prédictif relatif ;
-- une corrélation de rang positive ;
-- une validité prédictive absolue ;
+- a relative predictive gain;
+- a positive rank correlation;
+- absolute predictive validity;
 
-sur des systèmes de largeur 5 jamais utilisés pendant l’apprentissage ?
+on width-5 systems never used during training?
 
-## 3. Génération des systèmes
+## 3. System generation
 
-Les systèmes suivent le protocole de TDI-2 :
+The systems follow the TDI-2 protocol:
 
-- systèmes finis à transitions branchantes ;
-- ensemble non vide de successeurs pour chaque état ;
-- choix uniforme entre les successeurs distincts ;
-- génération déterministe par `SplitMix64` ;
-- état de référence nul ;
-- perturbation par inversion du bit `width - 1` ;
-- action dynamique `Noop`.
+- finite systems with branching transitions;
+- non-empty set of successors for each state;
+- uniform choice among the distinct successors;
+- deterministic generation by `SplitMix64`;
+- zero reference state;
+- perturbation by flipping bit `width - 1`;
+- dynamical action `Noop`.
 
-Les propagations distributionnelles utilisent des rationnels exacts.
-La conversion en `f64` intervient uniquement pour l’apprentissage et les
-métriques.
+Distributional propagations use exact rationals.
+Conversion to `f64` occurs only for training and metrics.
 
-## 4. Populations gelées
+## 4. Frozen populations
 
-### Apprentissage
+### Training
 
-- largeur 3 : 8 000 systèmes acceptés ;
-- largeur 4 : 8 000 systèmes acceptés ;
-- total : 16 000 systèmes ;
-- largeur 3 : graines à partir de `0` ;
-- largeur 4 : graines à partir de `10_000_000`.
+- width 3: 8,000 accepted systems;
+- width 4: 8,000 accepted systems;
+- total: 16,000 systems;
+- width 3: seeds starting from `0`;
+- width 4: seeds starting from `10_000_000`.
 
-### Holdout largeur 3
+### Width-3 holdout
 
-- 4 000 systèmes acceptés ;
-- graines à partir de `1_000_000`.
+- 4,000 accepted systems;
+- seeds starting from `1_000_000`.
 
-### Holdout largeur 4
+### Width-4 holdout
 
-- 4 000 systèmes acceptés ;
-- graines à partir de `11_000_000`.
+- 4,000 accepted systems;
+- seeds starting from `11_000_000`.
 
-### Holdout hors distribution largeur 5
+### Out-of-distribution width-5 holdout
 
-- 4 000 systèmes acceptés ;
-- graines à partir de `20_000_000`;
-- aucune donnée de largeur 5 ne peut intervenir dans la conception,
-  l’apprentissage, la standardisation ou la sélection du modèle.
+- 4,000 accepted systems;
+- seeds starting from `20_000_000`;
+- no width-5 data may intervene in the design, training, standardization or
+  selection of the model.
 
-Les graines sont consommées séquentiellement jusqu’à obtention du nombre
-de systèmes acceptés prévu.
+Seeds are consumed sequentially until the planned number of accepted systems
+is obtained.
 
-## 5. Horizons et exclusion
+## 5. Horizons and exclusion
 
-- horizon d’observation : 2 ;
-- horizon cible : 6 ;
-- cible : recouvrement exact `O6` entre les distributions de référence et
-  perturbée.
+- observation horizon: 2;
+- target horizon: 6;
+- target: exact recovery `O6` between the reference and perturbed
+  distributions.
 
-Les systèmes pour lesquels `O2 = 1` sont exclus, car leur recouvrement futur
-est déjà déterminé par la propriété de Markov.
+Systems for which `O2 = 1` are excluded, because their future recovery is
+already determined by the Markov property.
 
-Aucune autre exclusion n’est autorisée.
+No other exclusion is allowed.
 
-Le nombre de systèmes examinés, acceptés et exclus doit être publié pour
-chaque largeur.
+The number of examined, accepted and excluded systems must be published for
+each width.
 
-## 6. Cible
+## 6. Target
 
-La cible continue est :
+The continuous target is:
 
-O6 = somme sur x de min(P6(x), Q6(x)).
+O6 = sum over x of min(P6(x), Q6(x)).
 
-Elle appartient à l’intervalle `[0, 1]` et correspond à `1 - TV(P6,Q6)`.
+It belongs to the interval `[0, 1]` and corresponds to `1 - TV(P6,Q6)`.
 
-## 7. Baseline TDI-3 appariée
+## 7. Matched TDI-3 baseline
 
-La baseline ne peut utiliser que des informations disponibles jusqu’à
-l’horizon 2.
+The baseline may only use information available up to horizon 2.
 
-Elle comprend, pour les trajectoires de référence et perturbées :
+It comprises, for the reference and perturbed trajectories:
 
-- entropies aux profondeurs 1 et 2 ;
-- fractions d’états accessibles aux profondeurs 1 et 2 ;
-- logarithmes des nombres de chemins aux profondeurs 1 et 2 ;
-- largeur du système comme caractéristique partagée.
+- entropies at depths 1 and 2;
+- fractions of reachable states at depths 1 and 2;
+- logarithms of the numbers of paths at depths 1 and 2;
+- system width as a shared feature.
 
-Normalisations gelées :
+Frozen normalizations:
 
-- entropie divisée par `ln(2^width)` lorsque le dénominateur est non nul ;
-- nombre d’états accessibles divisé par `2^width` ;
-- nombre de chemins transformé par `ln(1 + count)` ;
-- largeur représentée par sa valeur entière convertie en `f64`.
+- entropy divided by `ln(2^width)` when the denominator is non-zero;
+- number of reachable states divided by `2^width`;
+- number of paths transformed by `ln(1 + count)`;
+- width represented by its integer value converted to `f64`.
 
-La baseline ne peut utiliser :
+The baseline may not use:
 
-- aucun recouvrement entre distributions ;
-- aucune donnée postérieure à l’horizon 2 ;
-- aucune caractéristique orbitale calculée sur le futur complet ;
-- aucune information dérivée de la cible.
+- any overlap between distributions;
+- any data beyond horizon 2;
+- any orbital feature computed on the full future;
+- any information derived from the target.
 
-## 8. Caractéristiques TDI-3
+## 8. TDI-3 features
 
-Le challenger utilise toutes les caractéristiques de la baseline et ajoute :
+The challenger uses all the baseline features and adds:
 
-- recouvrement exact `O1` ;
-- recouvrement exact `O2` ;
+- exact recovery `O1`;
+- exact recovery `O2`;
 - variation `O2 - O1`.
 
-Ces trois caractéristiques sont déjà sans dimension et ne dépendent pas
-directement du nombre d’états.
+These three features are already dimensionless and do not depend directly on
+the number of states.
 
-La largeur est disponible de manière identique pour la baseline et le
-challenger.
+The width is available identically to the baseline and the challenger.
 
-## 9. Modèle prédictif
+## 9. Predictive model
 
-Les deux modèles utilisent exactement le même algorithme :
+Both models use exactly the same algorithm:
 
-- régression ridge déterministe ;
-- standardisation calculée exclusivement sur l’ensemble d’apprentissage ;
-- terme constant non pénalisé ;
-- coefficient de régularisation fixé à `lambda = 1` ;
-- équations normales résolues de manière déterministe ;
-- prédictions bornées dans `[0, 1]`.
+- deterministic ridge regression;
+- standardization computed exclusively on the training set;
+- unpenalized constant term;
+- regularization coefficient fixed at `lambda = 1`;
+- normal equations solved deterministically;
+- predictions bounded in `[0, 1]`.
 
-Aucun hyperparamètre ne peut être ajusté après calcul des holdouts.
+No hyperparameter may be tuned after computing the holdouts.
 
-Aucune calibration post-hoc ne sera ajustée sur les holdouts.
+No post-hoc calibration will be fitted on the holdouts.
 
-## 10. Métriques
+## 10. Metrics
 
-Pour chaque largeur et pour le holdout combiné des largeurs 3 et 4 :
+For each width and for the combined holdout of widths 3 and 4:
 
-- MSE ;
-- MAE ;
-- R² ;
-- corrélation de rang de Spearman ;
-- biais moyen : moyenne prédiction moins moyenne cible ;
-- calibration dans le large : moyenne prédite et moyenne observée ;
-- pente et intercept de calibration obtenus en régressant la cible sur la
-  prédiction.
+- MSE;
+- MAE;
+- R²;
+- Spearman rank correlation;
+- mean bias: mean prediction minus mean target;
+- calibration in the large: mean predicted and mean observed;
+- calibration slope and intercept obtained by regressing the target on the
+  prediction.
 
-Les métriques sont calculées séparément pour la baseline et le challenger.
+The metrics are computed separately for the baseline and the challenger.
 
-## 11. Incertitude
+## 11. Uncertainty
 
-Un bootstrap apparié déterministe de 2 000 réplications est appliqué :
+A deterministic paired bootstrap of 2,000 replications is applied:
 
-- au holdout largeur 3 ;
-- au holdout largeur 4 ;
-- au holdout combiné largeurs 3 et 4 ;
-- au holdout hors distribution largeur 5.
+- to the width-3 holdout;
+- to the width-4 holdout;
+- to the combined width-3 and width-4 holdout;
+- to the out-of-distribution width-5 holdout.
 
-Il mesure :
+It measures:
 
-- `MSE_baseline - MSE_TDI` ;
+- `MSE_baseline - MSE_TDI`;
 - `MAE_baseline - MAE_TDI`.
 
-Graine bootstrap :
+Bootstrap seed:
 
 `0x5444_4933_494E_5445`.
 
-Les intervalles utilisent les quantiles empiriques 2,5 % et 97,5 %.
+The intervals use the empirical 2.5 % and 97.5 % quantiles.
 
-## 12. Critère principal TDI-3A
+## 12. Primary criterion TDI-3A
 
-TDI-3A est déclaré réussi uniquement si les conditions suivantes sont
-toutes satisfaites sur le holdout combiné des largeurs 3 et 4 :
+TDI-3A is declared successful only if the following conditions are all
+satisfied on the combined width-3 and width-4 holdout:
 
-1. réduction relative de MSE supérieure ou égale à 5 % ;
-2. borne inférieure de l’IC 95 % de l’amélioration MSE strictement positive ;
-3. borne inférieure de l’IC 95 % de l’amélioration MAE strictement positive ;
-4. amélioration MSE observée strictement positive séparément en largeur 3 ;
-5. amélioration MSE observée strictement positive séparément en largeur 4 ;
-6. Spearman du challenger strictement positif séparément en largeurs 3 et 4 ;
-7. R² du challenger strictement positif séparément en largeurs 3 et 4.
+1. relative MSE reduction greater than or equal to 5 %;
+2. lower bound of the 95 % CI of the MSE improvement strictly positive;
+3. lower bound of the 95 % CI of the MAE improvement strictly positive;
+4. observed MSE improvement strictly positive separately at width 3;
+5. observed MSE improvement strictly positive separately at width 4;
+6. challenger Spearman strictly positive separately at widths 3 and 4;
+7. challenger R² strictly positive separately at widths 3 and 4.
 
-## 13. Critère de transfert TDI-3B
+## 13. Transfer criterion TDI-3B
 
-TDI-3B est déclaré réussi sur la largeur 5 uniquement si :
+TDI-3B is declared successful at width 5 only if:
 
-1. l’amélioration MSE observée est strictement positive ;
-2. la borne inférieure de l’IC 95 % de l’amélioration MSE est strictement
-   positive ;
-3. la borne inférieure de l’IC 95 % de l’amélioration MAE est strictement
-   positive ;
-4. le R² du challenger est strictement positif ;
-5. le Spearman du challenger est strictement positif ;
-6. la valeur absolue du biais moyen du challenger est inférieure à celle de
-   la baseline.
+1. the observed MSE improvement is strictly positive;
+2. the lower bound of the 95 % CI of the MSE improvement is strictly
+   positive;
+3. the lower bound of the 95 % CI of the MAE improvement is strictly
+   positive;
+4. the challenger R² is strictly positive;
+5. the challenger Spearman is strictly positive;
+6. the absolute value of the challenger mean bias is lower than that of
+   the baseline.
 
-Une réduction relative positive accompagnée d’un R² ou d’un Spearman
-négatif ne sera pas présentée comme une généralisation valide.
+A positive relative reduction accompanied by a negative R² or Spearman will
+not be presented as valid generalization.
 
-## 14. Analyses secondaires
+## 14. Secondary analyses
 
-Seront publiées sans modifier le verdict principal :
+The following will be published without modifying the primary verdict:
 
-- résultats séparés par largeur ;
-- distribution des cibles ;
-- distribution des prédictions ;
-- proportion de prédictions bornées à 0 ou à 1 ;
-- coefficients standardisés des deux modèles ;
-- résultats par déciles de la cible ;
-- résultats par déciles de `O2` ;
-- matrices de corrélation des caractéristiques ;
-- temps d’exécution et nombre de systèmes rejetés.
+- results separated by width;
+- target distribution;
+- prediction distribution;
+- proportion of predictions bounded at 0 or 1;
+- standardized coefficients of both models;
+- results by target deciles;
+- results by `O2` deciles;
+- feature correlation matrices;
+- execution times and number of rejected systems.
 
-## 15. Contrôles logiciels obligatoires
+## 15. Mandatory software controls
 
-Avant l’évaluation finale :
+Before the final evaluation:
 
-- génération déterministe vérifiée par tests ;
-- longueurs exactes des vecteurs de caractéristiques ;
-- absence de données des holdouts dans la standardisation ;
-- absence de chevauchement des plages de graines ;
-- valeurs normalisées finies ;
-- prédictions comprises dans `[0, 1]` ;
-- bootstrap reproductible ;
-- vérification du hash du présent préenregistrement dans la CI.
+- deterministic generation verified by tests;
+- exact lengths of the feature vectors;
+- absence of holdout data in the standardization;
+- absence of overlap of the seed ranges;
+- finite normalized values;
+- predictions within `[0, 1]`;
+- reproducible bootstrap;
+- verification of the hash of this preregistration in the CI.
 
-## 16. Interdictions après gel
+## 16. Prohibitions after freeze
 
-Après création du hash :
+After creation of the hash:
 
-- aucun changement des populations ;
-- aucun changement des graines ;
-- aucun changement des horizons ;
-- aucun changement des caractéristiques ;
-- aucun changement de lambda ;
-- aucun changement des seuils de réussite ;
-- aucun examen des résultats de holdout avant gel complet du code
-  d’évaluation.
+- no change of populations;
+- no change of seeds;
+- no change of horizons;
+- no change of features;
+- no change of lambda;
+- no change of success thresholds;
+- no examination of holdout results before complete freeze of the
+  evaluation code.
 
-Toute correction de bug découverte après le premier calcul doit être
-documentée, testée et accompagnée d’une nouvelle exécution complète.
+Any bug correction discovered after the first computation must be
+documented, tested and accompanied by a new complete execution.
 
-## 17. Interprétation négative
+## 17. Negative interpretation
 
-Le résultat est négatif pour TDI-3A si son critère principal échoue.
+The result is negative for TDI-3A if its primary criterion fails.
 
-Le résultat est négatif pour TDI-3B si au moins une condition du transfert
-largeur 5 échoue.
+The result is negative for TDI-3B if at least one condition of the width-5
+transfer fails.
 
-Les verdicts TDI-3A et TDI-3B sont indépendants et doivent être publiés
-séparément.
+The TDI-3A and TDI-3B verdicts are independent and must be published
+separately.
 
-Un succès TDI-3A associé à un échec TDI-3B signifierait que le signal TDI
-est exploitable dans une population multi-largeurs connue, sans preuve de
-transfert vers une taille nouvelle.
+A TDI-3A success combined with a TDI-3B failure would mean that the TDI
+signal is usable in a known multi-width population, without evidence of
+transfer to a new size.
 
-## 18. Livrables prévus
+## 18. Planned deliverables
 
-- binaire `tdi-interwidth-continuous` ;
-- script `scripts/reproduce-tdi3.sh` ;
-- log déterministe dans `results/` ;
-- rapport `docs/TDI-3-INTERWIDTH-RESULTS.md` ;
-- hash SHA-256 du préenregistrement ;
-- hash SHA-256 du résultat de référence ;
-- tests unitaires et contrôles CI ;
-- release Git dédiée si l’évaluation est terminée.
+- binary `tdi-interwidth-continuous`;
+- script `scripts/reproduce-tdi3.sh`;
+- deterministic log in `results/`;
+- report `docs/TDI-3-INTERWIDTH-RESULTS.md`;
+- SHA-256 hash of the preregistration;
+- SHA-256 hash of the reference result;
+- unit tests and CI controls;
+- dedicated Git release if the evaluation is completed.

@@ -1,157 +1,156 @@
-# TDI-3 — Résultats de l’évaluation inter-width préenregistrée
+# TDI-3 — Results of the preregistered inter-width evaluation
 
-## Statut
+## Status
 
-- **Critère principal TDI-3A : ÉCHOUÉ**
-- **Critère de transfert TDI-3B : ÉCHOUÉ**
+- **Primary criterion TDI-3A: FAILED**
+- **Transfer criterion TDI-3B: FAILED**
 
-Ce résultat est négatif au sens strict des critères préenregistrés. Il ne
-signifie cependant pas que les variables TDI-3 sont dépourvues de signal :
-leurs effets sont positifs sur certaines largeurs et négatifs ou
-insuffisamment généralisables sur d’autres.
+This result is negative in the strict sense of the preregistered criteria.
+It does not however mean that the TDI-3 variables are devoid of signal:
+their effects are positive at some widths and negative or insufficiently
+generalizable at others.
 
-## Identité de l’expérience
+## Identity of the experiment
 
-- branche : `tdi-3-interwidth`
-- commit scientifique gelé :
+- branch: `tdi-3-interwidth`
+- frozen scientific commit:
   `5c7fc5ecae57b8cfa10e6c400f9c03bbd030af4c`
-- date d’exécution : 12 juillet 2026
-- durée : 118 secondes
-- Rust : `rustc 1.97.0`
-- architecture : Linux ARM64, Jetson AGX Thor
-- résultat :
+- execution date: 12 July 2026
+- duration: 118 seconds
+- Rust: `rustc 1.97.0`
+- architecture: Linux ARM64, Jetson AGX Thor
+- result:
   `results/tdi-interwidth-continuous.log`
-- SHA-256 du résultat :
+- SHA-256 of the result:
   `047a33708f691be20308fd51b9a428f98ee041ec1e5809516b5196de15ac7396`
-- SHA-256 de la console :
+- SHA-256 of the console:
   `633d36937f290bbe528e49111b609fff51166cfd5d40ee6cfa69992b53a12179`
 
-L’intégrité du préenregistrement, de l’évaluateur, du code scientifique et
-des dépendances vendoriées a été vérifiée avant l’exécution.
+The integrity of the preregistration, the evaluator, the scientific code and
+the vendored dependencies was verified before execution.
 
 ## Populations
 
-| Population | Systèmes retenus | Systèmes exclus |
+| Population | Retained systems | Excluded systems |
 |---|---:|---:|
-| entraînement width 3 | 8 000 | 42 |
-| holdout width 3 | 4 000 | 24 |
-| entraînement width 4 | 8 000 | 0 |
-| holdout width 4 | 4 000 | 0 |
-| holdout OOD width 5 | 4 000 | 0 |
+| training width 3 | 8,000 | 42 |
+| holdout width 3 | 4,000 | 24 |
+| training width 4 | 8,000 | 0 |
+| holdout width 4 | 4,000 | 0 |
+| OOD holdout width 5 | 4,000 | 0 |
 
-Le modèle a été entraîné sur 16 000 systèmes combinant les largeurs 3 et 4.
-Les critères ont été évalués sur 8 000 systèmes de holdout in-distribution
-et 4 000 systèmes hors distribution de largeur 5.
+The model was trained on 16,000 systems combining widths 3 and 4.
+The criteria were evaluated on 8,000 in-distribution holdout systems and
+4,000 out-of-distribution width-5 systems.
 
-## Résultats width 3
+## Width 3 results
 
-| Mesure | Baseline | Baseline + TDI-3 |
+| Measure | Baseline | Baseline + TDI-3 |
 |---|---:|---:|
 | MSE | 0.002080792 | 0.001789824 |
 | MAE | 0.018622116 | 0.017337850 |
 | R² | 0.305464087 | 0.402584700 |
 | Spearman | 0.591430188 | 0.697022323 |
 
-- réduction relative de MSE : **13.983526 %**
-- amélioration MAE : **0.001284266**
-- IC 95 % de l’amélioration MSE :
+- relative MSE reduction: **13.983526 %**
+- MAE improvement: **0.001284266**
+- 95 % CI of the MSE improvement:
   **[0.000195826, 0.000396785]**
-- IC 95 % de l’amélioration MAE :
+- 95 % CI of the MAE improvement:
   **[0.000928742, 0.001645253]**
 
-Les variables TDI-3 apportent ici une amélioration nette, statistiquement
-stable et accompagnée d’une meilleure qualité de classement.
+The TDI-3 variables here provide a clear improvement, statistically stable
+and accompanied by better ranking quality.
 
-## Résultats width 4
+## Width 4 results
 
-| Mesure | Baseline | Baseline + TDI-3 |
+| Measure | Baseline | Baseline + TDI-3 |
 |---|---:|---:|
 | MSE | 0.000025287 | 0.000039535 |
 | MAE | 0.002883024 | 0.003628335 |
 | R² | -22.139403817 | -35.176751612 |
 | Spearman | 0.018318165 | 0.279302369 |
 
-- réduction relative de MSE : **-56.342626 %**
-- amélioration MAE : **-0.000745311**
-- IC 95 % de l’amélioration MSE :
+- relative MSE reduction: **-56.342626 %**
+- MAE improvement: **-0.000745311**
+- 95 % CI of the MSE improvement:
   **[-0.000017242, -0.000011408]**
-- IC 95 % de l’amélioration MAE :
+- 95 % CI of the MAE improvement:
   **[-0.000870391, -0.000621827]**
 
-Les variables TDI-3 augmentent le signal ordinal, mais détériorent
-significativement les erreurs MSE et MAE. Les intervalles bootstrap sont
-entièrement négatifs : il ne s’agit pas d’une fluctuation d’échantillonnage.
+The TDI-3 variables increase the ordinal signal, but significantly worsen
+the MSE and MAE errors. The bootstrap intervals are entirely negative: this
+is not a sampling fluctuation.
 
-## Holdout combiné widths 3 et 4
+## Combined widths 3 and 4 holdout
 
-| Mesure | Baseline | Baseline + TDI-3 |
+| Measure | Baseline | Baseline + TDI-3 |
 |---|---:|---:|
 | MSE | 0.001053039 | 0.000914679 |
 | MAE | 0.010752570 | 0.010483093 |
 | R² | 0.324153855 | 0.412954221 |
 | Spearman | 0.490755159 | 0.566936416 |
 
-- réduction relative de MSE : **13.139139 %**
-- amélioration MAE : **0.000269478**
-- IC 95 % de l’amélioration MSE :
+- relative MSE reduction: **13.139139 %**
+- MAE improvement: **0.000269478**
+- 95 % CI of the MSE improvement:
   **[0.000091703, 0.000190158]**
-- IC 95 % de l’amélioration MAE :
+- 95 % CI of the MAE improvement:
   **[0.000079518, 0.000467571]**
 
-Le résultat agrégé est favorable et dépasse le seuil de 5 %. Le critère
-TDI-3A échoue néanmoins, car le préenregistrement exigeait également une
-amélioration MSE positive dans chaque largeur. La largeur 4 viole cette
-condition de manière statistiquement nette.
+The aggregated result is favorable and exceeds the 5 % threshold. The
+TDI-3A criterion nevertheless fails, because the preregistration also
+required a positive MSE improvement in each width. Width 4 violates this
+condition in a statistically clear manner.
 
-## Transfert hors distribution width 5
+## Out-of-distribution width 5 transfer
 
-| Mesure | Baseline | Baseline + TDI-3 |
+| Measure | Baseline | Baseline + TDI-3 |
 |---|---:|---:|
 | MSE | 0.000767583 | 0.000483356 |
 | MAE | 0.027293619 | 0.021295341 |
 | R² | -251476.348326980 | -158357.366983186 |
 | Spearman | -0.403040291 | -0.217928974 |
-| biais moyen | -0.027293619 | -0.021295341 |
+| mean bias | -0.027293619 | -0.021295341 |
 
-- réduction relative de MSE : **37.028775 %**
-- amélioration MAE : **0.005998278**
-- IC 95 % de l’amélioration MSE :
+- relative MSE reduction: **37.028775 %**
+- MAE improvement: **0.005998278**
+- 95 % CI of the MSE improvement:
   **[0.000279329, 0.000289017]**
-- IC 95 % de l’amélioration MAE :
+- 95 % CI of the MAE improvement:
   **[0.005897616, 0.006096733]**
 
-TDI-3 réduit fortement les erreurs absolues et le biais sur la largeur 5.
-Cependant, le R² et la corrélation de Spearman restent négatifs. Le modèle
-se rapproche donc davantage de cibles presque toutes voisines de 1, sans
-apprendre correctement leur variation individuelle. Le critère TDI-3B,
-qui exigeait notamment des valeurs positives de R² et de Spearman, échoue.
+TDI-3 strongly reduces absolute errors and bias at width 5. However, the
+R² and the Spearman correlation remain negative. The model therefore gets
+closer to targets almost all near 1, without correctly learning their
+individual variation. The TDI-3B criterion, which notably required positive
+values of R² and Spearman, fails.
 
-## Interprétation scientifique
+## Scientific interpretation
 
-Les résultats indiquent trois faits distincts :
+The results indicate three distinct facts:
 
-1. **Signal réel en width 3.**
-   TDI-3 améliore simultanément l’erreur, le classement et la variance
-   expliquée.
+1. **Real signal at width 3.**
+   TDI-3 simultaneously improves error, ranking and explained variance.
 
-2. **Instabilité entre largeurs 3 et 4.**
-   La largeur 4 présente une cible extrêmement concentrée près de 1. Les
-   variables TDI-3 améliorent Spearman mais détériorent la calibration et
-   les erreurs absolues. Le signal appris n’est donc pas invariant à la
-   largeur sous cette formulation.
+2. **Instability between widths 3 and 4.**
+   Width 4 presents a target extremely concentrated near 1. The TDI-3
+   variables improve Spearman but worsen calibration and absolute errors.
+   The learned signal is therefore not invariant to width under this
+   formulation.
 
-3. **Réduction d’erreur sans généralisation structurelle en width 5.**
-   Le gain MSE de 37 % est réel, mais il provient principalement d’une
-   correction du biais moyen. Les valeurs négatives de R² et Spearman
-   interdisent de conclure à une prédiction structurelle réussie.
+3. **Error reduction without structural generalization at width 5.**
+   The 37 % MSE gain is real, but it comes mainly from a correction of the
+   mean bias. The negative R² and Spearman values rule out concluding a
+   successful structural prediction.
 
 ## Conclusion
 
-TDI-3 ne valide pas l’hypothèse forte d’une représentation inter-width
-universelle selon les critères préenregistrés.
+TDI-3 does not validate the strong hypothesis of a universal inter-width
+representation according to the preregistered criteria.
 
-L’expérience fournit néanmoins une information constructive : les
-caractéristiques TDI-3 contiennent un signal prédictif, mais ce signal est
-sensible à la largeur et à la forte concentration de la cible près de 1.
-Toute étude ultérieure devra faire l’objet d’un nouveau préenregistrement,
-sans modifier rétroactivement le verdict de TDI-3.
+The experiment nevertheless provides constructive information: the TDI-3
+features contain a predictive signal, but this signal is sensitive to width
+and to the strong concentration of the target near 1. Any subsequent study
+must be the subject of a new preregistration, without retroactively
+modifying the TDI-3 verdict.

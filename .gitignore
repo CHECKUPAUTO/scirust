@@ -92,12 +92,12 @@ systemd/turboquant-*.service
 *.cdx.json
 
 # Bundles d'évidence du banc O1 sur Jetson (scripts/bench-o1-jetson.sh) :
-# les chiffres sont reportés dans paper/PAPER_PLAN.md et LIVESTATE.md,
+# les chiffres sont reportés dans paper/PAPER_PLAN.md et docs/archive/LIVESTATE.md,
 # le bundle brut reste sur la machine de mesure.
 bench-o1-jetson-*/
 
 # Bundles d'évidence de la preuve cross-platform portable_f32
-# (scripts/proof-portable-f32.sh) : verdict et SHA reportés dans LIVESTATE.md,
+# (scripts/proof-portable-f32.sh) : verdict et SHA reportés dans docs/archive/LIVESTATE.md,
 # le bundle brut reste sur la machine de mesure.
 proof-portable-f32-*/
 

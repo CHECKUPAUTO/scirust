@@ -1,201 +1,201 @@
-# Extension automobile / Industrie 4.0 pour SciRust
+# Automotive / Industry 4.0 extension for SciRust
 
-## Contexte
-SciRust dispose d'un socle d'inférence déterministe, de détection d'événements sur flux temporels, et de déploiement edge/embarqué (`no_std`, virgule fixe Q16.16, certification Kani). Cependant, l'intégration dans une chaîne de production automobile réelle est bloquée par l'absence de connecteurs industriels, d'extracteurs de features métier, et de modules applicatifs prêts à l'emploi.
+## Context
+SciRust has a deterministic inference foundation, temporal-stream event detection, and edge/embedded deployment (`no_std`, Q16.16 fixed point, Kani certification). However, integration into a real automotive production line is blocked by the lack of industrial connectors, business feature extractors, and ready-to-use application modules.
 
 ---
 
-## Axe 1 — Connecteurs protocoles industriels (`scirust-bridge`)
+## Axis 1 — Industrial protocol connectors (`scirust-bridge`)
 
 ```
-Implémenter un crate `scirust-opcua` :
-  - Client OPC-UA (lecture de nodes temps réel, variables, événements)
-  - Support du modèle de données OPC-UA (NodeId, BrowsePath)
-  - Abonnement aux changements de valeur (subscription) → alimentation d'un EventStream
-  - Sortie : flux normalisé compatible avec scirust-events-core::EventStream
+Implement a crate `scirust-opcua`:
+  - OPC-UA client (real-time node reading, variables, events)
+  - OPC-UA data model support (NodeId, BrowsePath)
+  - Subscription to value changes → feeding an EventStream
+  - Output: normalized stream compatible with scirust-events-core::EventStream
 
-Implémenter un crate `scirust-mqtt` :
-  - Client MQTT v3.1.1 / v5 (SparkPlug B pour Industrie 4.0)
-  - Publication des événements détectés (Event → payload JSON/CBOR)
+Implement a crate `scirust-mqtt`:
+  - MQTT v3.1.1 / v5 client (SparkPlug B for Industry 4.0)
+  - Publication of detected events (Event → JSON/CBOR payload)
   - QoS 1 minimum, keep-alive, last will testament
 
-Optionnel avancé :
+Advanced optional:
   - scirust-modbus (Modbus TCP/RTU)
-  - scirust-can (CAN 2.0 / CAN FD pour bus véhicule)
+  - scirust-can (CAN 2.0 / CAN FD for vehicle bus)
 ```
 
-**Contrainte :** tout en `no_std` compatible avec `scirust-edge` et `scirust-embedded`.
+**Constraint:** everything `no_std` compatible with `scirust-edge` and `scirust-embedded`.
 
 ---
 
-## Axe 2 — Extracteurs de features capteurs (`scirust-signal`)
+## Axis 2 — Sensor feature extractors (`scirust-signal`)
 
 ```
-Implémenter un crate `scirust-signal` (ou `scirust-features`) avec :
+Implement a crate `scirust-signal` (or `scirust-features`) with:
 
-1. Domaine fréquentiel :
-   - FFT (radix-2, fenêtres Hanning/Hamming/Blackman)
-   - Densité spectrale de puissance (PSD)
-   - Cepstre / cepstrum pour diagnostic engrenages
+1. Frequency domain:
+   - FFT (radix-2, Hanning/Hamming/Blackman windows)
+   - Power spectral density (PSD)
+   - Cepstrum for gearbox diagnostics
 
-2. Domaine temporel :
-   - RMS, crête, facteur de crête, kurtosis, skewness
-   - Enveloppe (transformée de Hilbert)
-   - Zero-crossing rate, autocorrélation
+2. Time domain:
+   - RMS, peak, crest factor, kurtosis, skewness
+   - Envelope (Hilbert transform)
+   - Zero-crossing rate, autocorrelation
 
-3. Spécifique automobile :
-   - Analyse d'ordre (order tracking) pour machines tournantes
-   - Détection de défauts de roulement (BPFO, BPFI, BSF)
-   - Indicateurs normalisés ISO 10816 / ISO 13374
+3. Automotive-specific:
+   - Order tracking for rotating machinery
+   - Bearing fault detection (BPFO, BPFI, BSF)
+   - Normalized ISO 10816 / ISO 13374 indicators
 
-Sortie : feature vectors compatibles avec un EventClassifier ou un SpikeDetector enrichi.
+Output: feature vectors compatible with an EventClassifier or an enriched SpikeDetector.
 ```
 
 ---
 
-## Axe 3 — Modules applicatifs (`scirust-predictive-maintenance`)
+## Axis 3 — Application modules (`scirust-predictive-maintenance`)
 
 ```
-Implémenter un crate `scirust-pdm` (predictive maintenance) :
+Implement a crate `scirust-pdm` (predictive maintenance):
 
-1. Détecteur de dégradation :
-   - Calcul de Health Index à partir d'un flux de features
-   - Estimation de Remaining Useful Life (RUL) par régression
-   - Détection de changement de régime (CUSUM, Page-Hinkley)
+1. Degradation detector:
+   - Health Index computation from a feature stream
+   - Remaining Useful Life (RUL) estimation by regression
+   - Regime change detection (CUSUM, Page-Hinkley)
 
-2. Détecteurs spécialisés :
-   - Déséquilibre moteur (1x RPM + harmoniques)
-   - Défaut d'alignement (2x, 3x RPM)
-   - Défaut de roulement (hautes fréquences BPFO/BPFI)
-   - Cavitation pompe
-   - Fuite pneumatique (analyse ultrason)
+2. Specialized detectors:
+   - Motor unbalance (1x RPM + harmonics)
+   - Misalignment fault (2x, 3x RPM)
+   - Bearing fault (BPFO/BPFI high frequencies)
+   - Pump cavitation
+   - Pneumatic leak (ultrasonic analysis)
 
-3. Classification multi-capteurs :
-   - Fusion de features par Kalman
-   - Modèle de diagnostic entraînable (CNN 1D / Transformer sur spectrogrammes)
-   - Export SRT1 du modèle entraîné pour déploiement edge
+3. Multi-sensor classification:
+   - Feature fusion via Kalman
+   - Trainable diagnostic model (1D CNN / Transformer on spectrograms)
+   - SRT1 export of the trained model for edge deployment
 
-4. Sortie standardisée :
-   - Event enrichi avec : severity (INFO/WARNING/CRITICAL), remaining_life_hours,
+4. Standardized output:
+   - Event enriched with: severity (INFO/WARNING/CRITICAL), remaining_life_hours,
      fault_type, component_id, maintenance_action_recommended
 ```
 
 ---
 
-## Axe 4 — Certification automobile (`scirust-functional-safety`)
+## Axis 4 — Automotive certification (`scirust-functional-safety`)
 
 ```
-Adapter SciRust aux contraintes ISO 26262 / IEC 61508 :
+Adapt SciRust to ISO 26262 / IEC 61508 constraints:
 
-1. Niveaux ASIL :
-   - Configuration du niveau d'intégrité (ASIL A/B/C/D)
-   - Redondance matérielle/logicielle paramétrable (dual lockstep)
-   - Watchdog timer pour boucle d'inférence
+1. ASIL levels:
+   - Integrity level configuration (ASIL A/B/C/D)
+   - Parametrizable hardware/software redundancy (dual lockstep)
+   - Watchdog timer for the inference loop
 
-2. Traçabilité exigences → code :
-   - Annotation #[requirement("REQ-SAF-042")] sur fonctions critiques
-   - Génération de matrice de traçabilité (requirements → tests → code)
-   - Export ReqIF ou format tableur pour dossiers de certification
+2. Requirements → code traceability:
+   - #[requirement("REQ-SAF-042")] annotation on critical functions
+   - Traceability matrix generation (requirements → tests → code)
+   - ReqIF or spreadsheet export for certification dossiers
 
-3. Tests de couverture :
-   - MC/DC (Modified Condition/Decision Coverage) sur chemins critiques
-   - Injection de fautes (fault injection) sur tenseurs et poids
-   - Tests de latence pire-cas (WCET) avec `scirust-edge`
+3. Coverage tests:
+   - MC/DC (Modified Condition/Decision Coverage) on critical paths
+   - Fault injection on tensors and weights
+   - Worst-case latency tests (WCET) with `scirust-edge`
 
-4. Mode dégradé :
-   - Fallback déterministe si confiance < seuil
-   - Isolation de capteur défaillant (graceful degradation)
-   - Journal d'audit immuable (hash chain) de toutes les décisions
-```
-
----
-
-## Axe 5 — Intégration continue industrielle (`scirust-mlops`)
-
-```
-1. Pipeline d'entraînement → déploiement :
-   - Entraînement sur données historiques (CSV, Parquet, base temps réel)
-   - Conversion automatique → SRT1 / QSR1 int8
-   - Signature du modèle (Ed25519 ou ECDSA P-256)
-   - Déploiement OTA (Over-The-Air) vers flotte edge
-
-2. Monitoring en production :
-   - Dérive de données (data drift) : détection de distribution shift
-   - Dérive de modèle (model drift) : divergence prédiction vs réalité
-   - Alerte automatique si dérive > seuil configurable
-   - Tableau de bord (export JSON ligne de commande, compatible Grafana)
-
-3. Validation continue :
-   - Benchmark de performance sur hardware cible (cycles, RAM, latence)
-   - Régression de précision vs modèle de référence
-   - Exécution parallèle modèle courant / nouveau modèle (shadow deployment)
-   - Rollback automatique si dégradation
+4. Degraded mode:
+   - Deterministic fallback if confidence < threshold
+   - Failed sensor isolation (graceful degradation)
+   - Immutable audit log (hash chain) of all decisions
 ```
 
 ---
 
-## Priorisation
+## Axis 5 — Industrial continuous integration (`scirust-mlops`)
 
-| Priorité | Axe | Justification |
+```
+1. Training → deployment pipeline:
+   - Training on historical data (CSV, Parquet, real-time database)
+   - Automatic conversion → SRT1 / QSR1 int8
+   - Model signing (Ed25519 or ECDSA P-256)
+   - OTA (Over-The-Air) deployment to edge fleet
+
+2. Production monitoring:
+   - Data drift: distribution shift detection
+   - Model drift: prediction vs reality divergence
+   - Automatic alert if drift > configurable threshold
+   - Dashboard (command-line JSON export, Grafana compatible)
+
+3. Continuous validation:
+   - Performance benchmark on target hardware (cycles, RAM, latency)
+   - Accuracy regression vs reference model
+   - Parallel execution current model / new model (shadow deployment)
+   - Automatic rollback on degradation
+```
+
+---
+
+## Prioritization
+
+| Priority | Axis | Justification |
 |----------|-----|---------------|
-| **P0** | Axe 1 (OPC-UA + MQTT) | Sans connecteur, aucune donnée réelle n'entre dans le système |
-| **P0** | Axe 2 (FFT + features) | Sans features, les détecteurs n'ont pas de signal exploitable |
-| **P1** | Axe 3 (PDM) | Valeur métier directe, s'appuie sur P0 |
-| **P1** | Axe 5 (MLOps) | Nécessaire pour itérer en conditions réelles |
-| **P2** | Axe 4 (ISO 26262) | Prérequis réglementaire mais lourd, peut démarrer en parallèle |
+| **P0** | Axis 1 (OPC-UA + MQTT) | Without a connector, no real data enters the system |
+| **P0** | Axis 2 (FFT + features) | Without features, the detectors have no usable signal |
+| **P1** | Axis 3 (PDM) | Direct business value, builds on P0 |
+| **P1** | Axis 5 (MLOps) | Required to iterate in real conditions |
+| **P2** | Axis 4 (ISO 26262) | Regulatory prerequisite but heavy, can start in parallel |
 
 ---
 
-## Métriques de succès par axe
+## Success metrics per axis
 
-- **Axe 1** : 1 tour de contrôle OPC-UA → EventStream en < 10 ms sur ARM Cortex-A72
-- **Axe 2** : FFT 1024 points en < 100 µs sur Cortex-M7 (fixed-point Q16.16)
-- **Axe 3** : F1 > 0.90 sur C-MAPSS (NASA turbofan degradation dataset)
-- **Axe 4** : 100% MC/DC sur les 20 fonctions critiques d'inférence edge
-- **Axe 5** : Détection de drift en < 1% de faux positifs sur dataset synthétique
+- **Axis 1**: 1 OPC-UA control loop → EventStream in < 10 ms on ARM Cortex-A72
+- **Axis 2**: 1024-point FFT in < 100 µs on Cortex-M7 (Q16.16 fixed-point)
+- **Axis 3**: F1 > 0.90 on C-MAPSS (NASA turbofan degradation dataset)
+- **Axis 4**: 100% MC/DC on the 20 critical edge inference functions
+- **Axis 5**: Drift detection at < 1% false positives on synthetic dataset
 
 ---
 
-## Statut d'implémentation (Juin 2026)
+## Implementation status (June 2026)
 
-### Axes implémentés
+### Implemented axes
 
-| Axe | Crate(s) | Statut | Tests | Description |
+| Axis | Crate(s) | Status | Tests | Description |
 |-----|----------|--------|-------|-------------|
-| **P0 - Axe 1** | `scirust-opcua`, `scirust-mqtt` | ✅ Complété | 6 + 9 | Traits `OpcuaClient` / `MqttPublisher` + simulateurs. Feature flags pour backends réels via `opcua` / `rumqttc` |
-| **P0 - Axe 2** | `scirust-signal` | ✅ Complété | 24 | FFT radix-2, 5 fenêtres, features temps/fréquence, BPFO/BPFI/BSF, order tracking |
-| **P1 - Axe 3** | `scirust-pdm` | ✅ Complété | 24 | Health Index (ISO 13374), RUL linéaire+exponentiel, CUSUM, Page-Hinkley, 4 détecteurs |
-| **P1 - Axe 5** | `scirust-mlops` | ✅ Complété | 19 | Data drift (PSI), model drift, shadow deployment (Promote/Keep/Inconclusive), OTA signé |
-| **P2 - Axe 4** | `scirust-func-safety` | ✅ Complété | 33 | ASIL A-D, traçabilité exigences, fault injection (6 types), mode dégradé (4 niveaux), audit log hash-chainé |
+| **P0 - Axis 1** | `scirust-opcua`, `scirust-mqtt` | ✅ Completed | 6 + 9 | `OpcuaClient` / `MqttPublisher` traits + simulators. Feature flags for real backends via `opcua` / `rumqttc` |
+| **P0 - Axis 2** | `scirust-signal` | ✅ Completed | 24 | radix-2 FFT, 5 windows, time/frequency features, BPFO/BPFI/BSF, order tracking |
+| **P1 - Axis 3** | `scirust-pdm` | ✅ Completed | 24 | Health Index (ISO 13374), linear+exponential RUL, CUSUM, Page-Hinkley, 4 detectors |
+| **P1 - Axis 5** | `scirust-mlops` | ✅ Completed | 19 | Data drift (PSI), model drift, shadow deployment (Promote/Keep/Inconclusive), signed OTA |
+| **P2 - Axis 4** | `scirust-func-safety` | ✅ Completed | 33 | ASIL A-D, requirements traceability, fault injection (6 types), degraded mode (4 levels), hash-chained audit log |
 
-### Crates supplémentaires d'intégration
+### Additional integration crates
 
 | Crate | Description | Tests |
 |-------|-------------|-------|
-| `scirust-integration` | Lib unificatrice : `Backend`, `BackendFactory`, `PipelineConfig`, `Pipeline`, templates de code | 32 |
-| `scirust-industrial` | CLI 7 commandes : discover, test-opcua, test-mqtt, gen-config, scaffold, run, doctor | — |
-| `examples/industrial_monitor` | Démo de bout en bout : OPC-UA → Signal → Events → Health → RUL → MQTT → Safety → MLOps | — |
+| `scirust-integration` | Unifying library: `Backend`, `BackendFactory`, `PipelineConfig`, `Pipeline`, code templates | 32 |
+| `scirust-industrial` | 7-command CLI: discover, test-opcua, test-mqtt, gen-config, scaffold, run, doctor | — |
+| `examples/industrial_monitor` | End-to-end demo: OPC-UA → Signal → Events → Health → RUL → MQTT → Safety → MLOps | — |
 
 ### Total
 
-- **115 nouveaux tests** pour les crates industriels (1047 dans tout le workspace, 0 échec)
-- **Documentation** : 8 langues (FR/EN/ES/DE/ZH/JA/KO/AR) mises à jour sous `docs/translations/` et dans le rapport technique
-- **Prochaines étapes** : Intégration des crates `opcua` et `rumqttc` pour backends réels, dataset C-MAPSS, benchmark de performance edge
+- **115 new tests** for the industrial crates (1047 in the whole workspace, 0 failures)
+- **Documentation**: 8 languages (FR/EN/ES/DE/ZH/JA/KO/AR) updated under `docs/translations/` and in the technical report
+- **Next steps**: Integration of the `opcua` and `rumqttc` crates for real backends, C-MAPSS dataset, edge performance benchmark
 
-### Commandes de test rapide
+### Quick test commands
 
 ```bash
-# Tester le pipeline complet en mode simulé
+# Test the full pipeline in simulated mode
 cargo run -p industrial-monitor
 
-# Découvrir les capteurs disponibles
+# Discover available sensors
 cargo run -p scirust-industrial -- discover --simulated
 
-# Générer et tester une config automotive
+# Generate and test an automotive config
 cargo run -p scirust-industrial -- gen-config --template automotive --stations 3 --output /tmp/cfg.json
 cargo run -p scirust-industrial -- doctor --config /tmp/cfg.json
 cargo run -p scirust-industrial -- run --config /tmp/cfg.json --cycles 50
 
-# Scaffolder un projet
+# Scaffold a project
 cargo run -p scirust-industrial -- scaffold --name my-monitor --template automotive --output /tmp
 ```

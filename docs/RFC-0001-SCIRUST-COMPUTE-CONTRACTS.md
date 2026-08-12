@@ -6,33 +6,34 @@
 
 ## Motivation
 
-SciRust possède déjà plusieurs chemins de calcul CPU, SIMD, WGPU et CUDA,
-mais leurs contrats sont séparés et incompatibles.
+SciRust already has several compute paths — CPU, SIMD, WGPU and CUDA —
+but their contracts are separate and incompatible.
 
-`scirust-compute` introduit un vocabulaire commun sans remplacer les
-implémentations existantes.
+`scirust-compute` introduces a common vocabulary without replacing the
+existing implementations.
 
 ## Decision
 
-Le crate définit uniquement :
+The crate defines only:
 
-- les types scalaires et métadonnées tensor ;
-- les périphériques et espaces mémoire ;
-- les modules noyaux et configurations de lancement ;
-- les liaisons de buffers ;
-- les erreurs communes ;
-- le trait `ComputeBackend`.
+- the scalar types and tensor metadata;
+- the devices and memory spaces;
+- the kernel modules and launch configurations;
+- the buffer bindings;
+- the common errors;
+- the `ComputeBackend` trait.
 
-Le crate reste sans dépendance et compatible `no_std`.
+The crate stays dependency-free and `no_std`-compatible.
 
 ## Dependency rule
 
-Les backends dépendent de `scirust-compute`.
+The backends depend on `scirust-compute`.
 
-`scirust-compute` ne dépend ni de `scirust-core`, ni de `scirust-gpu`,
-ni de `scirust-cuda`, ni de `scirust-simd`.
+`scirust-compute` depends on neither `scirust-core`, nor `scirust-gpu`,
+nor `scirust-cuda`, nor `scirust-simd`.
 
 ## Non-goals
 
-Cette phase ne remplace pas CUDA ou WGPU, ne crée pas un nouveau moteur tensor,
-ne modifie aucune API existante et n'implémente ni autograd ni ordonnanceur.
+This phase does not replace CUDA or WGPU, does not create a new tensor
+engine, does not modify any existing API, and implements neither autograd
+nor a scheduler.

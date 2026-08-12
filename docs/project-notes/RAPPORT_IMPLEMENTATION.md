@@ -1,12 +1,12 @@
-# Rapport d'implémentation — Pipeline Wavelet–RLS–RTS
+# Implementation report — Wavelet–RLS–RTS pipeline
 
-Équation maîtresse implémentée :
+Master equation implemented:
 
 $$\hat{\mathbf{x}}_{|N} = \mathbf{M}_{\text{RTS}} \left[ \left( \mathbf{I} - \mathbf{\Delta}_{\text{RLS}}(\mathbf{x}, \lambda) \right) \mathbf{W}^T \mathcal{T}_{\tau}(\mathbf{W}\mathbf{s}) \right]$$
 
 ---
 
-## 1. `scirust-signal/Cargo.toml` — Dépendance ajoutée
+## 1. `scirust-signal/Cargo.toml` — Added dependency
 
 ```toml
 [package]
@@ -24,7 +24,7 @@ serde = { version = "1", features = ["derive"] }
 
 ---
 
-## 2. `scirust-signal/src/lib.rs` — Déclarations de modules
+## 2. `scirust-signal/src/lib.rs` — Module declarations
 
 ```rust
 //! SciRust Signal Processing
@@ -85,7 +85,7 @@ pub use windows::{apply_window, blackman, blackman_harris, flattop, hamming, han
 
 ---
 
-## 3. `scirust-estimation/src/lib.rs` — Module RLS ajouté
+## 3. `scirust-estimation/src/lib.rs` — Added RLS module
 
 ```rust
 //! # scirust-estimation — deterministic state estimation
@@ -129,7 +129,7 @@ pub use ukf::Ukf;
 
 ---
 
-## 4. `scirust-signal/src/threshold.rs` — Opérateurs de seuillage
+## 4. `scirust-signal/src/threshold.rs` — Thresholding operators
 
 ```rust
 //! Soft and hard thresholding (shrinkage) operators for signal denoising.
@@ -346,7 +346,7 @@ mod tests {
 
 ---
 
-## 5. `scirust-signal/src/wavelet.rs` — Transformée de Haar
+## 5. `scirust-signal/src/wavelet.rs` — Haar transform
 
 ```rust
 //! Haar wavelet transform — forward and inverse DWT.
@@ -570,7 +570,7 @@ mod tests {
 
 ---
 
-## 6. `scirust-estimation/src/rls.rs` — Filtre adaptatif RLS
+## 6. `scirust-estimation/src/rls.rs` — Adaptive RLS filter
 
 ```rust
 //! Recursive Least Squares (RLS) adaptive filter — multi-channel, deterministic `f64`.
@@ -887,7 +887,7 @@ mod tests {
 
 ---
 
-## 7. `scirust-signal/src/denoise.rs` — Pipeline complet
+## 7. `scirust-signal/src/denoise.rs` — Complete pipeline
 
 ```rust
 //! Wavelet–RLS–RTS denoising pipeline.
@@ -1187,13 +1187,13 @@ mod tests {
 
 ---
 
-## Optimisations post-audit
+## Post-audit optimizations
 
-### A. Élimination du heap churn niveau-par-niveau — transformée d'ondelettes
+### A. Eliminating level-by-level heap churn — wavelet transform
 
-**Avant** (`haar_dwt_multilevel`) : une allocation `vec![0.0; len]` par niveau de décomposition.
+**Before** (`haar_dwt_multilevel`): one `vec![0.0; len]` allocation per decomposition level.
 
-**Après** : un unique scratch buffer de taille `n` alloué une fois pour toutes, réutilisé à chaque niveau via `data[..len].copy_from_slice(&scratch[..len])`.
+**After**: a single `n`-sized scratch buffer allocated once and for all, reused at every level via `data[..len].copy_from_slice(&scratch[..len])`.
 
 ```rust
 pub fn haar_dwt_multilevel(data: &mut [f64], levels: usize) {
@@ -1210,14 +1210,14 @@ pub fn haar_dwt_multilevel(data: &mut [f64], levels: usize) {
 }
 ```
 
-Même optimisation appliquée à `haar_idwt_multilevel`. Résultat : zéro fragmentation heap, prédictibilité cache L1/L2, déterministe.
+The same optimization applied to `haar_idwt_multilevel`. Result: zero heap fragmentation, L1/L2 cache predictability, deterministic.
 
-### B. Stabilité numérique du filtre RLS — symétrisation forcée de P
+### B. Numerical stability of the RLS filter — forced symmetrization of P
 
-Après la mise à jour de covariance `P_new = (P - k·uᵀ·P) / λ`, on force :
+After the covariance update `P_new = (P - k·uᵀ·P) / λ`, we force:
 
 ```rust
-// P = (P + Pᵀ) / 2   → garantit P symétrique
+// P = (P + Pᵀ) / 2   → guarantees P symmetric
 for i in 0..self.n_in {
     for j in (i + 1)..self.n_in {
         let avg = (self.p[i * self.n_in + j] + self.p[j * self.n_in + i]) * 0.5;
@@ -1227,21 +1227,21 @@ for i in 0..self.n_in {
 }
 ```
 
-Empêche la dérive de la définie-positivité sur les longs horizons temporels où λ < 1. Appliqué aux deux `RlsFilter::update` et `VectorRls::update`.
+Prevents positive-definiteness drift over long time horizons where λ < 1. Applied to both `RlsFilter::update` and `VectorRls::update`.
 
-### C. Perspective : factorisation UD de P
+### C. Outlook: UD factorization of P
 
-Pour une robustesse totale, la covariance P peut être stockée sous forme UD-factorisée (P = U·D·Uᵀ), comme dans le module `scirust-estimation/src/ud.rs` existant. Le module `UdFilter` de scirust fournit déjà l'infrastructure. Une future migration remplacerait la boucle de covariance O(n²) par des mises à jour UD garantissant P > 0 à la précision machine.
+For total robustness, the covariance P could be stored in UD-factorized form (P = U·D·Uᵀ), as in the existing `scirust-estimation/src/ud.rs` module. The scirust `UdFilter` module already provides the infrastructure. A future migration would replace the O(n²) covariance loop with UD updates guaranteeing P > 0 to machine precision.
 
 ---
 
-## Résumé des tests
+## Test summary
 
 ```text
 test result: ok. 76 passed (30 estimation + 46 signal), 0 failed, 0 ignored, 0 filtered out
 ```
 
-| Crate | Tests | Nouveaux tests |
+| Crate | Tests | New tests |
 |-------|-------|----------------|
 | `scirust-estimation` | 30 | `rls_tracks_linear_system`, `vector_rls_converges`, `delta_is_normalised` |
 | `scirust-signal` | 46 | `soft_threshold_*`, `hard_threshold_*`, `universal_soft_threshold_*`, `sure_threshold_*`, `haar_*` (4), `pipeline_denoises_*`, `wavelet_only_improves_mse` |

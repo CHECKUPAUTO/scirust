@@ -1,129 +1,129 @@
-# Protocole — banc de co-changement CCOS
+# Protocol — CCOS co-change benchmark
 
-**Statut : figé.** Ce document est écrit et commité *avant* toute implémentation et
-*avant* d'avoir vu le moindre chiffre. Il existe pour que le protocole ne puisse
-pas être ajusté après coup en fonction du résultat obtenu.
+**Status: frozen.** This document is written and committed *before* any
+implementation and *before* having seen any number. It exists so that the
+protocol cannot be adjusted after the fact based on the result obtained.
 
-Toute modification ultérieure de ce fichier doit être un commit séparé,
-postérieur à la publication des résultats, et dire explicitement ce qui change
-et pourquoi.
+Any subsequent modification of this file must be a separate commit,
+made after the results are published, and must explicitly state what
+changes and why.
 
 ---
 
-## 1. La question
+## 1. The question
 
-CCOS est vendu comme une **mémoire causale** : elle prétend sélectionner un
-meilleur contexte de travail qu'une recherche. La question mesurable est donc :
+CCOS is sold as a **causal memory**: it claims to select better working
+context than a search. The measurable question is therefore:
 
-> Partant d'un fichier sur lequel on travaille, CCOS place-t-il dans la fenêtre de
-> contexte les autres fichiers qu'il faudra réellement modifier — mieux qu'une
-> recherche lexicale, à budget de tokens égal ?
+> Starting from a file one is working on, does CCOS place into the context
+> window the other files that will actually need to be modified — better
+> than a lexical search, at an equal token budget?
 
-## 2. Pourquoi les bancs existants ne répondent pas
+## 2. Why existing benchmarks do not answer
 
-- `examples/pure_retrieval_vs_rag.rs` prend pour vérité terrain « les fichiers de
-  dépendance que l'AST a résolus », c'est-à-dire **le graphe de CCOS lui-même**.
-  Un banc dont la référence est produite par le système évalué ne peut pas
-  échouer. Il mesure la cohérence interne, pas la valeur.
-- `examples/recall_eval.rs` tourne sur un **corpus synthétique**, construit avec
-  sa propre vérité terrain.
-- `examples/beir_eval.rs` mesure de la recherche documentaire sur des résumés
-  scientifiques (SciFact). Utile pour situer les retrievers, sans rapport avec la
-  sélection de contexte de code.
+- `examples/pure_retrieval_vs_rag.rs` takes as ground truth "the dependency
+  files that the AST resolved", i.e. **CCOS's own graph**.
+  A benchmark whose reference is produced by the system being evaluated
+  cannot fail. It measures internal consistency, not value.
+- `examples/recall_eval.rs` runs on a **synthetic corpus**, built with its
+  own ground truth.
+- `examples/beir_eval.rs` measures document retrieval on scientific
+  abstracts (SciFact). Useful for situating the retrievers, unrelated to
+  code-context selection.
 
-Aucun n'a de vérité terrain **extérieure à CCOS**. C'est le trou que ce banc
-comble.
+None has ground truth **external to CCOS**. That is the gap this benchmark
+fills.
 
-## 3. Vérité terrain — l'historique git
+## 3. Ground truth — git history
 
-Un commit qui modifie plusieurs fichiers `.rs` est une observation directe de
-« ces fichiers devaient être touchés ensemble ». Cette information est produite
-par des humains résolvant de vraies tâches, des mois avant que CCOS n'existe.
-Elle ne peut pas être influencée par le système évalué.
+A commit that modifies several `.rs` files is a direct observation that
+"these files had to be touched together". This information is produced by
+humans solving real tasks, months before CCOS existed. It cannot be
+influenced by the system being evaluated.
 
-**Sélection des cas** (déterministe, sans réglage) :
+**Case selection** (deterministic, no tuning):
 
-- parcourir l'historique complet de `Memorithm/scirust` (2 246 commits) ;
-- retenir les commits touchant **entre 2 et 8 fichiers `.rs`** — au moins deux
-  pour qu'il y ait quelque chose à prédire, au plus huit pour écarter les
-  refactorings de masse et les renommages automatiques, qui ne représentent
-  aucune tâche de raisonnement ;
-- exclure les commits de fusion (aucun contenu propre) ;
-- ne retenir que les fichiers **présents dans l'arbre courant** : un fichier
-  supprimé depuis ne peut être ni recallé ni recherché, l'y attendre pénaliserait
-  les deux systèmes à l'identique mais brouillerait la lecture ;
-- après ce filtre, ne garder que les commits qui conservent **≥ 2 fichiers**.
+- walk the full history of `Memorithm/scirust` (2 246 commits);
+- keep the commits touching **between 2 and 8 `.rs` files** — at least two
+  so there is something to predict, at most eight to rule out
+  mass refactorings and automated renames, which represent no
+  reasoning task;
+- exclude merge commits (no content of their own);
+- keep only files **present in the current tree**: a file deleted since
+  then can be neither recalled nor searched, expecting it would penalize
+  both systems identically but blur the reading;
+- after this filter, keep only commits that retain **≥ 2 files**.
 
-**Construction d'un cas** : pour un commit retenu de fichiers `{f₁ … fₙ}`, on
-produit `n` cas. Le cas `i` a pour **ancre** `fᵢ` et pour **cibles** `{f₁ … fₙ} \ {fᵢ}`.
+**Building a case**: for a retained commit with files `{f₁ … fₙ}`, we
+produce `n` cases. Case `i` has **anchor** `fᵢ` and **targets** `{f₁ … fₙ} \ {fᵢ}`.
 
-## 4. Ce qui est comparé
+## 4. What is compared
 
-Les deux systèmes reçoivent **le même corpus** (l'arbre courant), **la même
-ancre**, et **le même budget de tokens**.
+Both systems receive **the same corpus** (the current tree), **the same
+anchor**, and **the same token budget**.
 
-- **CCOS** — `recall` stratégie `around`, ancre `file:<chemin>`, sur le workspace
-  `.ccos/workspace.ccos` ingéré depuis ce même arbre.
-- **Témoin — BM25 lexical.** Le contenu du fichier ancre sert de requête, on
-  classe tous les autres fichiers du corpus par BM25 et on remplit la fenêtre
-  jusqu'au budget.
+- **CCOS** — `recall` strategy `around`, anchor `file:<path>`, on the
+  `.ccos/workspace.ccos` workspace ingested from that same tree.
+- **Control — lexical BM25.** The anchor file's content is used as the query,
+  all other corpus files are ranked by BM25 and the window is filled up to
+  the budget.
 
-Le témoin n'est **pas** un homme de paille : BM25 est la ligne de base que la
-littérature IR utilise encore aujourd'hui, et l'implémentation vient de
-`ccos_core::retrieval`, donc du même code, avec le même tokenizer et la même
-arithmétique déterministe. Comparer CCOS à un agent aveugle ne prouverait rien.
+The control is **not** a straw man: BM25 is the baseline the IR
+literature still uses today, and the implementation comes from
+`ccos_core::retrieval`, hence from the same code, with the same tokenizer and
+the same deterministic arithmetic. Comparing CCOS to a blind agent would
+prove nothing.
 
-## 5. Métriques
+## 5. Metrics
 
-Pour chaque cas, on regarde quels fichiers cibles apparaissent dans la fenêtre
-rendue :
+For each case, we look at which target files appear in the returned
+window:
 
-- **Recall@budget** — fraction des cibles présentes dans la fenêtre. Métrique
-  principale : c'est littéralement « le contexte contenait-il ce dont j'avais
-  besoin ».
-- **MRR** — inverse du rang du premier fichier cible. Mesure si les cibles
-  arrivent tôt.
-- **Precision@budget** — fraction de la fenêtre qui était pertinente. Mesure le
-  gaspillage de contexte.
+- **Recall@budget** — fraction of targets present in the window. Primary
+  metric: it is literally "did the context contain what I needed".
+- **MRR** — inverse of the rank of the first target file. Measures whether
+  targets arrive early.
+- **Precision@budget** — fraction of the window that was relevant. Measures
+  context waste.
 
-Rapportées à **trois budgets** : 1 024, 2 048 et 8 192 tokens. Un avantage qui
-n'existe qu'à un seul budget est un artefact de réglage, pas un résultat.
+Reported at **three budgets**: 1 024, 2 048 and 8 192 tokens. An advantage
+that exists at only one budget is a tuning artifact, not a result.
 
-## 6. Critère de réussite — fixé maintenant
+## 6. Success criterion — fixed now
 
-CCOS est déclaré **meilleur que la recherche** si, et seulement si :
+CCOS is declared **better than search** if, and only if:
 
-> le Recall@budget de CCOS dépasse celui de BM25 **aux trois budgets**, et l'écart
-> au budget 2 048 est d'au moins **5 points de pourcentage**.
+> CCOS's Recall@budget exceeds BM25's **at all three budgets**, and the gap
+> at the 2 048 budget is at least **5 percentage points**.
 
-Tout autre résultat est un échec du banc pour CCOS, et sera rapporté comme tel.
-Sont explicitement des échecs :
+Any other result is a failure of the benchmark for CCOS, and will be
+reported as such. Explicitly failures:
 
-- CCOS gagne à un ou deux budgets sur trois ;
-- CCOS gagne partout mais de moins de 5 points au budget 2 048 ;
-- CCOS perd.
+- CCOS wins at one or two budgets out of three;
+- CCOS wins everywhere but by less than 5 points at the 2 048 budget;
+- CCOS loses.
 
-Le seuil de 5 points est posé avant mesure. Il correspond à ce qui serait visible
-sur une tâche réelle ; un écart d'un point ne justifierait pas de vendre une
-architecture.
+The 5-point threshold is set before measurement. It corresponds to what
+would be visible on a real task; a one-point gap would not justify selling
+an architecture.
 
-## 7. Ce que ce banc ne prouve pas
+## 7. What this benchmark does not prove
 
-À énoncer avec les résultats, sans attendre qu'on le demande :
+To be stated with the results, without waiting to be asked:
 
-- Il mesure la **sélection de contexte**, pas la réussite d'un agent. Un meilleur
-  contexte devrait aider ; ce banc ne le démontre pas.
-- La co-modification est un **proxy** du besoin. Deux fichiers changés ensemble
-  l'ont parfois été pour des raisons sans rapport (mise à jour de version,
-  reformatage).
-- Un seul dépôt, un seul langage. Rien ici ne se transpose à un dépôt Python ou à
-  une base de dix millions de lignes sans nouvelle mesure.
-- L'ancre est un fichier, pas une intention en langage naturel. Le scénario réel
-  d'un agent part souvent d'une description de tâche.
+- It measures **context selection**, not agent success. Better context
+  should help; this benchmark does not demonstrate it.
+- Co-modification is a **proxy** for need. Two files changed together have
+  sometimes been changed for unrelated reasons (version bump,
+  reformatting).
+- One repository, one language. Nothing here transfers to a Python
+  repository or a ten-million-line codebase without new measurement.
+- The anchor is a file, not a natural-language intent. The real scenario of
+  an agent often starts from a task description.
 
-## 8. Exécution
+## 8. Execution
 
-Le banc est lancé **une seule fois** après implémentation, et son résultat est
-rapporté quel qu'il soit. S'il faut le relancer (bug du harnais, corpus mal
-construit), la raison est consignée dans le rapport, avec le résultat de la
-première exécution.
+The benchmark is run **exactly once** after implementation, and its result
+is reported whatever it is. If it must be re-run (harness bug, poorly
+built corpus), the reason is recorded in the report, along with the result
+of the first execution.

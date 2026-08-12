@@ -1,70 +1,70 @@
-# SciRust — Mémoire Wall Optimization: Implementation Summary
+# SciRust — Memory Wall Optimization: Implementation Summary
 
-## Architecture finale des modules
+## Final module architecture
 
 ```
 scirust/
-├── Cargo.toml                         # Workspace avec scirust-arena + scirust-fusion
+├── Cargo.toml                         # Workspace with scirust-arena + scirust-fusion
 ├── docs/
-│   ├── MEMORY_WALL_ARCHITECTURE.md    # Architecture complète (5 piliers)
-│   └── MEMORY_WALL_IMPLEMENTATION_SUMMARY.md  # Ce fichier
+│   ├── MEMORY_WALL_ARCHITECTURE.md    # Full architecture (5 pillars)
+│   └── MEMORY_WALL_IMPLEMENTATION_SUMMARY.md  # This file
 │
-├── scirust-arena/                     # PILIER 3: Arena Allocators
+├── scirust-arena/                     # PILLAR 3: Arena Allocators
 │   ├── Cargo.toml
 │   └── src/
 │       ├── lib.rs                     # PinnedArena + Slab + AlignedVec + exports
 │       ├── allocator.rs               # PinnedArena — bump pointer, 128-byte aligned
-│       ├── slab.rs                    # Slab — free list + versioning pour SSM
-│       └── aligned.rs                 # AlignedVec — buffer aligné SIMD
+│       ├── slab.rs                    # Slab — free list + versioning for SSM
+│       └── aligned.rs                 # AlignedVec — SIMD-aligned buffer
 │
-├── scirust-fusion/                    # PILIER 1: AST Kernel Fusion
+├── scirust-fusion/                    # PILLAR 1: AST Kernel Fusion
 │   ├── Cargo.toml
 │   └── src/
-│       ├── lib.rs                     # FusionPipeline — entrée publique
-│       ├── graph.rs                   # OpGraph — graphe de dépendance DAG
-│       ├── fusion.rs                  # FusionPass — détection de motifs
-│       ├── kernel.rs                  # FusedKernel — exécution des kernels
-│       └── patterns.rs                # FusionPatterns — base de motifs canoniques
+│       ├── lib.rs                     # FusionPipeline — public entry point
+│       ├── graph.rs                   # OpGraph — DAG dependency graph
+│       ├── fusion.rs                  # FusionPass — pattern detection
+│       ├── kernel.rs                  # FusedKernel — kernel execution
+│       └── patterns.rs                # FusionPatterns — canonical pattern database
 │
-├── scirust-core/                      # Core — modules mis à jour
-│   ├── Cargo.toml                     # +libc pour pinned memory
+├── scirust-core/                      # Core — updated modules
+│   ├── Cargo.toml                     # +libc for pinned memory
 │   └── src/
 │       ├── lib.rs                     # Export quant + tensor/pinned
 │       ├── tensor/
 │       │   ├── mod.rs                 # +pinned + tiling exports
-│       │   ├── tensor_nd.rs           # TensorND (inchangé)
-│       │   ├── pinned.rs              # PILIER 2: PinnedBuffer
-│       │   └── tiling.rs              # PILIER 4: Tiling config + detection
-│       ├── quant/                     # PILIER 5: Quantification native
+│       │   ├── tensor_nd.rs           # TensorND (unchanged)
+│       │   ├── pinned.rs              # PILLAR 2: PinnedBuffer
+│       │   └── tiling.rs              # PILLAR 4: Tiling config + detection
+│       ├── quant/                     # PILLAR 5: Native quantization
 │       │   ├── mod.rs                 # QuantTensor + Quantized trait
-│       │   ├── int8.rs                # int8 quant/dequant + SIMD AVX2
+│       │   ├── int8.rs                # int8 quant/dequant + AVX2 SIMD
 │       │   ├── bf16.rs                # bf16 quant/dequant + NEON/SVE
 │       │   └── int4.rs                # int4 packed (8× compression)
 │       └── nn/
 │           ├── mod.rs                 # +fused_ops module
-│           └── fused_ops.rs           # PILIER 1+4: Kernels fusionnés
+│           └── fused_ops.rs           # PILLAR 1+4: Fused kernels
 │
-└── scirust-simd/                      # SIMD — extensions ARM64
-    ├── Cargo.toml                     # +libc pour SVE detection
+└── scirust-simd/                      # SIMD — ARM64 extensions
+    ├── Cargo.toml                     # +libc for SVE detection
     └── src/
         ├── lib.rs                     # +NEON + SVE + runtime dispatch
-        ├── neon.rs                    # PILIER 4: ARM64 NEON intrinsics
-        ├── sve.rs                     # PILIER 4: ARM SVE intrinsics
+        ├── neon.rs                    # PILLAR 4: ARM64 NEON intrinsics
+        ├── sve.rs                     # PILLAR 4: ARM SVE intrinsics
         └── matrix/
-            ├── backend.rs             # SimdBackend trait (inchangé)
-            └── tiling_dispatch.rs     # (en cours)
+            ├── backend.rs             # SimdBackend trait (unchanged)
+            └── tiling_dispatch.rs     # (in progress)
 ```
 
-## Pilier 1: AST Kernel Fusion
+## Pillar 1: AST Kernel Fusion
 
-### Fichier: `scirust-fusion/src/graph.rs`
-- **OpKind**: enum des 30+ opérations supportées
-- **FusedOp**: nœud du graphe avec inputs, constante, kind
-- **OpGraph**: DAG avec topological sort (algorithme de Kahn)
+### File: `scirust-fusion/src/graph.rs`
+- **OpKind**: enum of the 30+ supported operations
+- **FusedOp**: graph node with inputs, constant, kind
+- **OpGraph**: DAG with topological sort (Kahn's algorithm)
 
-### Fichier: `scirust-fusion/src/patterns.rs`
-Motifs détectés:
-| Motif | Gain mémoire | Operations |
+### File: `scirust-fusion/src/patterns.rs`
+Detected patterns:
+| Pattern | Memory gain | Operations |
 |-------|-------------|------------|
 | matmul_silu | 50% | Linear + SiLU |
 | matmul_relu | 50% | Linear + ReLU |
@@ -73,89 +73,89 @@ Motifs détectés:
 | layernorm_activation | 50% | LayerNorm + Activation |
 | two_layer_mlp | 66% | Linear + Linear + Add |
 | matmul_scale | 50% | Linear × scale |
-| ssm_scan | 0% | SsmStep + SsmStep (séquentiel) |
+| ssm_scan | 0% | SsmStep + SsmStep (sequential) |
 
-### Fichier: `scirust-fusion/src/kernel.rs`
-- FusedKernel avec execute() pour chaque kernel type
-- Implémente matmul_silu, matmul_gelu, matmul_relu, matmul_layernorm
-- Les accumulateurs restent dans des vecteurs locaux (stack), jamais en heap
+### File: `scirust-fusion/src/kernel.rs`
+- FusedKernel with execute() for each kernel type
+- Implements matmul_silu, matmul_gelu, matmul_relu, matmul_layernorm
+- Accumulators stay in local (stack) vectors, never on the heap
 
-### Fichier: `scirust-core/src/nn/fused_ops.rs`
-- Kernels fusionnés exécutables (matmul_silu, matmul_gelu, matmul_layernorm)
-- Utilise scirust_core::simd::tiling pour le tiling automatique
-- Compatible avec le graphe autograd
+### File: `scirust-core/src/nn/fused_ops.rs`
+- Executable fused kernels (matmul_silu, matmul_gelu, matmul_layernorm)
+- Uses scirust_core::simd::tiling for automatic tiling
+- Compatible with the autograd graph
 
-## Pilier 2: PinnedMemory (Zero-Copy)
+## Pillar 2: PinnedMemory (Zero-Copy)
 
-### Fichier: `scirust-core/src/tensor/pinned.rs`
-- **PinnedBuffer**: mmap + mlock sur Linux, align 128 bytes
-- **PinnedPool**: pool de buffers réutilisables
+### File: `scirust-core/src/tensor/pinned.rs`
+- **PinnedBuffer**: mmap + mlock on Linux, 128-byte alignment
+- **PinnedPool**: pool of reusable buffers
 - **MemoryLayout**: enum (Cpu, Pinned, GpuUnified)
-- Compatible CUDA unified memory (cudaHostRegister)
+- Compatible with CUDA unified memory (cudaHostRegister)
 
-## Pilier 3: Arena Allocators
+## Pillar 3: Arena Allocators
 
-### Fichier: `scirust-arena/src/allocator.rs`
-- **PinnedArena**: bump pointer, O(1) alloc/dalloc
-- Alignement 128 bytes garanti
-- reset() = O(1) — tout le bloc est reset en une opération
+### File: `scirust-arena/src/allocator.rs`
+- **PinnedArena**: bump pointer, O(1) alloc/dealloc
+- 128-byte alignment guaranteed
+- reset() = O(1) — the whole block is reset in one operation
 - **MemoryBlock**: mmap(MAP_ANONYMOUS) + mlock()
 
-### Fichier: `scirust-arena/src/slab.rs`
-- **Slab**: free list + versioning pour les états SSM
-- Handle avec version → protection use-after-free
+### File: `scirust-arena/src/slab.rs`
+- **Slab**: free list + versioning for SSM states
+- Handle with version → use-after-free protection
 - **SlabHandle**: index + version
 
-### Fichier: `scirust-arena/src/aligned.rs`
-- **AlignedVec**: Vec avec alignement garanti
-- Trait ToAligned pour Vec<T> → AlignedVec
+### File: `scirust-arena/src/aligned.rs`
+- **AlignedVec**: Vec with guaranteed alignment
+- ToAligned trait for Vec<T> → AlignedVec
 
-## Pilier 4: Cache-Aware Tiling
+## Pillar 4: Cache-Aware Tiling
 
-### Fichier: `scirust-core/src/simd/tiling.rs`
-- **TilingConfig**: détection auto de la plateforme et du cache L2
-- **CacheProfile**: détection L1/L2/L3 + calcul des tiles optimaux
-- **matmul_tiled_f32**: matmul tuilé i-p-j
-- **detect_l2_cache_size()**: lit /sys/devices/system/cpu/cpu0/cache/
-- Config par plateforme:
+### File: `scirust-core/src/simd/tiling.rs`
+- **TilingConfig**: automatic platform and L2 cache detection
+- **CacheProfile**: L1/L2/L3 detection + optimal tile computation
+- **matmul_tiled_f32**: i-p-j tiled matmul
+- **detect_l2_cache_size()**: reads /sys/devices/system/cpu/cpu0/cache/
+- Per-platform config:
   - x86_64 AVX-512: tile 64, lane 16
   - x86_64 AVX2: tile 32, lane 8
   - ARM64 NEON: tile 32, lane 4
-  - ARM64 SVE: tile scalable, lane configurable
+  - ARM64 SVE: scalable tile, configurable lane
 
-### Fichier: `scirust-simd/src/neon.rs`
+### File: `scirust-simd/src/neon.rs`
 - **NEON kernels**: saxpy, add, mul, silu, gelu, relu, layernorm, matmul
-- 4-lanes par registre (float32x4_t)
-- Tiling pour matmul (32×32 par défaut)
+- 4 lanes per register (float32x4_t)
+- Tiling for matmul (32×32 by default)
 
-### Fichier: `scirust-simd/src/sve.rs`
-- **SVE kernels**: scalable vector length (256-bit sur Jetson Thor)
+### File: `scirust-simd/src/sve.rs`
+- **SVE kernels**: scalable vector length (256-bit on Jetson Thor)
 - Predicate-based: svld1, svst1, svmla, etc.
-- Detecte la présence SVE via getauxval(AT_HWCAP)
+- Detects SVE presence via getauxval(AT_HWCAP)
 
-## Pilier 5: Quantification Native
+## Pillar 5: Native Quantization
 
-### Fichier: `scirust-core/src/quant/mod.rs`
+### File: `scirust-core/src/quant/mod.rs`
 - **Quantized** trait: format, compression ratio
 - **QuantFormat**: Fp32, Int8, Bf16, Int4
-- **QuantTensor**: stockage + métadonnées + dequantize()
+- **QuantTensor**: storage + metadata + dequantize()
 
-### Fichier: `scirust-core/src/quant/int8.rs`
-- Quantification symétrique int8 par canal
-- SIMD dequantization: int8 → f32 en 8-lanes (AVX2)
-- Matmul int8 × int8 → int32 accumulateur
+### File: `scirust-core/src/quant/int8.rs`
+- Per-channel symmetric int8 quantization
+- SIMD dequantization: int8 → f32 in 8 lanes (AVX2)
+- int8 × int8 matmul → int32 accumulator
 
-### Fichier: `scirust-core/src/quant/bf16.rs`
-- Conversion f32 ↔ bf16 (troncature LSB)
-- NEON batch: 4 elements par itération
-- AVX2 batch: 8 elements par itération
+### File: `scirust-core/src/quant/bf16.rs`
+- f32 ↔ bf16 conversion (LSB truncation)
+- NEON batch: 4 elements per iteration
+- AVX2 batch: 8 elements per iteration
 
-### Fichier: `scirust-core/src/quant/int4.rs`
-- Quantification int4 signed (8× compression)
-- Packing: 2 valeurs int4 par byte
-- Matmul int4 packed × int4 packed → fp32
+### File: `scirust-core/src/quant/int4.rs`
+- Signed int4 quantization (8× compression)
+- Packing: 2 int4 values per byte
+- int4 packed × int4 packed matmul → fp32
 
-## Compatibilité multi-plateforme
+## Multi-platform compatibility
 
 | Feature | x86_64 | ARM64 | Jetson | Windows |
 |---------|--------|-------|--------|---------|
@@ -170,21 +170,21 @@ Motifs détectés:
 | bf16 quant | ✓ | ✓ | ✓ | ✓ |
 | int4 quant | ✓ | ✓ | ✓ | ✓ |
 
-## Prochaines étapes
+## Next steps
 
-1. **Fusion avec autodiff**: adapter les kernels fusionnés pour qu'ils fonctionnent
-   avec le graphe tape. Nécessite d'ajouter les backward rules pour chaque kernel.
+1. **Fusion with autodiff**: adapt the fused kernels so they work with the
+   tape graph. Requires adding backward rules for each kernel.
 
-2. **PinnedMemory + CUDA**: intégrer cudaHostRegister/cudaHostUnregister pour le
-   zero-copy vers GPU.
+2. **PinnedMemory + CUDA**: integrate cudaHostRegister/cudaHostUnregister for
+   zero-copy to GPU.
 
-3. **SLab + SSM cells**: implémenter les cellules Mamba avec le Slab pour gérer
-   les états cachés (c, h̃) à chaque timestep.
+3. **Slab + SSM cells**: implement Mamba cells with the Slab to manage the
+   hidden states (c, h̃) at each timestep.
 
-4. **Fused matmul SIMD**: remplacer les boucles scalaires dans les kernels fusionnés
-   par les appels NEON/AVX512 directement.
+4. **Fused matmul SIMD**: replace the scalar loops in the fused kernels with
+   direct NEON/AVX512 calls.
 
-5. **Benchmarks**: mesurer le speedup sur les patterns targets (MatMul → SiLU → LN).
+5. **Benchmarks**: measure the speedup on the target patterns (MatMul → SiLU → LN).
 
-6. **Extension compilateur éventuelle** : ne réintroduire une voie MIR qu'avec
-   une transformation réelle, des oracles de code généré et un gate CI bloquant.
+6. **Possible compiler extension**: only reintroduce an MIR path with a real
+   transformation, generated-code oracles, and a blocking CI gate.

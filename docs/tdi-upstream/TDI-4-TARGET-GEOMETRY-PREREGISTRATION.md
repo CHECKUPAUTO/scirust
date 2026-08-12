@@ -1,357 +1,358 @@
-# TDI-4 — Préenregistrement de l’évaluation Target Geometry
+# TDI-4 — Preregistration of the Target Geometry evaluation
 
-## 1. Statut
+## 1. Status
 
-Ce document est établi avant :
+This document is established before:
 
-- l’implémentation de l’évaluateur TDI-4 ;
-- la génération des populations TDI-4 ;
-- l’observation des métriques TDI-4 ;
-- toute adaptation des seuils de succès.
+- the implementation of the TDI-4 evaluator;
+- the generation of the TDI-4 populations;
+- the observation of the TDI-4 metrics;
+- any adaptation of the success thresholds.
 
-Les résultats TDI-3 sont connus et motivent la formulation de TDI-4, mais
-aucune population TDI-3 ne sera réutilisée pour entraîner ou évaluer
-TDI-4.
+The TDI-3 results are known and motivate the formulation of TDI-4, but no
+TDI-3 population will be reused to train or evaluate TDI-4.
 
 ## 2. Motivation
 
-TDI-3 a montré :
+TDI-3 showed:
 
-- un signal prédictif favorable en largeur 3 ;
-- une détérioration des erreurs en largeur 4 ;
-- une réduction importante du biais et de la MSE en largeur 5 ;
-- des valeurs négatives de R² et de Spearman en largeur 5 ;
-- une concentration croissante de la cible `O₆` près de `1`.
+- a favorable predictive signal at width 3;
+- a deterioration of errors at width 4;
+- a large reduction of bias and MSE at width 5;
+- negative R² and Spearman values at width 5;
+- a growing concentration of the target `O₆` near `1`.
 
-La moyenne observée de `O₆` était notamment proche de :
+The observed mean of `O₆` was notably close to:
 
-- `0.9836` en largeur 3 ;
-- `0.9990` en largeur 4 ;
-- `0.99988` en largeur 5.
+- `0.9836` at width 3;
+- `0.9990` at width 4;
+- `0.99988` at width 5.
 
-Une régression directe de `O₆` confond donc deux phénomènes :
+A direct regression of `O₆` therefore confounds two phenomena:
 
-1. l’atteinte exacte de `O₆ = 1` ;
-2. la taille du déficit résiduel lorsque `O₆ < 1`.
+1. the exact attainment of `O₆ = 1`;
+2. the size of the residual deficit when `O₆ < 1`.
 
-TDI-4 teste une géométrie de cible en deux parties afin de séparer ces
-phénomènes.
+TDI-4 tests a two-part target geometry in order to separate these
+phenomena.
 
-## 3. Hypothèses
+## 3. Hypotheses
 
-### H4.1 — Géométrie de cible
+### H4.1 — Target geometry
 
-Une représentation en deux parties de la récupération à l’horizon 6 est
-plus stable entre les largeurs qu’une régression directe de `O₆`.
+A two-part representation of recovery at horizon 6 is more stable across
+widths than a direct regression of `O₆`.
 
-### H4.2 — Valeur ajoutée des variables TDI
+### H4.2 — Added value of the TDI variables
 
-À architecture de modèle et géométrie de cible identiques, les variables
-TDI observées à l’horizon 2 améliorent la prédiction par rapport aux seules
-variables de baseline.
+With identical model architecture and target geometry, the TDI variables
+observed at horizon 2 improve prediction relative to the baseline variables
+alone.
 
-### H4.3 — Transfert hors distribution
+### H4.3 — Out-of-distribution transfer
 
-Le gain du challenger entraîné sur les largeurs 3 et 4 reste positif sur
-une population intacte de largeur 5.
+The gain of the challenger trained on widths 3 and 4 remains positive on an
+unseen width-5 population.
 
-## 4. Systèmes et horizons
+## 4. Systems and horizons
 
-Pour chaque système :
+For each system:
 
-- état de référence : état nul de la largeur considérée ;
-- perturbation : inversion du dernier nœud ;
-- action future : `Noop` ;
-- horizon d’observation : `2` ;
-- horizon de résultat : `6`.
+- reference state: zero state of the considered width;
+- perturbation: flip of the last node;
+- future action: `Noop`;
+- observation horizon: `2`;
+- outcome horizon: `6`.
 
-Les distributions sont propagées avec l’arithmétique rationnelle exacte
-fondée sur `BigUint`.
+The distributions are propagated with the exact rational arithmetic based
+on `BigUint`.
 
 ## 5. Exclusion
 
-Un système est exclu si les distributions sont déjà exactement identiques
-à l’horizon d’observation :
+A system is excluded if the distributions are already exactly identical at
+the observation horizon:
 
 `O₂ = 1`.
 
-Cette règle est identique à celle de TDI-3 et évite une fuite logique
-directe de la cible.
+This rule is identical to that of TDI-3 and avoids a direct logical leak of
+the target.
 
-Les systèmes tels que `O₆ = 1` sont conservés. Ils constituent précisément
-la composante binaire du nouveau problème.
+Systems such that `O₆ = 1` are retained. They constitute precisely the
+binary component of the new problem.
 
-Aucune autre exclusion dépendant de la cible n’est autorisée.
+No other exclusion depending on the target is allowed.
 
-## 6. Populations et graines
+## 6. Populations and seeds
 
-Les plages de graines sont entièrement nouvelles.
+The seed ranges are entirely new.
 
-| Population | Largeur | Effectif retenu | Première graine |
+| Population | Width | Retained size | First seed |
 |---|---:|---:|---:|
-| entraînement | 3 | 10 000 | 30 000 000 |
-| holdout | 3 | 5 000 | 31 000 000 |
-| entraînement | 4 | 10 000 | 40 000 000 |
-| holdout | 4 | 5 000 | 41 000 000 |
-| holdout OOD | 5 | 5 000 | 50 000 000 |
+| training | 3 | 10,000 | 30,000,000 |
+| holdout | 3 | 5,000 | 31,000,000 |
+| training | 4 | 10,000 | 40,000,000 |
+| holdout | 4 | 5,000 | 41,000,000 |
+| OOD holdout | 5 | 5,000 | 50,000,000 |
 
-La génération continue au-delà de la première graine jusqu’à obtention du
-nombre préenregistré de systèmes retenus.
+Generation continues beyond the first seed until the preregistered number
+of retained systems is obtained.
 
-Les populations d’entraînement des largeurs 3 et 4 sont combinées.
+The training populations of widths 3 and 4 are combined.
 
-Les holdouts ne sont jamais utilisés pour :
+The holdouts are never used to:
 
-- choisir les variables ;
-- choisir les transformations ;
-- régler les seuils ;
-- sélectionner le modèle ;
-- ajuster `lambda`.
+- choose the variables;
+- choose the transformations;
+- tune the thresholds;
+- select the model;
+- adjust `lambda`.
 
-## 7. Variables explicatives
+## 7. Explanatory variables
 
-### 7.1 Baseline appariée
+### 7.1 Matched baseline
 
-La baseline conserve exactement les 13 variables utilisées dans TDI-3 :
+The baseline keeps exactly the 13 variables used in TDI-3:
 
-- entropies normalisées ;
-- nombres d’états accessibles normalisés ;
-- logarithmes des nombres de chemins ;
-- caractéristiques de largeur.
+- normalized entropies;
+- normalized numbers of reachable states;
+- logarithms of the numbers of paths;
+- width features.
 
-La largeur est incluse comme variable explicative de la même façon que dans
+The width is included as an explanatory variable in the same way as in
 TDI-3.
 
-### 7.2 Challenger TDI-4
+### 7.2 TDI-4 challenger
 
-Le challenger contient les 13 variables de baseline et les trois variables
-TDI déjà définies :
+The challenger contains the 13 baseline variables and the three already
+defined TDI variables:
 
-- `O₁` ;
-- `O₂` ;
+- `O₁`;
+- `O₂`;
 - `O₂ - O₁`.
 
-Aucune variable supplémentaire ne peut être ajoutée après le gel.
+No additional variable may be added after the freeze.
 
-## 8. Géométrie de cible en deux parties
+## 8. Two-part target geometry
 
-Soit :
+Let:
 
 `O₆ ∈ [0, 1]`
 
-le recouvrement exact à l’horizon 6.
+be the exact recovery at horizon 6.
 
-### 8.1 Composante de récupération exacte
+### 8.1 Exact-recovery component
 
-La cible binaire est :
+The binary target is:
 
-`Z = 1` si `O₆ = 1`, sinon `Z = 0`.
+`Z = 1` if `O₆ = 1`, otherwise `Z = 0`.
 
-Un premier modèle prédit :
+A first model predicts:
 
 `p = P(Z = 1 | X)`.
 
-La prédiction linéaire est bornée dans `[0, 1]`.
+The linear prediction is bounded in `[0, 1]`.
 
-### 8.2 Composante conditionnelle
+### 8.2 Conditional component
 
-Pour les seuls systèmes tels que `O₆ < 1`, le déficit est :
+For the only systems such that `O₆ < 1`, the deficit is:
 
 `D = 1 - O₆`.
 
-La cible conditionnelle est :
+The conditional target is:
 
 `U = -log₂(D)`.
 
-Une grande valeur de `U` indique un déficit très faible.
+A large value of `U` indicates a very small deficit.
 
-`U` est standardisé à partir de la moyenne et de l’écart-type calculés
-exclusivement sur les systèmes d’entraînement non complètement récupérés.
+`U` is standardized from the mean and standard deviation computed
+exclusively on the training systems that are not fully recovered.
 
 ### 8.3 Reconstruction
 
-La prédiction finale de recouvrement est :
+The final recovery prediction is:
 
 `Ô₆ = 1 - (1 - p̂) × 2^(-Û)`.
 
-La valeur reconstruite est bornée dans `[0, 1]`.
+The reconstructed value is bounded in `[0, 1]`.
 
-La même procédure est appliquée à la baseline et au challenger.
+The same procedure is applied to the baseline and the challenger.
 
-## 9. Modèles
+## 9. Models
 
-Les deux composantes utilisent une régression ridge déterministe.
+Both components use a deterministic ridge regression.
 
-Paramètre fixé :
+Fixed parameter:
 
 `lambda = 1`.
 
-Deux têtes sont entraînées pour chaque famille de variables :
+Two heads are trained for each family of variables:
 
-1. tête binaire sur `Z` ;
-2. tête conditionnelle sur `U`, uniquement pour les systèmes où `Z = 0`.
+1. binary head on `Z`;
+2. conditional head on `U`, only for the systems where `Z = 0`.
 
-Aucune recherche d’hyperparamètres n’est autorisée.
+No hyperparameter search is allowed.
 
-L’ordre d’accumulation flottante reste déterministe.
+The floating-point accumulation order remains deterministic.
 
-## 10. Perte composite principale
+## 10. Main composite loss
 
-La perte principale est :
+The main loss is:
 
 `L = 0.5 × Brier(Z, p̂) + 0.5 × MSE(U_std, Û_std | Z = 0)`.
 
-La seconde composante est calculée uniquement sur les observations non
-complètement récupérées.
+The second component is computed only on the not fully recovered
+observations.
 
-Si une population d’évaluation ne contient aucun système non complètement
-récupéré, l’évaluation doit s’interrompre avec une erreur explicite. Aucun
-terme nul artificiel ne sera substitué.
+If an evaluation population contains no not fully recovered system, the
+evaluation must stop with an explicit error. No artificial zero term will
+be substituted.
 
-Une amélioration est définie par :
+An improvement is defined by:
 
 `ΔL = L_baseline - L_challenger`.
 
-Une valeur positive favorise TDI-4.
+A positive value favors TDI-4.
 
-## 11. Métriques rapportées
+## 11. Reported metrics
 
-Pour chaque largeur et pour le holdout combiné seront rapportés :
+For each width and for the combined holdout, the following will be reported:
 
-### Tête binaire
+### Binary head
 
-- Brier score ;
-- taux observé de récupération exacte ;
-- moyenne de `p̂` ;
-- calibration intercept ;
-- calibration slope ;
-- fraction de prédictions bornées à `0` ;
-- fraction de prédictions bornées à `1`.
+- Brier score;
+- observed rate of exact recovery;
+- mean of `p̂`;
+- calibration intercept;
+- calibration slope;
+- fraction of predictions bounded at `0`;
+- fraction of predictions bounded at `1`.
 
-### Tête conditionnelle
+### Conditional head
 
-- MSE sur `U` standardisé ;
-- MAE sur `U` standardisé ;
-- R² conditionnel ;
-- Spearman conditionnel.
+- MSE on standardized `U`;
+- MAE on standardized `U`;
+- conditional R²;
+- conditional Spearman.
 
-### Reconstruction de `O₆`
+### Reconstruction of `O₆`
 
-- MSE ;
-- MAE ;
-- R² ;
-- Spearman ;
-- biais moyen ;
-- moyenne observée ;
-- moyenne prédite ;
-- calibration intercept ;
+- MSE;
+- MAE;
+- R²;
+- Spearman;
+- mean bias;
+- observed mean;
+- predicted mean;
+- calibration intercept;
 - calibration slope.
 
-### Perte principale
+### Main loss
 
-- perte composite `L` ;
-- amélioration absolue `ΔL` ;
-- réduction relative de `L`.
+- composite loss `L`;
+- absolute improvement `ΔL`;
+- relative reduction of `L`.
 
-## 12. Comparateur secondaire
+## 12. Secondary comparator
 
-Un comparateur secondaire reproduit, sur les nouvelles populations, la
-régression ridge directe de `O₆` utilisée dans TDI-3.
+A secondary comparator reproduces, on the new populations, the direct ridge
+regression of `O₆` used in TDI-3.
 
-Ce comparateur sert uniquement à déterminer si la géométrie en deux parties
-améliore la stabilité.
+This comparator serves only to determine whether the two-part geometry
+improves stability.
 
-Il ne peut pas remplacer la baseline principale et ne participe pas au
-verdict TDI-4A ou TDI-4B.
+It cannot replace the main baseline and does not participate in the TDI-4A
+or TDI-4B verdict.
 
 ## 13. Bootstrap
 
-Le bootstrap est :
+The bootstrap is:
 
-- apparié ;
-- déterministe ;
-- effectué séparément pour chaque population ;
-- composé de 2 000 réplications.
+- paired;
+- deterministic;
+- performed separately for each population;
+- composed of 2,000 replications.
 
-Graine fixe :
+Fixed seed:
 
 `0x5444_4934_4745_4F4D`.
 
-Des intervalles percentile à 95 % sont calculés pour :
+95 % percentile intervals are computed for:
 
-- l’amélioration de perte composite ;
-- l’amélioration du Brier score ;
-- l’amélioration de la MSE conditionnelle ;
-- l’amélioration de la MSE reconstruite ;
-- l’amélioration de la MAE reconstruite.
+- the composite loss improvement;
+- the Brier score improvement;
+- the conditional MSE improvement;
+- the reconstructed MSE improvement;
+- the reconstructed MAE improvement.
 
-## 14. Critère principal TDI-4A
+## 14. Primary criterion TDI-4A
 
-TDI-4A est déclaré **RÉUSSI** seulement si toutes les conditions suivantes
-sont satisfaites sur les holdouts des largeurs 3 et 4 :
+TDI-4A is declared **PASSED** only if all the following conditions are
+satisfied on the width-3 and width-4 holdouts:
 
-1. réduction relative de la perte composite combinée supérieure ou égale à
-   `5 %` ;
-2. borne inférieure de l’IC 95 % de `ΔL` combiné strictement positive ;
-3. borne inférieure de l’IC 95 % de l’amélioration du Brier combiné
-   strictement positive ;
-4. borne inférieure de l’IC 95 % de `ΔL` en largeur 3 strictement positive ;
-5. borne inférieure de l’IC 95 % de `ΔL` en largeur 4 strictement positive ;
-6. amélioration ponctuelle positive de la MSE reconstruite combinée ;
-7. amélioration ponctuelle positive de la MAE reconstruite combinée ;
-8. Spearman conditionnel positif pour le challenger dans les deux largeurs.
+1. relative reduction of the combined composite loss greater than or equal
+   to `5 %`;
+2. lower bound of the 95 % CI of the combined `ΔL` strictly positive;
+3. lower bound of the 95 % CI of the combined Brier improvement strictly
+   positive;
+4. lower bound of the 95 % CI of `ΔL` at width 3 strictly positive;
+5. lower bound of the 95 % CI of `ΔL` at width 4 strictly positive;
+6. positive point improvement of the combined reconstructed MSE;
+7. positive point improvement of the combined reconstructed MAE;
+8. positive conditional Spearman for the challenger in both widths.
 
-L’échec d’une seule condition entraîne le verdict **ÉCHOUÉ**.
+The failure of a single condition leads to the verdict **FAILED**.
 
-## 15. Critère de transfert TDI-4B
+## 15. Transfer criterion TDI-4B
 
-TDI-4B est déclaré **RÉUSSI** seulement si toutes les conditions suivantes
-sont satisfaites sur le holdout intact de largeur 5 :
+TDI-4B is declared **PASSED** only if all the following conditions are
+satisfied on the unseen width-5 holdout:
 
-1. borne inférieure de l’IC 95 % de `ΔL` strictement positive ;
-2. réduction relative de la MSE reconstruite supérieure ou égale à `5 %` ;
-3. borne inférieure de l’IC 95 % de l’amélioration de MSE reconstruite
-   strictement positive ;
-4. borne inférieure de l’IC 95 % de l’amélioration du Brier score
-   strictement positive ;
-5. Spearman conditionnel du challenger strictement positif ;
-6. Spearman conditionnel du challenger supérieur ou égal à celui de la
-   baseline ;
-7. biais absolu reconstruit du challenger inférieur à celui de la baseline.
+1. lower bound of the 95 % CI of `ΔL` strictly positive;
+2. relative reduction of the reconstructed MSE greater than or equal to
+   `5 %`;
+3. lower bound of the 95 % CI of the reconstructed MSE improvement strictly
+   positive;
+4. lower bound of the 95 % CI of the Brier score improvement strictly
+   positive;
+5. strictly positive conditional Spearman of the challenger;
+6. conditional Spearman of the challenger greater than or equal to that of
+   the baseline;
+7. absolute reconstructed bias of the challenger lower than that of the
+   baseline.
 
-L’échec d’une seule condition entraîne le verdict **ÉCHOUÉ**.
+The failure of a single condition leads to the verdict **FAILED**.
 
-## 16. Analyses secondaires
+## 16. Secondary analyses
 
-Les analyses suivantes sont rapportées mais ne modifient pas les verdicts :
+The following analyses are reported but do not modify the verdicts:
 
-- résultats séparés pour chaque tête ;
-- comparaison avec la régression directe TDI-3 ;
-- coefficients des modèles ;
-- taux de récupération exacte par largeur ;
-- distribution de `U` ;
-- saturation des prédictions ;
-- résultats par déciles de déficit observé.
+- results separated for each head;
+- comparison with the direct TDI-3 regression;
+- model coefficients;
+- exact recovery rate by width;
+- distribution of `U`;
+- saturation of the predictions;
+- results by deciles of observed deficit.
 
-Aucune analyse secondaire ne peut être requalifiée comme critère principal
-après observation des résultats.
+No secondary analysis may be requalified as a primary criterion after
+observation of the results.
 
-## 17. Politique en cas d’erreur
+## 17. Error policy
 
-Une erreur d’implémentation ou une limite numérique découverte avant la
-production de métriques peut être corrigée si :
+An implementation error or a numerical limit discovered before the
+production of metrics may be corrected if:
 
-- l’échec initial est conservé ;
-- la cause est documentée ;
-- les critères et populations ne sont pas modifiés ;
-- le code corrigé est regélé avant une nouvelle exécution.
+- the initial failure is preserved;
+- the cause is documented;
+- the criteria and populations are not modified;
+- the corrected code is refrozen before a new execution.
 
-Une fois les métriques produites, aucune modification du protocole,
-de l’évaluateur ou des critères n’est autorisée pour cette expérience.
+Once the metrics are produced, no modification of the protocol, the
+evaluator or the criteria is allowed for this experiment.
 
-## 18. Verdicts attendus dans la sortie
+## 18. Expected verdicts in the output
 
-L’évaluateur doit produire exactement deux lignes finales :
+The evaluator must produce exactly two final lines:
 
 `CRITÈRE PRINCIPAL TDI-4A : RÉUSSI|ÉCHOUÉ`
 

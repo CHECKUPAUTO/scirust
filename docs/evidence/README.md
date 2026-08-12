@@ -1,42 +1,42 @@
-# Évidence brute archivée — chantier « déterminisme comme évidence » (2026-07-10)
+# Archived raw evidence — "determinism as evidence" workstream (2026-07-10)
 
-Pièces de provenance des chiffres cités par `docs/DEAD_GUARDS_STUDY.md`,
-`paper/PAPER_PLAN.md` (table claims → évidence) et le draft
-`paper/correctness26/main.tex`. Archivées ici le 2026-07-11 lors de la
-clôture du chantier (soumission Correctness reportée — pas en 2026).
+Provenance pieces for the figures cited by `docs/DEAD_GUARDS_STUDY.md`,
+`paper/PAPER_PLAN.md` (claims → evidence table) and the draft
+`paper/correctness26/main.tex`. Archived here on 2026-07-11 at the
+close of the workstream (Correctness submission postponed — not in 2026).
 
-## `dead-guards/` — campagne de minage (Lot 2, verdict NO-GO)
+## `dead-guards/` — mining campaign (Lot 2, NO-GO verdict)
 
-Les 22 rapports Markdown par dépôt, produits par
-`epsilon-audit --mine <dépôt> --out <rapport>` le 2026-07-10, **tels quels** :
-chacun est scellé par son `Report-SHA256` (hachage du corps — toute
-altération est détectable) et reproductible bit-à-bit sur un arbre source
-identique. `SHAS.txt` liste, pour chaque dépôt : nom, SHA de commit cloné
-(`--depth 1`), URL, et sous-répertoires du clone sparse le cas échéant.
-Synthèse et revue manuelle des candidats : `docs/DEAD_GUARDS_STUDY.md`.
+The 22 Markdown reports per repository, produced by
+`epsilon-audit --mine <dépôt> --out <rapport>` on 2026-07-10, **as-is**:
+each one is sealed by its `Report-SHA256` (hash of the body — any
+alteration is detectable) and reproducible bit-for-bit on an identical source
+tree. `SHAS.txt` lists, for each repository: name, cloned commit SHA
+(`--depth 1`), URL, and the sparse-clone subdirectories if any.
+Synthesis and manual review of the candidates: `docs/DEAD_GUARDS_STUDY.md`.
 
-Provenance : générés dans le conteneur de session (x86-64) au commit
-`ecf575b3` de l'outil ; copiés ici sans modification (les scellés SHA-256
-en font foi).
+Provenance: generated in the session container (x86-64) at commit
+`ecf575b3` of the tool; copied here without modification (the SHA-256 seals
+attest to this).
 
-## `o1-bench/` — banc « coût du déterminisme » (protocole O1)
+## `o1-bench/` — "cost of determinism" benchmark (protocol O1)
 
-Sorties brutes de `bench_reduction_overhead`
-(`scirust-core/src/bin/bench_reduction_overhead.rs`) :
+Raw outputs of `bench_reduction_overhead`
+(`scirust-core/src/bin/bench_reduction_overhead.rs`):
 
-- `x86-20260710.md` — deux exécutions sur l'hôte x86-64 du conteneur de
-  session (4 cœurs). Provenance : sortie de terminal de la session,
-  archivée par l'agent qui l'a exécutée.
-- `jetson-20260710T094509Z.md` et `jetson-20260710T114542Z.md` — les deux
-  protocoles complets sur **NVIDIA Jetson AGX Thor Developer Kit**
-  (14 cœurs, L4T R38.4.0, MAXN), exécutés par l'opérateur via
-  `scripts/bench-o1-jetson.sh` aux commits `0c2f1bf` puis `014795f`.
-  Provenance : **retranscription de la sortie de terminal collée par
-  l'opérateur en session** — les bundles originaux
-  (`bench-o1-jetson-<UTC>/`) restent sur la machine Jetson (`~/scirust/
-  scirust/`), git-ignorés par conception ; en cas de doute, ils font foi.
+- `x86-20260710.md` — two runs on the x86-64 host of the session
+  container (4 cores). Provenance: terminal output of the session,
+  archived by the agent that executed it.
+- `jetson-20260710T094509Z.md` and `jetson-20260710T114542Z.md` — the two
+  complete protocols on the **NVIDIA Jetson AGX Thor Developer Kit**
+  (14 cores, L4T R38.4.0, MAXN), executed by the operator via
+  `scripts/bench-o1-jetson.sh` at commits `0c2f1bf` then `014795f`.
+  Provenance: **transcription of the terminal output pasted by the
+  operator in session** — the original bundles
+  (`bench-o1-jetson-<UTC>/`) remain on the Jetson machine (`~/scirust/
+  scirust/`), git-ignored by design; in case of doubt, they prevail.
 
-Résultat clé re-vérifiable dans ces fichiers : les 4 empreintes de la
-réduction en ordre figé (`0x60daf62cf2cb2c29`, `0x9bf7c3f3e9b18898`,
-`0xd5b8e15fc7c028e6`, `0x7e99a9d050da4d55` à 1/2/4/8 threads) sont
-**bit-identiques entre x86-64 et aarch64**, sur des runs indépendants.
+Key result re-verifiable in these files: the 4 fingerprints of the
+fixed-order reduction (`0x60daf62cf2cb2c29`, `0x9bf7c3f3e9b18898`,
+`0xd5b8e15fc7c028e6`, `0x7e99a9d050da4d55` at 1/2/4/8 threads) are
+**bit-identical between x86-64 and aarch64**, on independent runs.

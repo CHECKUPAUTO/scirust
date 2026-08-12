@@ -1,136 +1,136 @@
-# SciRust Memory Wall — Architecture des 5 Piliers
+# SciRust Memory Wall — Architecture of the 5 Pillars
 
-## Vue d'ensemble
+## Overview
 
-Ce document décrit l'architecture complète pour surmonter le **Memory Wall** (goulot d'étranglement de la bande passante mémoire) dans SciRust, cible les architectures ARM64 (Jetson AGX Thor) et x86 (64 cœurs).
+This document describes the complete architecture for overcoming the **Memory Wall** (memory-bandwidth bottleneck) in SciRust, targeting ARM64 (Jetson AGX Thor) and x86 (64 cores) architectures.
 
-## Problématique
+## Problem statement
 
-Dans les SSM (Mamba), LLMs, et le trading haute fréquence :
+In SSMs (Mamba), LLMs, and high-frequency trading:
 
-| Métrique | Avant | Cible |
+| Metric | Before | Target |
 |----------|-------|-------|
-| Alllocations/intmédiaire | 1-3 per layer norm | 0 (fusion) |
-| CPU↔GPU copy per matmul | 2 (h2d + d2h) | 0 (zero-copy pinned) |
+| Allocations/intermediates | 1-3 per layer norm | 0 (fusion) |
+| CPU↔GPU copies per matmul | 2 (h2d + d2h) | 0 (zero-copy pinned) |
 | Arena alloc latency | O(n) linear scan | O(1) pointer bump |
-| L2 cache hit rate (matmul tiled) | ~65% | >95% |
-| Bandwidth effective (quant int8) | ~1× | ~4× |
+| L2 cache hit rate (tiled matmul) | ~65% | >95% |
+| Effective bandwidth (int8 quant) | ~1× | ~4× |
 
-## Structure des modules
+## Module structure
 
 ```
 scirust/
-├── scirust-arena/                    # Pilier 3: Arena Allocators
+├── scirust-arena/                    # Pillar 3: Arena Allocators
 │   ├── Cargo.toml
 │   └── src/
 │       ├── lib.rs                    # Arena public API
 │       ├── allocator.rs              # PinnedArena impl
 │       ├── slab.rs                   # Slab allocator for SSM states
 │       └── aligned.rs                # AlignedVec + alignment utilities
-├── scirust-fusion/                   # Pilier 1: AST Kernel Fusion
+├── scirust-fusion/                   # Pillar 1: AST Kernel Fusion
 │   ├── Cargo.toml
 │   └── src/
 │       ├── lib.rs                    # Public API
-│       ├── graph.rs                  # OpGraph — graphe de dépendance
-│       ├── fusion.rs                 # FusionPass — détection + fusion
-│       ├── kernel.rs                 # FusedKernel — génération de code
+│       ├── graph.rs                  # OpGraph — dependency graph
+│       ├── fusion.rs                 # FusionPass — detection + fusion
+│       ├── kernel.rs                 # FusedKernel — code generation
 │       └── patterns.rs               # Built-in fusion patterns
-├── scirust-core/ (modifié)
+├── scirust-core/ (modified)
 │   └── src/
 │       ├── tensor/
-│       │   ├── pinned.rs             # Pilier 2: PinnedMemory
-│       │   └── mem_pool.rs           # Pilier 2: MemoryPool
+│       │   ├── pinned.rs             # Pillar 2: PinnedMemory
+│       │   └── mem_pool.rs           # Pillar 2: MemoryPool
 │       ├── simd/
-│       │   ├── tiling.rs             # Pilier 4: Cache-Aware Tiling
-│       │   └── neon.rs               # Pilier 4: ARM64 NEON/SVE
+│       │   ├── tiling.rs             # Pillar 4: Cache-Aware Tiling
+│       │   └── neon.rs               # Pillar 4: ARM64 NEON/SVE
 │       ├── quant/
-│       │   ├── mod.rs                # Pilier 5: quantification module
-│       │   ├── int8.rs               # Pilier 5: int8 quant + dequant SIMD
-│       │   ├── bf16.rs               # Pilier 5: bf16 <-> f32
-│       │   └── int4.rs               # Pilier 5: int4 unpacking
+│       │   ├── mod.rs                # Pillar 5: quantization module
+│       │   ├── int8.rs               # Pillar 5: int8 quant + dequant SIMD
+│       │   ├── bf16.rs               # Pillar 5: bf16 <-> f32
+│       │   └── int4.rs               # Pillar 5: int4 unpacking
 │       └── nn/
-│           └── fused_ops.rs          # Pilier 1: Fused matmul+silu+layernorm
-└── scirust-simd/ (modifié)
+│           └── fused_ops.rs          # Pillar 1: Fused matmul+silu+layernorm
+└── scirust-simd/ (modified)
     └── src/
-        ├── sve.rs                    # Pilier 4: ARM SVE intrinsics
-        └── matrix/tiling_dispatch.rs # Pilier 4: Tiling dispatch
+        ├── sve.rs                    # Pillar 4: ARM SVE intrinsics
+        └── matrix/tiling_dispatch.rs # Pillar 4: Tiling dispatch
 ```
 
-## Détails par pilier
+## Per-pillar details
 
-### Pilier 1: AST Kernel Fusion
+### Pillar 1: AST Kernel Fusion
 
-**Objectif**: Éviter les allers-retours en RAM en fondant les opérateurs consécutifs.
+**Goal**: Avoid RAM round-trips by fusing consecutive operators.
 
-**Algorithme de détection**:
-1. Construire un `OpGraph` depuis le MIR (via le rustc driver) ou depuis le forward pass (via le tracing runtime)
-2. Rechercher les motifs (patterns) canoniques:
+**Detection algorithm**:
+1. Build an `OpGraph` from the MIR (via the rustc driver) or from the forward pass (via the tracing runtime)
+2. Look for canonical patterns:
    - `MatMul → SiLU` (linear activation)
    - `MatMul → SiLU → LayerNorm` (MLP block)
    - `MatMul → LayerNorm` (pre-LN transformer)
    - `MatMul → MatMul → Add` (two-layer MLP)
    - `Conv2d → ReLU → Pool` (conv block)
-3. Pour chaque motif détecté, générer un `FusedKernel` qui:
-   - Calcule mean/var en un passage (LayerNorm)
-   - Applique SiLU/GELU sans intermédiaire
-   - Accumule les produits matriciels dans des registres accum
+3. For each detected pattern, generate a `FusedKernel` that:
+   - Computes mean/var in a single pass (LayerNorm)
+   - Applies SiLU/GELU with no intermediate
+   - Accumulates matrix products in accum registers
 
-### Pilier 2: Mémoire Unifiée (Zero-Copy)
+### Pillar 2: Unified Memory (Zero-Copy)
 
-**PinnedMemory** — mémoire alignée 64 octets, pinée en espace utilisateur:
-- Sur ARM64 (Jetson): utilise `mmap(MAP_ANONYMOUS | MAP_POPULATE)` avec `mlock()`
-- Sur x86: utilise `posix_memalign` + `mlock()`
-- Compatible CUDA Unified Memory (`cudaHostRegister`) et GPU Direct
+**PinnedMemory** — 64-byte aligned memory, pinned in user space:
+- On ARM64 (Jetson): uses `mmap(MAP_ANONYMOUS | MAP_POPULATE)` with `mlock()`
+- On x86: uses `posix_memalign` + `mlock()`
+- Compatible with CUDA Unified Memory (`cudaHostRegister`) and GPU Direct
 
-**MemoryPool** — pool de tenseurs à taille fixe:
-- Réduit la fragmentation pour les batches de taille constante
-- Réutilise les blocs déjà alloués
+**MemoryPool** — fixed-size tensor pool:
+- Reduces fragmentation for constant-size batches
+- Reuses already-allocated blocks
 
-### Pilier 3: Arena Allocators
+### Pillar 3: Arena Allocators
 
-**PinnedArena** — allocation par bump pointer:
-- Pré-alloue un grand bloc (128-byte aligned)
-- `alloc::<T>()` = déplacement d'un pointeur (O(1))
-- `reset()` = remise à zéro du pointeur (O(1))
-- **No Drop, no free** — toutes les allocations sont dealloquées ensemble
+**PinnedArena** — bump-pointer allocation:
+- Pre-allocates one large block (128-byte aligned)
+- `alloc::<T>()` = pointer bump (O(1))
+- `reset()` = pointer reset (O(1))
+- **No Drop, no free** — all allocations are deallocated together
 
-**Slab** — pour les états SSM:
-- Stocke les états cachés (c, h̃) des cellules Mamba
-- Accès par index (O(1))
-- Supporte le garbage collection mark-and-sweep pour les séquences de longueur variable
+**Slab** — for SSM states:
+- Stores the hidden states (c, h̃) of Mamba cells
+- Indexed access (O(1))
+- Supports mark-and-sweep garbage collection for variable-length sequences
 
-### Pilier 4: Auto-Vectorisation SIMD "Cache-Aware"
+### Pillar 4: "Cache-Aware" SIMD Auto-Vectorization
 
-**Tiling** — pour le matmul:
-- Analyse la taille du cache L2 de la machine cible
-- Adapte la taille des blocs (tile) pour qu'ils tiennent dans L2
-- x86: AVX-512 (16x f32 par tile), AVX2 (8x f32)
+**Tiling** — for matmul:
+- Analyzes the L2 cache size of the target machine
+- Adapts the tile sizes so they fit in L2
+- x86: AVX-512 (16x f32 per tile), AVX2 (8x f32)
 - ARM64: NEON (4x f32), SVE (scalable vector length)
 
-**Cache profilage**:
-- Détecte la taille L2 au runtime via `/sys/devices/system/cpu/cpu0/cache/`
-- Sur Jetson AGX Thor: L2 = 4MB per cluster
-- Sur x86: L2 ≈ 256KB-1MB per core
+**Cache profiling**:
+- Detects L2 size at runtime via `/sys/devices/system/cpu/cpu0/cache/`
+- On Jetson AGX Thor: L2 = 4MB per cluster
+- On x86: L2 ≈ 256KB-1MB per core
 
-### Pilier 5: Primitives de Quantification Natives
+### Pillar 5: Native Quantization Primitives
 
-**QuantizedTensor** — stockage quantifié:
+**QuantizedTensor** — quantized storage:
 - `int8`: 4× compression (f32 → int8)
 - `bf16`: 2× compression (f32 → bf16)
 - `int4`: 8× compression (f32 → int4 packed)
 
-**Décompression on-the-fly**:
-- int8 → f32 dans registres SIMD (AVX2: 8-lanes, NEON: 4-lanes)
-- bf16 → f32: conversion directe
+**On-the-fly decompression**:
+- int8 → f32 in SIMD registers (AVX2: 8-lanes, NEON: 4-lanes)
+- bf16 → f32: direct conversion
 - int4 packed → int8 → f32: unpack + sign-extend
 
-**Calcul en quantifié**:
+**Computing in quantized form**:
 - int8 × int8 → int32 (accumulate in int32)
-- Fused dequant + matmul: déquantiser directement dans le produit
+- Fused dequant + matmul: dequantize directly into the product
 
-## Compatibilité
+## Compatibility
 
-| Plateforme | SIMD | Arena | Fusion | Quant | Pinned |
+| Platform | SIMD | Arena | Fusion | Quant | Pinned |
 |------------|------|-------|--------|-------|--------|
 | x86_64 (AVX-512) | AVX-512 | ✓ | ✓ | ✓ | ✓ |
 | x86_64 (AVX2) | AVX2 | ✓ | ✓ | ✓ | ✓ |

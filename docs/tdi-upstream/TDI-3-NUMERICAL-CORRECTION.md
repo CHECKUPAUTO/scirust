@@ -1,97 +1,97 @@
-# TDI-3 — Correction numérique postérieure au gel
+# TDI-3 — Numerical correction after freeze
 
-Date de détection : 12 juillet 2026.
+Detection date: 12 July 2026.
 
-## Exécution concernée
+## Affected execution
 
-La première exécution du protocole TDI-3 a été lancée sur le commit gelé :
+The first execution of the TDI-3 protocol was launched on the frozen commit:
 
 `25b6146764b2ee87bbffda559dd9dd0559213360`
 
-Elle s’est interrompue avant la production de métriques ou de verdicts.
+It stopped before producing metrics or verdicts.
 
-## Erreur observée
+## Observed error
 
-L’échec est reproductible avec :
+The failure is reproducible with:
 
-- largeur : 5 ;
-- graine : `20_000_000` ;
-- horizon : 6 ;
-- distribution : référence ;
-- état signalé : bits `15` ;
-- erreur : `ProbabilityOverflow`.
+- width: 5;
+- seed: `20_000_000`;
+- horizon: 6;
+- distribution: reference;
+- reported state: bits `15`;
+- error: `ProbabilityOverflow`.
 
-Message original :
+Original message:
 
 `ReferenceDistribution(ProbabilityOverflow { state: State { bits: 15, width: 5 }, depth: 6 })`
 
 ## Cause
 
-`ExactRatio` utilisait deux entiers `u128`.
+`ExactRatio` used two `u128` integers.
 
-La propagation restait rationnellement exacte, mais l’addition de
-probabilités issues de chemins possédant des dénominateurs différents pouvait
-produire un dénominateur commun réduit supérieur à la capacité de `u128`.
+The propagation remained rationally exact, but adding probabilities coming
+from paths with different denominators could produce a reduced common
+denominator exceeding the capacity of `u128`.
 
-Il ne s’agit donc pas :
+It is therefore not:
 
-- d’un résultat négatif de TDI-3 ;
-- d’une modification des données ;
-- d’une instabilité flottante ;
-- d’un dépassement provenant de la cible statistique.
+- a negative TDI-3 result;
+- a modification of the data;
+- a floating-point instability;
+- an overflow coming from the statistical target.
 
-Il s’agit d’une limite de représentation du moteur rationnel exact.
+It is a representation limit of the exact rational engine.
 
 ## Correction
 
-`ExactRatio` utilise désormais `BigUint`, une représentation entière
-arbitrairement grande en Rust pur.
+`ExactRatio` now uses `BigUint`, an arbitrarily large integer
+representation in pure Rust.
 
-Les opérations suivantes restent exactes :
+The following operations remain exact:
 
-- réduction par PGCD ;
-- addition rationnelle ;
-- division par le nombre local de successeurs ;
-- comparaison rationnelle ;
-- calcul du recouvrement distributionnel.
+- reduction by GCD;
+- rational addition;
+- division by the local number of successors;
+- rational comparison;
+- computation of the distributional recovery.
 
-La conversion en `f64` reste limitée à l’affichage et à la modélisation
-statistique, conformément au préenregistrement.
+Conversion to `f64` remains limited to display and statistical modeling,
+in accordance with the preregistration.
 
-## Contrôle de non-altération
+## Non-alteration control
 
-La correction ne modifie pas :
+The correction does not modify:
 
-- les populations ;
-- les plages de graines ;
-- les horizons 2 et 6 ;
-- la perturbation ;
-- les caractéristiques ;
-- la baseline ;
-- le modèle ridge ;
-- `lambda = 1` ;
-- le bootstrap ;
-- les critères TDI-3A et TDI-3B.
+- the populations;
+- the seed ranges;
+- the horizons 2 and 6;
+- the perturbation;
+- the features;
+- the baseline;
+- the ridge model;
+- `lambda = 1`;
+- the bootstrap;
+- the TDI-3A and TDI-3B criteria.
 
-Un test de régression vérifie que la largeur 5, graine `20_000_000`, peut
-désormais être analysée sans débordement. Ce test ne publie ni cible, ni
-prédiction, ni métrique.
+A regression test verifies that width 5, seed `20_000_000`, can now be
+analyzed without overflow. This test publishes neither target, nor
+prediction, nor metric.
 
-## Preuves conservées
+## Preserved evidence
 
-Les preuves locales de l’échec initial ont été conservées dans :
+The local evidence of the initial failure was preserved in:
 
 `/tmp/tdi3-first-run-overflow`
 
-Hashes observés :
+Observed hashes:
 
-- log partiel :
-  `28c43a599ba94afd4c74a1bed2f11e9050a7c4e774847e71e2c8c82e28e99893` ;
-- console complète :
+- partial log:
+  `28c43a599ba94afd4c74a1bed2f11e9050a7c4e774847e71e2c8c82e28e99893`;
+- complete console:
   `00f0a9d6ce5102ecdf1630c60149c885bce3616a30cc3096024fc9b106465b42`.
 
-## Nouveau gel
+## New freeze
 
-Après validation complète, un nouveau hash de l’évaluateur et un manifeste
-SHA-256 de l’ensemble du code scientifique seront produits avant la nouvelle
-exécution intégrale.
+After complete validation, a new hash of the evaluator and a SHA-256
+manifest of all the scientific code will be produced before the new full
+execution.
