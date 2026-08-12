@@ -35,30 +35,35 @@ train window is visited exactly once.
 ## Shared physical-Thor GPU lock
 
 Every production CUDA command and every physical-Thor performance qualification uses
-one advisory lock on the **shared host filesystem**:
+one advisory lock on the physical NVIDIA device inode:
 
 ```text
-/var/lib/github-runner/.scirust-thor-gpu.lock
+/dev/nvidia0
 ```
 
-Do not move this lock back under `/tmp`. The four persistent Actions runners are
-separate systemd services, and `/tmp` may be private to a service namespace. The
-`/var/lib/github-runner` path is the persistent runner state visible on the Thor host,
-so all `tarek-scirust-arm64-01..04` services and the root production shell contend on
-the same host inode.
+This is deliberate. The persistent Actions runners are separate systemd services, and
+a pathname on `/tmp` or on a runner-private mount can resolve to different inodes. The
+Thor qualification probe demonstrated that `/dev/nvidia0` is the same character device
+across multiple persistent runners (`rdev 195:0`) and that independent `flock`
+descriptions serialize on that inode.
 
-From the root shell, create the lock without replacing its inode and make it usable by
-the runner service account:
+Do not create, replace, chmod, or remove this device node as part of the runbook. Before
+using it, verify that it is a readable/writable character device and that `flock` is
+available:
 
 ```bash
-export SCIRUST_THOR_GPU_LOCK=/var/lib/github-runner/.scirust-thor-gpu.lock
-touch "$SCIRUST_THOR_GPU_LOCK"
-chmod 0666 "$SCIRUST_THOR_GPU_LOCK"
+export SCIRUST_THOR_GPU_LOCK=/dev/nvidia0
+test -c "$SCIRUST_THOR_GPU_LOCK"
+test -r "$SCIRUST_THOR_GPU_LOCK"
+test -w "$SCIRUST_THOR_GPU_LOCK"
+command -v flock >/dev/null
+stat -Lc 'gpu_lock_target=%n st_dev=%d inode=%i rdev_hex=%t:%T mode=%a owner=%U:%G type=%F' \
+  "$SCIRUST_THOR_GPU_LOCK"
 ```
 
-Never remove or atomically replace the lock file while a trainer or qualification may
-be running. `touch`/`chmod` preserve the inode. Physical qualification workflows print
-the lock device/inode before taking it so evidence can be audited.
+Physical qualification workflows perform the same checks and also verify that a second
+independent file description cannot acquire the lock while the qualification descriptor
+holds it.
 
 ## Stage 1 — read-only/fresh preflight and corpus fingerprint
 
@@ -86,10 +91,11 @@ export SCIAGENT_EXPECT_CORPUS_TOKENS=1029492639
 export SCIAGENT_SEQ=512
 export SCIAGENT_BATCH=8
 export SCIAGENT_PREFLIGHT_ONLY=1
-export SCIRUST_THOR_GPU_LOCK=/var/lib/github-runner/.scirust-thor-gpu.lock
+export SCIRUST_THOR_GPU_LOCK=/dev/nvidia0
 
-touch "$SCIRUST_THOR_GPU_LOCK"
-chmod 0666 "$SCIRUST_THOR_GPU_LOCK"
+test -c "$SCIRUST_THOR_GPU_LOCK"
+test -r "$SCIRUST_THOR_GPU_LOCK"
+test -w "$SCIRUST_THOR_GPU_LOCK"
 command -v flock >/dev/null
 flock -x "$SCIRUST_THOR_GPU_LOCK" \
   cargo +nightly-2026-07-02 run \
@@ -152,10 +158,11 @@ export SCIAGENT_SHUFFLE=1
 export SCIAGENT_TELEMETRY=25
 export SCIAGENT_SAVE_HOURS=6
 export SCIAGENT_KEEP=2
-export SCIRUST_THOR_GPU_LOCK=/var/lib/github-runner/.scirust-thor-gpu.lock
+export SCIRUST_THOR_GPU_LOCK=/dev/nvidia0
 
-touch "$SCIRUST_THOR_GPU_LOCK"
-chmod 0666 "$SCIRUST_THOR_GPU_LOCK"
+test -c "$SCIRUST_THOR_GPU_LOCK"
+test -r "$SCIRUST_THOR_GPU_LOCK"
+test -w "$SCIRUST_THOR_GPU_LOCK"
 command -v flock >/dev/null
 nohup flock -x "$SCIRUST_THOR_GPU_LOCK" \
   cargo +nightly-2026-07-02 run \
