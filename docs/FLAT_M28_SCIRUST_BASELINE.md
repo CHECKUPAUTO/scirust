@@ -33,10 +33,12 @@ The CSV includes median/p95 timings, paired ratios and parity evidence. `perform
 
 ## Physical Thor release-evidence gate
 
-`.github/workflows/flat-m28-thor-release-evidence.yml` runs the paired benchmark on the self-hosted physical Jetson Thor under the shared SciRust GPU lock. It fails closed when any other compute process is active and records the exact source revision plus the NVIDIA adapter/driver reported by the machine.
+`.github/workflows/flat-m28-thor-release-evidence.yml` runs the paired benchmark on the self-hosted physical Jetson Thor under the shared SciRust GPU lock. The idle observation and benchmark execute under the same lock boundary. An unreadable compute-occupancy query fails closed; a known detached production `cuda_pretrain` workload is never killed and is allowed to finish naturally while the workflow reserves the next idle boundary. Unknown GPU compute activity fails the qualification.
+
+The workflow checks out and verifies the exact source revision being reported, requires the physical NVIDIA Thor to be visible through Vulkan, forces the Vulkan WGPU backend, and rejects benchmark output unless the selected WGPU adapter reports `NVIDIA Tegra NVIDIA Thor`. NVIDIA inventory alone is not treated as proof that the measured WGPU work executed on Thor.
 
 The release-evidence sweep covers `seq_len` 128 and 512 with `head_dim` 64 and 128; each benchmark invocation measures both causal and non-causal attention with 3 warmups and 9 timed repeats. The same correctness oracle must pass before any timing row is emitted.
 
-This workflow is evidence collection, not a performance assertion. A release-level improvement statement may be promoted only after the exact-head output has been inspected and accepted for the explicitly measured workload(s). Software-adapter timing does not substitute for this physical-device evidence.
+This workflow is evidence collection, not a performance assertion. A release-level improvement statement may be promoted only after the exact-head output has been inspected and accepted for the explicitly measured workload(s). Any run collected while Thor occupancy is unverified or while another compute workload is active is rejected as release evidence. Software-adapter timing does not substitute for this physical-device evidence.
 
 The sovereignty boundary is unchanged: Rust-native host code and WGPU/WGSL only; no project-authored C/C++ or C ABI bridge and no mandatory CUDA C++/`nvcc`, WMMA/WGMMA, CUTLASS, cuDNN or vendor SDK.
