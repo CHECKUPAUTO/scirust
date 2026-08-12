@@ -38,6 +38,19 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Require persistent physical Thor runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "runner_name=$RUNNER_NAME"
+          case "$RUNNER_NAME" in
+            tarek-scirust-arm64-01|tarek-scirust-arm64-02|tarek-scirust-arm64-03|tarek-scirust-arm64-04)
+              ;;
+            *)
+              echo "::error::M28 physical evidence requires one of the persistent tarek-scirust-arm64-01..04 runners; refusing $RUNNER_NAME before build"
+              exit 1
+              ;;
+          esac
       - name: Verify exact source revision
         shell: bash
         run: |
@@ -59,9 +72,12 @@ jobs:
       - name: Format
         run: rustup run nightly-2026-07-02 cargo fmt --all -- --check
       - name: Build M28 benchmark
-        run: >-
-          rustup run nightly-2026-07-02 cargo build --release --locked -p scirust-gpu
-          --features flat-attention --example flat_m28_naive_vs_fused
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup run nightly-2026-07-02 cargo build --release --locked -p scirust-gpu \
+            --features flat-attention --example flat_m28_naive_vs_fused
+          test -x "$GITHUB_WORKSPACE/target/release/examples/flat_m28_naive_vs_fused"
       - name: Physical Thor paired benchmark
         shell: bash
         timeout-minutes: 330
@@ -110,11 +126,6 @@ jobs:
             exit 1
           }
 
-          # The production trainer historically did not acquire the benchmark
-          # flock. Prove a continuous idle/cooldown interval instead of trusting
-          # one nvidia-smi sample at the start of the job. Once the production
-          # runbook uses the shared lock, this also protects against legacy or
-          # accidentally unwrapped trainers.
           deadline=$((SECONDS + 18000))
           settle_step=5
           settle_required="$SCIRUST_THOR_IDLE_SETTLE_SECONDS"
@@ -179,15 +190,15 @@ jobs:
           echo "thor_idle_settle_seconds=$SCIRUST_THOR_IDLE_SETTLE_SECONDS"
           echo "sciagent_contamination_watch=continuous_1s"
 
+          benchmark="$GITHUB_WORKSPACE/target/release/examples/flat_m28_naive_vs_fused"
+          test -x "$benchmark"
           for seq in 128 512; do
             for dim in 64 128; do
               echo "=== geometry seq_len=$seq head_dim=$dim ==="
               out="$RUNNER_TEMP/flat-m28-thor-${seq}-${dim}.csv"
               SCIRUST_M28_SEQ_LEN="$seq" \
               SCIRUST_M28_HEAD_DIM="$dim" \
-              rustup run nightly-2026-07-02 cargo run --release --locked -p scirust-gpu \
-                --features flat-attention --example flat_m28_naive_vs_fused \
-                | tee "$out"
+              "$benchmark" | tee "$out"
 
               if [[ -s "$contamination" ]]; then
                 echo "::error::SciAgent training appeared during the measured M28 window; all timing evidence from this run is invalid"
