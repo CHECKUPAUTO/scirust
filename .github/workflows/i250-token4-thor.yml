@@ -1,0 +1,42 @@
+name: I250 token-four Thor diagnostic
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "scirust-sciagent/**"
+      - "scirust-cuda/**"
+      - ".github/workflows/i250-token4-thor.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    name: I250 token-four CUDA trace
+    runs-on: [self-hosted, Linux, ARM64, scirust-arm64, jetson-thor, internal]
+    timeout-minutes: 90
+    env:
+      RUSTFLAGS: "-D warnings"
+      CARGO_INCREMENTAL: "0"
+      SCIRUST_REQUIRE_CUDA: "1"
+      SCIRUST_THOR_GPU_LOCK: /dev/nvidia0
+      SCIAGENT_DECODE_PROMPT: "128"
+      SCIAGENT_DECODE_TRACE_TOKENS: "4"
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+      - name: Trace exact fourth-token divergence
+        shell: bash
+        run: |
+          set -euo pipefail
+          exec 9>"$SCIRUST_THOR_GPU_LOCK"
+          flock -x 9
+          test -e "$SCIRUST_THOR_GPU_LOCK"
+          if [[ -n "$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader)" ]]; then
+            echo "GPU compute activity is present; refusing diagnostic"
+            exit 1
+          fi
+          cargo run -p scirust-sciagent --features cuda --release --example cuda_decode_token_trace
