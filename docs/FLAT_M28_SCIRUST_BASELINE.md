@@ -13,6 +13,8 @@ Each primitive uses the production SciRust WGPU implementation and therefore sub
 
 Both paths are correctness-gated against `forward_reference_grouped` before timing. H2D upload and D2H readback are excluded from timed regions. The benchmark reports a fresh-output FLAT scope and a reused-output FLAT scope separately because buffer-allocation policy is part of the observable public-path contract.
 
+The measurement loop rotates the three timed paths (SciRust multi-dispatch, FLAT with fresh output, FLAT with reused output) through first/middle/last execution position over complete three-iteration cycles. This avoids structurally assigning one path to the same thermal/cache/order position on every repeat.
+
 Run:
 
 ```bash
@@ -28,5 +30,13 @@ Environment overrides:
 - `SCIRUST_M28_REPEATS`
 
 The CSV includes median/p95 timings, paired ratios and parity evidence. `performance_claim=none` is emitted deliberately: the numbers are benchmark evidence for the measured adapter and scope, not a universal speedup claim.
+
+## Physical Thor release-evidence gate
+
+`.github/workflows/flat-m28-thor-release-evidence.yml` runs the paired benchmark on the self-hosted physical Jetson Thor under the shared SciRust GPU lock. It fails closed when any other compute process is active and records the exact source revision plus the NVIDIA adapter/driver reported by the machine.
+
+The release-evidence sweep covers `seq_len` 128 and 512 with `head_dim` 64 and 128; each benchmark invocation measures both causal and non-causal attention with 3 warmups and 9 timed repeats. The same correctness oracle must pass before any timing row is emitted.
+
+This workflow is evidence collection, not a performance assertion. A release-level improvement statement may be promoted only after the exact-head output has been inspected and accepted for the explicitly measured workload(s). Software-adapter timing does not substitute for this physical-device evidence.
 
 The sovereignty boundary is unchanged: Rust-native host code and WGPU/WGSL only; no project-authored C/C++ or C ABI bridge and no mandatory CUDA C++/`nvcc`, WMMA/WGMMA, CUTLASS, cuDNN or vendor SDK.
