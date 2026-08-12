@@ -435,7 +435,7 @@ impl ResidentModel {
     }
 
     /// **EOS-aware KV-cached greedy generation** — the same resident M32 prefill
-    /// + M15 incremental decode route as [`Self::generate_cached`], terminating
+    /// plus M15 incremental decode route as [`Self::generate_cached`], terminating
     /// immediately after a generated token matches `eos_tokens`. An empty EOS
     /// set is behaviorally identical to ordinary cached greedy generation.
     pub fn generate_cached_until_eos(
