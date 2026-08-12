@@ -19,7 +19,7 @@ jobs:
       WGPU_BACKEND: vulkan
       FLAT_REQUIRE_WGPU: "1"
       RUSTFLAGS: "-D warnings"
-      FLAT_M34_SHA: "1165cbbb2fa116bfeb59d7c0c4927834e82969a1"
+      FLAT_M34_SHA: "d7ddc9093efcbff0c71e55778574727925d381a5"
     steps:
       - name: Prepare evidence workspace
         shell: bash
