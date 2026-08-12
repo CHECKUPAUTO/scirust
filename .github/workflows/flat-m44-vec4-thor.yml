@@ -1,0 +1,236 @@
+name: FLAT M44 vec4 Thor candidate
+
+on:
+  pull_request:
+    branches: [master, ci/thor-exclusive-performance-evidence]
+    paths:
+      - "ci/flat_m28_vec4_candidate.rs"
+      - ".github/workflows/flat-m44-vec4-thor.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flat-m44-vec4-thor-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  vec4-thor:
+    name: MHA vec4 candidate vs SciRust on physical Thor
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, ARM64, scirust-arm64, jetson-thor, internal]
+    timeout-minutes: 360
+    env:
+      CARGO_INCREMENTAL: 0
+      RUSTFLAGS: "-D warnings"
+      SCIRUST_THOR_GPU_LOCK: /tmp/scirust-thor-gpu.lock
+      SCIRUST_SOURCE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+      FLAT_M44_CANDIDATE_REV: bf69a1e1328769a1d1e26b3f2f0f813aa5c0b62c
+      SCIRUST_M28_WARMUPS: "3"
+      SCIRUST_M28_REPEATS: "12"
+      SCIRUST_THOR_IDLE_SETTLE_SECONDS: "300"
+      WGPU_BACKEND: vulkan
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify exact source revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          echo "source_revision=$actual"
+          test "$actual" = "$SCIRUST_SOURCE_REVISION"
+
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt
+
+      - name: Format candidate harness
+        run: rustup run nightly-2026-07-02 rustfmt --check --edition 2021 ci/flat_m28_vec4_candidate.rs
+
+      - name: Build exact FLAT candidate without touching product lockfile
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate="$RUNNER_TEMP/flat-m44-vec4-candidate"
+          rm -rf "$candidate"
+          mkdir -p "$candidate/src"
+          cp ci/flat_m28_vec4_candidate.rs "$candidate/src/main.rs"
+          cat > "$candidate/Cargo.toml" <<EOF
+          [package]
+          name = "flat-m44-vec4-candidate"
+          version = "0.0.0"
+          edition = "2021"
+          publish = false
+
+          [dependencies]
+          scirust-gpu = { path = "$GITHUB_WORKSPACE/scirust-gpu", default-features = false, features = ["wgpu"] }
+          flat-attention = { git = "https://github.com/Memorithm/FLAT-ATTENTION", rev = "$FLAT_M44_CANDIDATE_REV", default-features = false, features = ["wgpu"] }
+          wgpu = "0.20"
+          EOF
+          rustup run nightly-2026-07-02 cargo build --release --manifest-path "$candidate/Cargo.toml"
+          grep -F "$FLAT_M44_CANDIDATE_REV" "$candidate/Cargo.lock" >/dev/null || {
+            echo "::error::temporary candidate lock did not resolve exact FLAT revision $FLAT_M44_CANDIDATE_REV"
+            exit 1
+          }
+          test "$(git status --short -- Cargo.lock scirust-gpu/Cargo.toml | wc -l)" -eq 0 || {
+            echo "::error::candidate build modified SciRust product dependency state"
+            git status --short -- Cargo.lock scirust-gpu/Cargo.toml
+            exit 1
+          }
+          echo "FLAT_M44_CANDIDATE_BIN=$candidate/target/release/flat-m44-vec4-candidate" >> "$GITHUB_ENV"
+          echo "candidate_revision=$FLAT_M44_CANDIDATE_REV"
+
+      - name: Exclusive physical Thor candidate benchmark
+        shell: bash
+        timeout-minutes: 330
+        run: |
+          set -euo pipefail
+          command -v flock >/dev/null
+          command -v pgrep >/dev/null
+          command -v nvidia-smi >/dev/null
+          command -v vulkaninfo >/dev/null
+
+          training_processes() {
+            pgrep -af 'cuda_pretrain' || true
+          }
+
+          compute_processes() {
+            nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null
+          }
+
+          exec 9>"$SCIRUST_THOR_GPU_LOCK"
+          flock -x 9
+
+          gpu_inventory="$(nvidia-smi --query-gpu=name,driver_version --format=csv,noheader)" || {
+            echo "::error::cannot query NVIDIA GPU inventory"
+            exit 1
+          }
+          printf '%s\n' "$gpu_inventory"
+          grep -F "NVIDIA Thor" <<< "$gpu_inventory" >/dev/null || {
+            echo "::error::expected physical NVIDIA Thor was not found"
+            exit 1
+          }
+
+          vulkan_summary="$(vulkaninfo --summary 2>&1)" || {
+            printf '%s\n' "$vulkan_summary"
+            echo "::error::cannot query Vulkan adapter inventory"
+            exit 1
+          }
+          grep -F "NVIDIA Tegra NVIDIA Thor" <<< "$vulkan_summary" >/dev/null || {
+            printf '%s\n' "$vulkan_summary"
+            echo "::error::physical Thor is not exposed through Vulkan"
+            exit 1
+          }
+
+          deadline=$((SECONDS + 18000))
+          settle_step=5
+          settle_required="$SCIRUST_THOR_IDLE_SETTLE_SECONDS"
+          settled=0
+          while (( settled < settle_required )); do
+            training="$(training_processes)"
+            if ! active="$(compute_processes)"; then
+              echo "::error::candidate gate cannot verify Thor compute occupancy"
+              exit 1
+            fi
+            if [[ -n "${training//[[:space:]]/}" ]]; then
+              echo "SciAgent cuda_pretrain is active; candidate timing remains blocked."
+              printf '%s\n' "$training"
+              settled=0
+            elif [[ -n "${active//[[:space:]]/}" ]]; then
+              echo "::error::unknown GPU compute activity is active while candidate gate owns Thor:"
+              printf '%s\n' "$active"
+              exit 1
+            else
+              settled=$((settled + settle_step))
+              if (( settled == settle_step || settled % 60 == 0 )); then
+                echo "Thor continuously idle: ${settled}/${settle_required}s"
+              fi
+            fi
+            if (( SECONDS >= deadline )); then
+              echo "::error::Thor never reached the required continuous idle window before deadline"
+              exit 1
+            fi
+            sleep "$settle_step"
+          done
+
+          echo "Thor idle/cooldown qualification satisfied for ${settle_required}s."
+          nvidia-smi --query-gpu=temperature.gpu,utilization.gpu,clocks.gr,clocks.sm,power.draw --format=csv,noheader || true
+
+          contamination="$RUNNER_TEMP/flat-m44-vec4-contamination.txt"
+          : > "$contamination"
+          (
+            while true; do
+              training="$(training_processes)"
+              if [[ -n "${training//[[:space:]]/}" ]]; then
+                {
+                  date -u +'%Y-%m-%dT%H:%M:%SZ'
+                  printf '%s\n' "$training"
+                } >> "$contamination"
+                exit 0
+              fi
+              sleep 1
+            done
+          ) &
+          watchdog_pid=$!
+          cleanup_watchdog() {
+            kill "$watchdog_pid" 2>/dev/null || true
+            wait "$watchdog_pid" 2>/dev/null || true
+          }
+          trap cleanup_watchdog EXIT
+
+          echo "source_revision=$(git rev-parse HEAD)"
+          echo "flat_candidate_revision=$FLAT_M44_CANDIDATE_REV"
+          echo "benchmark_scope=resident_same_context_prepared_upload_readback_excluded"
+          echo "warmups=$SCIRUST_M28_WARMUPS repeats=$SCIRUST_M28_REPEATS"
+          echo "thor_idle_settle_seconds=$SCIRUST_THOR_IDLE_SETTLE_SECONDS"
+
+          for seq in 128 512; do
+            for dim in 64 128; do
+              echo "=== candidate geometry seq_len=$seq head_dim=$dim ==="
+              out="$RUNNER_TEMP/flat-m44-vec4-${seq}-${dim}.csv"
+              SCIRUST_M28_SEQ_LEN="$seq" \
+              SCIRUST_M28_HEAD_DIM="$dim" \
+              "$FLAT_M44_CANDIDATE_BIN" | tee "$out"
+
+              if [[ -s "$contamination" ]]; then
+                echo "::error::SciAgent training appeared during candidate timing; all evidence from this run is invalid"
+                cat "$contamination"
+                exit 1
+              fi
+              if [[ -n "$(training_processes)" ]]; then
+                echo "::error::SciAgent training is active immediately after a measured geometry"
+                training_processes
+                exit 1
+              fi
+              grep -F "NVIDIA Tegra NVIDIA Thor,Vulkan," "$out" >/dev/null || {
+                echo "::error::candidate did not execute on physical Thor through Vulkan"
+                exit 1
+              }
+              grep -F 'Q4Vec4Mha,none' "$out" >/dev/null || {
+                echo "::error::candidate benchmark did not prove the vec4 kernel selection"
+                exit 1
+              }
+            done
+          done
+
+          cleanup_watchdog
+          trap - EXIT
+
+          if ! post_active="$(compute_processes)"; then
+            echo "::error::cannot verify post-benchmark Thor occupancy"
+            exit 1
+          fi
+          if [[ -n "${post_active//[[:space:]]/}" ]]; then
+            echo "::error::GPU compute activity is present after candidate timing"
+            printf '%s\n' "$post_active"
+            exit 1
+          fi
+          nvidia-smi --query-gpu=temperature.gpu,utilization.gpu,clocks.gr,clocks.sm,power.draw --format=csv,noheader || true
+          echo "performance_claim=none"
