@@ -1,17 +1,17 @@
 # scirust-burn-bridge
 
-Pont d'inférence entre [Burn](https://burn.dev/) (framework deep learning Rust) et les boucles SciRust (algorithmes non-différentiables : évolution, RL, MCTS, Monte-Carlo).
+Inference bridge between [Burn](https://burn.dev/) (Rust deep learning framework) and the SciRust loops (non-differentiable algorithms: evolution, RL, MCTS, Monte-Carlo).
 
-## Statut
+## Status
 
-🟢 **v0.0.1 — squelette fonctionnel** (Phase 0).
+🟢 **v0.0.1 — functional skeleton** (Phase 0).
 
-API stable pour le cas d'usage minimal : *« évaluer un `burn::Module` depuis une boucle SciRust sans la pénalité de l'autodiff »*.
+Stable API for the minimal use case: *"evaluate a `burn::Module` from a SciRust loop without the autodiff penalty"*.
 
-Pas encore stable :
-- Évaluation batchée parallèle (rayon) — cible v0.1
-- Détection compile-time du backend `Autodiff<_>` interdit — cible v0.1
-- Support GPU via Wgpu/Cuda — cible v0.2 (le code est déjà générique sur `Backend`, faut juste tester)
+Not yet stable:
+- Parallel batched evaluation (rayon) — target v0.1
+- Compile-time detection of the forbidden `Autodiff<_>` backend — target v0.1
+- GPU support via Wgpu/Cuda — target v0.2 (the code is already generic over `Backend`, just needs testing)
 
 ## Quick reference
 
@@ -21,14 +21,14 @@ use burn::backend::NdArray;
 
 type B = NdArray<f32>;
 
-// 1. Implémenter Policy<B> pour ton réseau
+// 1. Implement Policy<B> for your network
 impl<BB: Backend> Policy<BB> for MyMlp<BB> {
     type Input = Tensor<BB, 2>;
     type Output = Tensor<BB, 2>;
     fn forward(&self, input: Tensor<BB, 2>) -> Tensor<BB, 2> { /* ... */ }
 }
 
-// 2. Wrapper et évaluer
+// 2. Wrap and evaluate
 let bridge = InferenceOnly::new(my_mlp, device);
 let output = bridge.eval(input);
 ```
@@ -36,21 +36,21 @@ let output = bridge.eval(input);
 ## Tests
 
 ```bash
-cargo test -p scirust-burn-bridge          # tests unitaires + intégration
+cargo test -p scirust-burn-bridge          # unit + integration tests
 cargo run --release -p scirust-burn-bridge --example eval_population
 cargo run --release -p scirust-burn-bridge --bench forward
 ```
 
-## Cible de performance Phase 0
+## Phase 0 performance target
 
-≥ **1 000 000 forwards/s** en single-thread sur petit MLP (4→8→2, NdArray, f32) sur un CPU moderne.
+≥ **1,000,000 forwards/s** single-threaded on a small MLP (4→8→2, NdArray, f32) on a modern CPU.
 
-Si non atteint après optimisation du profil release, ouvrir une issue avec la sortie de `bench forward` + `lscpu`.
+If not reached after optimizing the release profile, open an issue with the output of `bench forward` + `lscpu`.
 
-## Garantie philosophique
+## Philosophical guarantee
 
-**Ce crate ne tracke jamais de gradient.** Si tu vois un usage avec `Autodiff<_>` quelque part, c'est un bug.
+**This crate never tracks gradients.** If you see a use with `Autodiff<_>` anywhere, that's a bug.
 
-## Licence
+## License
 
-Apache-2.0 OR MIT (au choix de l'utilisateur).
+Apache-2.0 OR MIT (at the user's choice).

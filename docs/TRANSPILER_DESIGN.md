@@ -1,370 +1,372 @@
-# SciRust — Conception du transpileur scientifique (source → Rust)
+# SciRust — Scientific transpiler design (source → Rust)
 
-> Statut : **conception + Phase 0 livrée**. Ce document décrit l'architecture
-> d'un transpileur *entrant* (Python / MATLAB / Julia / Fortran / C++ → Rust)
-> déterministe, sûr et **vérifié par oracle**, aligné sur la doctrine du dépôt
-> (« aucune affirmation sans test »). Il distingue rigoureusement ce qui
-> **existe déjà** de ce qui **reste à construire**, et ne revendique aucune
-> capacité non livrée.
+> Status: **design + Phase 0 delivered**. This document describes the architecture
+> of an *inbound* transpiler (Python / MATLAB / Julia / Fortran / C++ → Rust)
+> that is deterministic, safe and **oracle-verified**, aligned with the repository's
+> doctrine ("no claim without a test"). It rigorously distinguishes what
+> **already exists** from what **remains to be built**, and claims no
+> undelivered capability.
 >
-> **Mise à jour — Phase 0 (MVP) implémentée et prouvée.** Le crate
-> [`scirust-transpiler`](../scirust-transpiler) réalise le pipeline entrant
-> complet (front-end Python/NumPy → SIR typée → émission Rust déterministe),
-> gated par un **oracle différentiel contre NumPy réel** :
-> `cargo run -p scirust-transpiler --example oracle` → **7/7 cas, 200 essais
-> chacun, conformes** (rk4, dot, norm, weighted-mean, cumsum, saxpy, tanh).
-> L'oracle est non-vacuous (l'injection d'un opérateur faux fait passer 4/7 cas
-> au ROUGE). Voir la §9-bis « État d'implémentation ».
+> **Update — Phase 0 (MVP) implemented and proven.** The crate
+> [`scirust-transpiler`](../scirust-transpiler) realizes the complete inbound
+> pipeline (Python/NumPy front-end → typed SIR → deterministic Rust emission),
+> gated by a **differential oracle against real NumPy**:
+> `cargo run -p scirust-transpiler --example oracle` → **7/7 cases, 200 trials
+> each, conformant** (rk4, dot, norm, weighted-mean, cumsum, saxpy, tanh).
+> The oracle is non-vacuous (injecting a wrong operator turns 4/7 cases
+> RED). See §9-bis "Implementation status".
 
 ---
 
-## 0. Résumé honnête (à lire en premier)
+## 0. Honest summary (read first)
 
-La vision demande un outil capable de **convertir automatiquement** des
-algorithmes scientifiques écrits en Python, MATLAB, Julia, Fortran ou C++ en
-Rust « performant, déterministe et sûr », pour 15 secteurs régulés.
+The vision calls for a tool able to **automatically convert** scientific
+algorithms written in Python, MATLAB, Julia, Fortran or C++ into
+"performant, deterministic and safe" Rust, for 15 regulated sectors.
 
-État réel du dépôt aujourd'hui :
+Real state of the repository today:
 
-| Brique nécessaire                              | Statut | Où |
+| Required brick                              | Status | Where |
 |------------------------------------------------|--------|----|
-| Front-ends de langue (source → AST)            | ❌ absent | — |
-| IR scientifique typée (formes, unités, effets) | ❌ absent | — |
-| Backend d'émission Rust (AST → source Rust)    | 🟡 **réutilisable** | `scirust-codetrans` (`Expr` + pretty-printer) |
-| Passes d'optimisation sur l'IR                 | 🟡 **réutilisable** | `scirust-codetrans` (20 règles : CSE, DCE, LICM…) |
-| **Vocabulaire cible vérifié par oracle**       | ✅ **présent** | ~90 crates `scirust-*` (voir §5) |
-| **Doctrine de validation par oracle**          | ✅ **présente** | tout le dépôt ; audit hash-chaîné CCOS / MCP |
-| Harnais d'oracle *de transpilation*            | ❌ absent | — |
-| SLM / agent assistant                          | ✅ présent | `scirust-sciagent`, `scirust-mcp` |
+| Language front-ends (source → AST)            | ❌ absent | — |
+| Typed scientific IR (shapes, units, effects) | ❌ absent | — |
+| Rust emission backend (AST → Rust source)    | 🟡 **reusable** | `scirust-codetrans` (`Expr` + pretty-printer) |
+| IR optimization passes                 | 🟡 **reusable** | `scirust-codetrans` (20 rules: CSE, DCE, LICM…) |
+| **Oracle-verified target vocabulary**       | ✅ **present** | ~90 `scirust-*` crates (see §5) |
+| **Oracle validation doctrine**          | ✅ **present** | whole repository; hash-chained CCOS / MCP audit |
+| *Transpilation* oracle harness            | ❌ absent | — |
+| SLM / assistant agent                          | ✅ present | `scirust-sciagent`, `scirust-mcp` |
 
-> ⚠️ **Point crucial et honnête.** `scirust-codetrans` transpile **Rust → Python**
-> et **Rust → C** (sens *sortant*), c'est-à-dire l'**inverse** de ce que la vision
-> demande. Ses fonctions `parse_expr` / `parse_pattern` lisent un AST S-expression
-> **interne**, pas du code source Python/MATLAB/Fortran. Il n'existe donc
-> aujourd'hui **aucune** capacité de transpilation entrante.
+> ⚠️ **Crucial and honest point.** `scirust-codetrans` transpiles **Rust → Python**
+> and **Rust → C** (the *outbound* direction), i.e. the **reverse** of what the vision
+> asks for. Its `parse_expr` / `parse_pattern` functions read an **internal**
+> S-expression AST, not Python/MATLAB/Fortran source code. So today there is
+> **no** inbound transpilation capability at all.
 
-**Verdict.** Le transpileur entrant n'est pas encore livré. Mais deux des trois
-briques les plus difficiles le sont déjà : (1) un **vocabulaire cible** de
-primitives numériques prouvées bit-exactes contre un oracle de référence, et
-(2) la **discipline de preuve** qui distingue SciRust d'un traducteur
-« LLM ligne à ligne ». La pièce manquante est le pipeline
-*front-end → IR → émission* et le *harnais d'oracle de transpilation*. Ce
-document en fixe l'architecture et la feuille de route.
+**Verdict.** The inbound transpiler is not yet delivered. But two of the three
+hardest bricks already are: (1) a **target vocabulary** of numerical
+primitives proven bit-exact against a reference oracle, and
+(2) the **proof discipline** that distinguishes SciRust from a
+"line-by-line LLM" translator. The missing piece is the
+*front-end → IR → emission* pipeline and the *transpilation oracle harness*. This
+document fixes its architecture and roadmap.
 
 ---
 
-## 1. Pourquoi un transpileur scientifique n'est PAS un traducteur syntaxique
+## 1. Why a scientific transpiler is NOT a syntactic translator
 
-Le piège évident — un LLM ou un jeu de règles regex qui « traduit ligne à
-ligne » — produit du Rust *plausible* mais potentiellement **faux, non
-déterministe et non vérifié**. C'est précisément ce que les secteurs visés
-interdisent :
+The obvious trap — an LLM or a regex rule set that "translates line by
+line" — produces *plausible* but potentially **wrong, non-deterministic and
+unverified** Rust. That is precisely what the target sectors
+forbid:
 
-- **DO-178C** (aéronautique) et **IEC 62304 Ed.2** (dispositifs médicaux)
-  exigent une traçabilité qui « suppose un comportement déterministe ».
-- **ISO 26262** (automobile) impose des tests MIL/SIL/PIL/HIL redondants
-  *parce que* la correspondance modèle ⇄ code généré n'est garantie
-  qu'« à une tolérance près » (MathWorks le documente lui-même).
-- La non-associativité du flottant + le threading BLAS non déterministe
-  cassent la reproductibilité (cf. `docs/DOMAIN_ROADMAP.md`, bug OpenBLAS
+- **DO-178C** (aeronautics) and **IEC 62304 Ed.2** (medical devices)
+  require traceability that "assumes deterministic behavior".
+- **ISO 26262** (automotive) imposes redundant MIL/SIL/PIL/HIL tests
+  *because* the model ⇄ generated-code correspondence is only guaranteed
+  "within tolerance" (MathWorks documents this itself).
+- Floating-point non-associativity + non-deterministic BLAS threading
+  break reproducibility (cf. `docs/DOMAIN_ROADMAP.md`, OpenBLAS bug
   #1844).
 
-La thèse de SciRust, appliquée à la transpilation, tient en trois exigences
-non négociables :
+SciRust's thesis, applied to transpilation, comes down to three
+non-negotiable requirements:
 
-1. **Comprendre la sémantique numérique** (formes, types, ordre des
-   réductions, source d'aléa) — pas seulement la syntaxe.
-2. **Émettre vers des primitives déjà prouvées** bit-exactes, plutôt que de
-   re-dériver la numérique dans du Rust neuf non testé.
-3. **Prouver l'équivalence** source ⇄ Rust par un oracle *avant* d'accepter le
-   port — exactement la règle « aucune affirmation sans test » du reste du
-   dépôt.
+1. **Understand the numerical semantics** (shapes, types, reduction
+   order, source of randomness) — not just the syntax.
+2. **Emit to already-proven** bit-exact primitives, rather than
+   re-deriving the numerics in fresh untested Rust.
+3. **Prove source ⇄ Rust equivalence** via an oracle *before* accepting the
+   port — exactly the "no claim without a test" rule of the rest of the
+   repository.
 
-Un port qui ne passe pas l'oracle est **rejeté**, pas « probablement bon ».
+A port that fails the oracle is **rejected**, not "probably good".
 
 ---
 
-## 2. Architecture cible (pipeline en 5 étages)
+## 2. Target architecture (5-stage pipeline)
 
 ```
-  Source scientifique                                          Rust vérifié
-  (Python/MATLAB/                                              déterministe, sûr
-   Julia/Fortran/C++)                                          (+ rapport signé)
+  Scientific source                                          Verified Rust
+  (Python/MATLAB/                                              deterministic, safe
+   Julia/Fortran/C++)                                          (+ signed report)
         │                                                              ▲
         ▼                                                              │
  ┌─────────────┐   ┌──────────────┐   ┌───────────────┐   ┌──────────────────┐
  │ 1. FRONT-END│──▶│ 2. SIR        │──▶│ 3. ANALYSES   │──▶│ 4. LOWERING       │
- │ (1 par      │   │ Scientific IR │   │ formes, types,│   │ SIR → codetrans:: │
- │  langue)    │   │ typée         │   │ RNG, aliasing,│   │ Expr → Rust src   │
- │  → AST      │   │ (shapes,      │   │ ordre de      │   │ (routé vers les   │
- │             │   │  dtypes,      │   │ réduction     │   │  primitives       │
- │             │   │  unités,      │   │               │   │  scirust-*)       │
- │             │   │  effets)      │   │               │   │                   │
+ │ (1 per      │   │ Scientific IR │   │ shapes, types,│   │ SIR → codetrans:: │
+ │  language)  │   │ typed         │   │ RNG, aliasing,│   │ Expr → Rust src   │
+ │  → AST      │   │ (shapes,      │   │ reduction     │   │ (routed to        │
+ │             │   │  dtypes,      │   │ order         │   │  scirust-*        │
+ │             │   │  units,       │   │               │   │  primitives)      │
+ │             │   │  effects)     │   │               │   │                   │
  └─────────────┘   └──────────────┘   └───────────────┘   └──────────────────┘
                                                                     │
                                                                     ▼
                                                         ┌────────────────────────┐
-                                                        │ 5. ORACLE DE            │
-                                                        │    TRANSPILATION        │
-                                                        │ exécute source ⇄ Rust   │
-                                                        │ sur N entrées, compare  │
-                                                        │ sous tolérance déclarée │
-                                                        │ → accepte / rejette     │
-                                                        │ → rapport hash-chaîné   │
+                                                        │ 5. TRANSPILATION       │
+                                                        │    ORACLE             │
+                                                        │ runs source ⇄ Rust    │
+                                                        │ on N inputs, compares │
+                                                        │ under declared        │
+                                                        │ tolerance             │
+                                                        │ → accept / reject     │
+                                                        │ → hash-chained report │
                                                         └────────────────────────┘
 ```
 
-### Étage 1 — Front-ends
-Un analyseur par langue produisant un AST spécifique. On ne vise **jamais**
-« tout le langage » mais un **sous-ensemble scientifique contractuel**,
-statiquement analysable (voir §6). Chaque front-end déclare explicitement ce
-qu'il accepte et **refuse** (avec diagnostic) ce qu'il ne comprend pas —
-plutôt que de deviner.
+### Stage 1 — Front-ends
+One parser per language producing a language-specific AST. We **never** target
+"the whole language" but a **contractual scientific subset**,
+statically analyzable (see §6). Each front-end explicitly declares what
+it accepts and **refuses** (with diagnostics) what it does not understand —
+rather than guessing.
 
-### Étage 2 — Scientific IR (SIR)
-Une IR typée, indépendante de la langue source, où chaque valeur porte :
-- **forme** (shape) et **dtype** (f32/f64/i32/complex…),
-- **unité physique optionnelle** (m, s, kg… — utile en aéro/spatial/énergie),
-- **effets** : pureté, I/O, source d'aléa (RNG), aliasing potentiel,
-- **ordre de réduction** requis (pour les sommes/produits).
+### Stage 2 — Scientific IR (SIR)
+A typed IR, independent of the source language, where each value carries:
+- **shape** and **dtype** (f32/f64/i32/complex…),
+- **optional physical unit** (m, s, kg… — useful in aero/space/energy),
+- **effects**: purity, I/O, source of randomness (RNG), potential aliasing,
+- **required reduction order** (for sums/products).
 
-Le SIR est le seul endroit où la sémantique numérique est raisonnée. C'est
-aussi la frontière stable : ajouter une langue = ajouter un front-end vers le
-SIR, sans toucher au lowering ni à l'oracle.
+The SIR is the only place where numerical semantics are reasoned about. It is
+also the stable boundary: adding a language = adding a front-end to the
+SIR, without touching lowering or the oracle.
 
-### Étage 3 — Analyses
-Inférence de formes/types (indispensable depuis Python/MATLAB dynamiques),
-détection des sources d'aléa, détection de l'aliasing, fixation de l'ordre
-des réductions. Ces analyses transforment un SIR « possiblement dynamique »
-en un SIR **statiquement émettable**.
+### Stage 3 — Analyses
+Shape/type inference (essential from dynamic Python/MATLAB),
+detection of randomness sources, aliasing detection, fixing the reduction
+order. These analyses transform a "possibly dynamic" SIR into a
+**statically emittable** SIR.
 
-### Étage 4 — Lowering
-Abaissement du SIR vers `scirust-codetrans::Expr` (backend d'émission **déjà
-présent**, dont le `Display` imprime du Rust), en **routant chaque opération
-vers une primitive `scirust-*` vérifiée** (voir §4). Les 20 règles
-d'optimisation de `codetrans` (constant folding, DCE, CSE, LICM, réduction de
-force, inlining, TCO) s'appliquent ici.
+### Stage 4 — Lowering
+Lowering of the SIR to `scirust-codetrans::Expr` (the **already-present**
+emission backend, whose `Display` prints Rust), **routing each operation
+to a verified `scirust-*` primitive** (see §4). The 20 `codetrans`
+optimization rules (constant folding, DCE, CSE, LICM, strength
+reduction, inlining, TCO) apply here.
 
-### Étage 5 — Oracle de transpilation (cœur de la confiance)
-Détaillé en §8. Sans oracle vert, aucun port n'est accepté.
-
----
-
-## 3. Contrat de déterminisme et de sûreté (par construction)
-
-Le transpileur n'ajoute pas le déterminisme *après coup* — il **n'émet que du
-Rust déterministe par construction**, en s'appuyant sur des garanties déjà
-tenues ailleurs dans le dépôt :
-
-- **Ordre de réduction fixe.** Les sommes/produits/moyennes sont émis avec un
-  ordre pinné (déjà garanti par `scirust-core` : réductions flottantes
-  indépendantes du nombre de threads, fingerprint 64 bits identique).
-- **PRNG germé.** Toute source `np.random`, `rand`, `randn`, MATLAB `rand` est
-  mappée sur un flux `SplitMix64` germé explicitement — jamais d'entropie
-  système implicite.
-- **Anti-aliasing.** Le SIR trace l'aliasing ; l'émission produit des
-  emprunts `&` / `&mut` sûrs, ou insère des copies explicites documentées.
-  Objectif : **zéro `unsafe` non justifié**.
-- **Tolérance déclarée.** Chaque port porte une tolérance numérique explicite
-  (ex. `rel ≤ 1e-12`) ; le **mode bit-exact** est activé quand la primitive
-  cible le permet.
-- **Cible embarquée optionnelle.** Pour l'IA embarquée / NVIDIA Jetson, le
-  lowering peut cibler `scirust-edge` / `scirust-embedded` (`no_std`,
-  sans allocation).
+### Stage 5 — Transpilation oracle (core of the trust)
+Detailed in §8. Without a green oracle, no port is accepted.
 
 ---
 
-## 4. La cible : router les opérations vers des primitives prouvées
+## 3. Determinism and safety contract (by construction)
 
-C'est le différenciateur central. **On ne re-dérive pas la numérique dans du
-Rust neuf ; on route chaque opération source vers un noyau déjà validé contre
-un oracle de référence.** Extrait du mapping (à compléter au fil des phases) :
+The transpiler does not add determinism *after the fact* — it **only emits
+Rust that is deterministic by construction**, relying on guarantees already
+held elsewhere in the repository:
 
-| Opération source (NumPy/SciPy/MATLAB/BLAS…)         | Primitive `scirust-*` cible |
+- **Fixed reduction order.** Sums/products/means are emitted with a
+  pinned order (already guaranteed by `scirust-core`: floating-point
+  reductions independent of thread count, identical 64-bit fingerprint).
+- **Seeded PRNG.** Any `np.random`, `rand`, `randn`, MATLAB `rand` source is
+  mapped onto an explicitly seeded `SplitMix64` stream — never implicit
+  system entropy.
+- **Anti-aliasing.** The SIR tracks aliasing; emission produces safe
+  `&` / `&mut` borrows, or inserts documented explicit copies.
+  Goal: **zero unjustified `unsafe`**.
+- **Declared tolerance.** Each port carries an explicit numerical tolerance
+  (e.g. `rel ≤ 1e-12`); **bit-exact mode** is enabled when the target
+  primitive allows it.
+- **Optional embedded target.** For embedded AI / NVIDIA Jetson, the
+  lowering can target `scirust-edge` / `scirust-embedded` (`no_std`,
+  no allocation).
+
+---
+
+## 4. The target: routing operations to proven primitives
+
+This is the central differentiator. **We do not re-derive the numerics in fresh
+Rust; we route each source operation to a kernel already validated against a
+reference oracle.** Excerpt of the mapping (to be completed as phases
+progress):
+
+| Source operation (NumPy/SciPy/MATLAB/BLAS…)         | Target `scirust-*` primitive |
 |-----------------------------------------------------|-----------------------------|
-| `np.linalg.solve` / `\` MATLAB / LU                 | `scirust-solvers` (LU, QR, Cholesky) |
-| `np.linalg.svd` / `eig` / `qr`                      | `scirust-solvers` (SVD Jacobi, eig Householder+QL) |
-| `scipy.sparse.linalg` (GMRES/BiCGSTAB)              | `scirust-solvers` (GMRES restart, BiCGSTAB) |
-| `np.fft` / `scipy.signal`                           | `scirust-signal` (FFT, fenêtres, features) |
+| `np.linalg.solve` / MATLAB `\` / LU                 | `scirust-solvers` (LU, QR, Cholesky) |
+| `np.linalg.svd` / `eig` / `qr`                      | `scirust-solvers` (Jacobi SVD, Householder+QL eig) |
+| `scipy.sparse.linalg` (GMRES/BiCGSTAB)              | `scirust-solvers` (restarted GMRES, BiCGSTAB) |
+| `np.fft` / `scipy.signal`                           | `scirust-signal` (FFT, windows, features) |
 | `scipy.integrate.odeint` / MATLAB `ode45`           | `scirust-solvers::ode` (RK, autodiff) |
 | Kalman/EKF (`filterpy`, MATLAB)                     | `scirust-estimation` (KF/EKF/UD square-root) |
 | GNSS/INS, TDOA                                       | `scirust-nav` |
 | PID/LQR/MPC                                          | `scirust-control` |
-| optimisation (`scipy.optimize`, `fmincon`)          | `scirust-solvers`, `scirust-evo` |
+| optimization (`scipy.optimize`, `fmincon`)          | `scirust-solvers`, `scirust-evo` |
 | PCA/ICA/K-Means/clustering                           | `scirust-multivariate`, `scirust-unsupervised` |
-| réseaux de neurones / inférence                     | `scirust-core`, `scirust-onnx`, `scirust-sciagent` |
-| traitement d'images / CNN / segmentation            | `scirust-vision` |
+| neural networks / inference                     | `scirust-core`, `scirust-onnx`, `scirust-sciagent` |
+| image processing / CNN / segmentation            | `scirust-vision` |
 | rainflow / Palmgren-Miner (fatigue)                 | `scirust-fatigue` |
-| réseaux électriques / WLS                            | `scirust-grid` |
-| biosignaux / ECG / dosing                            | `scirust-biomed` |
+| power grids / WLS                            | `scirust-grid` |
+| biosignals / ECG / dosing                            | `scirust-biomed` |
 
-Là où aucune primitive n'existe, le transpileur **ne devine pas** : le lowering
-retourne une erreur `unsupported ...` explicite. Il ne génère jamais de source
-contenant un `TODO` exécutable.
+Where no primitive exists, the transpiler **does not guess**: the lowering
+returns an explicit `unsupported ...` error. It never generates source
+containing an executable `TODO`.
 
 ---
 
-## 5. Couverture des 15 secteurs (matrice honnête)
+## 5. Coverage of the 15 sectors (honest matrix)
 
-« Vocabulaire cible » = les primitives Rust vérifiées vers lesquelles émettre.
-`✅` = primitives déjà présentes ; `🟡` = partiel ; `❌` = à construire.
-La transpilation Python/NumPy et MATLAB couvre le sous-ensemble vérifié par les
-tests du crate `scirust-transpiler`; cette matrice décrit les primitives cibles
-au-delà de ce sous-ensemble, sans les présenter comme déjà abaissées.
+"Target vocabulary" = the verified Rust primitives to emit to.
+`✅` = primitives already present; `🟡` = partial; `❌` = to be built.
+Python/NumPy and MATLAB transpilation covers the subset verified by the tests
+of the crate `scirust-transpiler`; this matrix describes the target primitives
+beyond that subset, without presenting them as already lowered.
 
-| # | Secteur | Vocabulaire cible présent ? | Crates d'ancrage |
+| # | Sector | Target vocabulary present? | Anchor crates |
 |---|---------|------------------------------|------------------|
-| 1 | Pharma / biotech (simulation moléculaire, génomique, PK, jumeaux bio) | 🟡 | `scirust-biomed`, `scirust-solvers`, `scirust-multivariate`, `scirust-tn` |
-| 2 | Robotique industrielle (trajectoire, SLAM, fusion, temps réel, vision) | ✅ | `scirust-robotics`, `scirust-fusion`, `scirust-control`, `scirust-vision`, `scirust-estimation` |
-| 3 | Aéronautique (guidage, nav, Kalman, contrôle de vol, simulation) | ✅ | `scirust-nav`, `scirust-estimation`, `scirust-control`, `scirust-func-safety` |
-| 4 | Spatial (nav satellite, orbite, contrôle embarqué, télémétrie) | 🟡 | `scirust-nav`, `scirust-estimation`, `scirust-embedded`, `scirust-signal` |
-| 5 | Automobile (ADAS, fusion lidar/radar, vision, moteur, batterie) | ✅ | `scirust-fusion`, `scirust-vision`, `scirust-bms`, `scirust-func-safety`, `scirust-control` |
-| 6 | Finance quantitative (pricing, Monte Carlo, risque, portefeuille) | 🟡 | `scirust-solvers`, `scirust-evo`, `scirust-trader` |
-| 7 | Énergie (réseaux, smart grid, prévision, éolien, nucléaire, hydro) | ✅ | `scirust-grid`, `scirust-sis`, `scirust-reliability`, `scirust-seasonal`, `scirust-water` |
-| 8 | Géophysique (sismologie, exploration, tomographie, signaux) | 🟡 | `scirust-signal`, `scirust-solvers`, `scirust-shm` |
-| 9 | Météorologie (prévision numérique, assimilation, climat) | 🟡 | `scirust-solvers`, `scirust-estimation` (assimilation ≈ filtrage), `scirust-tn` |
-| 10 | IA embarquée (prétraitement, pipelines ML, inférence déterministe) | ✅ | `scirust-edge`, `scirust-embedded`, `scirust-core`, `scirust-onnx` |
-| 11 | Industrie chimique (réacteurs, CFD, thermo, optimisation procédés) | 🟡 | `scirust-solvers`, `scirust-fab`, `scirust-sis`, `scirust-spc` |
-| 12 | Imagerie médicale (reconstruction CT/IRM, segmentation, filtrage) | 🟡 | `scirust-vision`, `scirust-signal`, `scirust-solvers` |
-| 13 | Défense (simulation, radar, sonar, guerre élec., fusion) | ✅ | `scirust-signal`, `scirust-fusion`, `scirust-estimation`, `scirust-nav` |
-| 14 | Physique (Monte Carlo, quantique, astrophysique, particules) | 🟡 | `scirust-tn`, `scirust-solvers`, `scirust-tensor-*` |
-| 15 | Industrie 4.0 (jumeaux numériques, PdM, optimisation prod., vision) | ✅ | `scirust-pdm`, `scirust-mlops`, `scirust-opcua`, `scirust-mqtt`, `scirust-vision` |
+| 1 | Pharma / biotech (molecular simulation, genomics, PK, bio twins) | 🟡 | `scirust-biomed`, `scirust-solvers`, `scirust-multivariate`, `scirust-tn` |
+| 2 | Industrial robotics (trajectory, SLAM, fusion, real-time, vision) | ✅ | `scirust-robotics`, `scirust-fusion`, `scirust-control`, `scirust-vision`, `scirust-estimation` |
+| 3 | Aeronautics (guidance, nav, Kalman, flight control, simulation) | ✅ | `scirust-nav`, `scirust-estimation`, `scirust-control`, `scirust-func-safety` |
+| 4 | Space (satellite nav, orbit, embedded control, telemetry) | 🟡 | `scirust-nav`, `scirust-estimation`, `scirust-embedded`, `scirust-signal` |
+| 5 | Automotive (ADAS, lidar/radar fusion, vision, engine, battery) | ✅ | `scirust-fusion`, `scirust-vision`, `scirust-bms`, `scirust-func-safety`, `scirust-control` |
+| 6 | Quantitative finance (pricing, Monte Carlo, risk, portfolio) | 🟡 | `scirust-solvers`, `scirust-evo`, `scirust-trader` |
+| 7 | Energy (grids, smart grid, forecasting, wind, nuclear, hydro) | ✅ | `scirust-grid`, `scirust-sis`, `scirust-reliability`, `scirust-seasonal`, `scirust-water` |
+| 8 | Geophysics (seismology, exploration, tomography, signals) | 🟡 | `scirust-signal`, `scirust-solvers`, `scirust-shm` |
+| 9 | Meteorology (numerical forecasting, assimilation, climate) | 🟡 | `scirust-solvers`, `scirust-estimation` (assimilation ≈ filtering), `scirust-tn` |
+| 10 | Embedded AI (preprocessing, ML pipelines, deterministic inference) | ✅ | `scirust-edge`, `scirust-embedded`, `scirust-core`, `scirust-onnx` |
+| 11 | Chemical industry (reactors, CFD, thermo, process optimization) | 🟡 | `scirust-solvers`, `scirust-fab`, `scirust-sis`, `scirust-spc` |
+| 12 | Medical imaging (CT/MRI reconstruction, segmentation, filtering) | 🟡 | `scirust-vision`, `scirust-signal`, `scirust-solvers` |
+| 13 | Defense (simulation, radar, sonar, electronic warfare, fusion) | ✅ | `scirust-signal`, `scirust-fusion`, `scirust-estimation`, `scirust-nav` |
+| 14 | Physics (Monte Carlo, quantum, astrophysics, particles) | 🟡 | `scirust-tn`, `scirust-solvers`, `scirust-tensor-*` |
+| 15 | Industry 4.0 (digital twins, PdM, prod. optimization, vision) | ✅ | `scirust-pdm`, `scirust-mlops`, `scirust-opcua`, `scirust-mqtt`, `scirust-vision` |
 
-**Lecture.** Pour ~8 secteurs sur 15, le vocabulaire cible est déjà là et de
-qualité oracle : le travail est le pipeline d'entrée, pas la numérique. Pour
-les 🟡, il faudra compléter quelques primitives (CFD, reconstruction
-tomographique, Monte Carlo financier…) en parallèle des front-ends.
+**Reading.** For ~8 sectors out of 15, the target vocabulary is already there and
+of oracle quality: the work is the input pipeline, not the numerics. For
+the 🟡, a few primitives will need to be completed (CFD, tomographic
+reconstruction, financial Monte Carlo…) in parallel with the front-ends.
 
 ---
 
-## 6. Front-ends : stratégie par langue (difficulté croissante)
+## 6. Front-ends: strategy per language (increasing difficulty)
 
-Ordre de priorité guidé par (a) le volume de code scientifique réellement
-concerné et (b) la tractabilité de l'analyse statique.
+Priority order guided by (a) the volume of actually relevant scientific code
+and (b) the tractability of static analysis.
 
-| Langue | Priorité | Sous-ensemble visé | Difficulté | Piste de parsing |
+| Language | Priority | Targeted subset | Difficulty | Parsing approach |
 |--------|----------|--------------------|------------|------------------|
-| **Python/NumPy** | 1 (MVP) | fonctions typées, NumPy/SciPy, pas d'`eval`/réflexion/monkeypatch | moyenne | AST via `rustpython-parser` (Rust pur) — à évaluer côté licence/déps |
-| **MATLAB** | 2 | fonctions, matrices, indexation 1-based, broadcasting implicite | moyenne-haute | parser dédié (grammaire propre, copy-on-write) |
-| **Fortran** (77/90+) | 3 | routines numériques, tableaux column-major | haute | parser dédié ; attention `COMMON`/`EQUIVALENCE` |
-| **Julia** | 4 | déjà typé, dispatch multiple | moyenne | intérêt moindre (Julia est déjà rapide) |
-| **C/C++** | 5 | sous-ensemble numérique | très haute | pré-passe `c2rust` puis raffinage vers idiomes SciRust |
+| **Python/NumPy** | 1 (MVP) | typed functions, NumPy/SciPy, no `eval`/reflection/monkeypatch | medium | AST via `rustpython-parser` (pure Rust) — to evaluate on license/deps |
+| **MATLAB** | 2 | functions, matrices, 1-based indexing, implicit broadcasting | medium-high | dedicated parser (own grammar, copy-on-write) |
+| **Fortran** (77/90+) | 3 | numerical routines, column-major arrays | high | dedicated parser; watch `COMMON`/`EQUIVALENCE` |
+| **Julia** | 4 | already typed, multiple dispatch | medium | lesser interest (Julia is already fast) |
+| **C/C++** | 5 | numerical subset | very high | `c2rust` pre-pass then refinement toward SciRust idioms |
 
-Principe commun : **contrat de sous-ensemble explicite**, refus diagnostiqué
-hors périmètre, jamais de traduction devinée.
+Common principle: **explicit subset contract**, diagnosed refusal
+outside scope, never a guessed translation.
 
-Pourquoi cet ordre : Python/MATLAB portent le prototypage de recherche
-(pharma, robotique, finance, imagerie médicale — « développé en Python puis
-réécrit ») ; Fortran porte le code hérité (météo, géophysique, spatial,
-physique — « des millions de lignes ») ; C/C++ est le plus dur et le moins
-rentable en premier (l'UB et les templates rendent l'équivalence prouvable
-coûteuse).
-
----
-
-## 7. Rôle du LLM / SLM : **assistant, jamais oracle**
-
-Le dépôt possède déjà un SLM spécialisé Rust (`scirust-sciagent`) et une
-couche MCP (`scirust-mcp`) pilotable par un LLM externe. Leur place dans le
-transpileur :
-
-- **Utiles pour** : combler les trous sémantiques (idiomes ambigus), proposer
-  un mapping d'opérations, **générer les cas de test** de l'oracle, rédiger la
-  documentation du port.
-- **Jamais** source de vérité : **toute** sortie assistée passe l'oracle de
-  transpilation (§8). C'est la posture déjà tenue par `scirust-trader`
-  (« certified predictions, LLM narration, proof-sealed decisions »),
-  transposée à la transpilation.
-
-Un LLM accélère la *proposition* ; l'oracle décide de l'*acceptation*.
+Why this order: Python/MATLAB carry research prototyping
+(pharma, robotics, finance, medical imaging — "developed in Python then
+rewritten"); Fortran carries the legacy code (weather, geophysics, space,
+physics — "millions of lines"); C/C++ is the hardest and least
+profitable first (UB and templates make provable equivalence
+expensive).
 
 ---
 
-## 8. Le harnais d'oracle de transpilation
+## 7. Role of the LLM / SLM: **assistant, never oracle**
 
-C'est la brique qui transforme « transpileur » en « transpileur *de confiance* ».
+The repository already has a specialized Rust SLM (`scirust-sciagent`) and an
+MCP layer (`scirust-mcp`) drivable by an external LLM. Their place in the
+transpiler:
 
-1. **Test différentiel.** Exécuter la source dans son **runtime réel**
-   (CPython+NumPy, Octave/MATLAB, `gfortran`, `clang`) et le Rust émis sur un
-   corpus d'entrées : aléas germés + cas limites (0, NaN/Inf, matrices
-   singulières, tableaux vides) + éventuellement property-based. Comparer sous
-   la tolérance déclarée du port.
-2. **Test métamorphique** quand aucun runtime de référence n'est disponible :
-   vérifier des invariants (linéarité, conservation d'énergie/masse, symétrie,
-   monotonie) que le port doit préserver.
-3. **Rapport signé** hash-chaîné, réutilisant l'infrastructure d'audit
-   existante (CCOS dans `scirust-sciagent::ccos`, chaîne SHA-256 de
-   `scirust-mcp`). Chaque port acceptable produit une preuve rejouable.
-4. **Gate CI.** Aucun port fusionné sans oracle vert ; la tolérance et le
-   corpus font partie du livrable, pas un à-côté.
+- **Useful for**: filling semantic gaps (ambiguous idioms), proposing
+  an operation mapping, **generating the oracle's test cases**, writing the
+  port's documentation.
+- **Never** a source of truth: **any** assisted output goes through the
+  transpilation oracle (§8). This is the posture already held by `scirust-trader`
+  ("certified predictions, LLM narration, proof-sealed decisions"),
+  transposed to transpilation.
+
+An LLM accelerates the *proposal*; the oracle decides the *acceptance*.
 
 ---
 
-## 9. Feuille de route par phases
+## 8. The transpilation oracle harness
 
-- **Phase 0 — MVP (tranche verticale la plus fine). ✅ LIVRÉE.** Sous-ensemble
-  Python/NumPy → Rust déterministe std-only, **gated par oracle différentiel
-  contre NumPy réel**. Objectif atteint : **le pipeline est prouvé de bout en
-  bout** (front-end → SIR → lowering → oracle vert). Corpus livré (7 cas,
-  200 essais chacun) : intégrateur **RK4** (scalaire), **dot**, **norme**
-  euclidienne, **moyenne pondérée**, **cumsum** (boucle + tableau en sortie),
-  **saxpy** (broadcast), **tanh** élémentaire. *Écart honnête vs le plan
-  initial :* `np.linalg.solve` et `np.fft` ne sont **pas** encore livrés — ils
-  exigent le routage vers `scirust-solvers`/`scirust-signal`, prévu en Phase 1.
-- **Phase 1 — Élargir Python + router vers les noyaux vérifiés.** ✅ **en cours,
-  déjà livré :** contrôle de flux `if`/`elif`/`else` + `while`, et le premier
-  **routage `np.linalg.solve` → `scirust-solvers`** (résolution LU vérifiée,
-  cas d'oracle compilé via cargo). ⏳ **reste :** `np.fft` → `scirust-signal`,
-  tableaux 2-D généraux, fonctions multiples. Secteurs débloqués par le
-  routage : robotique, finance, imagerie.
-- **Phase 2 — MATLAB + tuples/SVD.** ✅ **livré :** (1) second front-end (lexer +
-  parser + lowering dédiés) sur la **même** SIR + émetteur que Python, prouvé
-  contre **Octave réel** (oracle différentiel, 9 cas × 200 essais) — indexation
-  **1-based** (`a(i)` → `a[i-1]`), plages `for` inclusives (`1:n` → `1..n+1`),
-  opérateurs élémentaires `.*`/`./`/`.^` vs scalaires `*`/`/`, retour par
-  **variable de sortie**, hoisting des locales assignées en branche (`if`/`else`)
-  validé par l'analyse d'assignation-définie de Rust ; (2) premier **noyau
-  multi-sorties** : `U, S, Vh = np.linalg.svd(A)` (déstructuration de tuple +
-  `np.diag`) → SVD fine vérifiée de `scirust-solvers`, prouvé contre NumPy par
-  les valeurs singulières *et* la reconstruction `U·diag(S)·Vᵀ` ; (3) **Python
-  élargi** : appels de fonctions **utilisateur** (une `def` en appelle une autre
-  définie plus tôt, avec inférence de type inter-fonctions sans annotation) et
-  **listes littérales** `[a, b, c]` → `Vec<f64>`. ⏳ **reste :** routage matriciel
-  depuis MATLAB, `zeros(m,n)` 2-D, broadcasting scalaire↔tableau sans `.*`,
-  autres décompositions (`qr`, `eig`), retours de tuple généraux. Secteurs visés :
-  aéro, automobile, contrôle, imagerie.
-- **Phase 3 — Fortran.** Routines numériques héritées ; secteurs : météo,
-  géophysique, spatial, physique.
-- **Phase 4 — C/C++.** Sous-ensemble numérique via pré-passe `c2rust`.
+This is the brick that turns a "transpiler" into a "*trusted* transpiler".
 
-Chaque phase livre : contrat de sous-ensemble + corpus d'oracle + matrice des
-secteurs réellement débloqués.
+1. **Differential test.** Run the source in its **real runtime**
+   (CPython+NumPy, Octave/MATLAB, `gfortran`, `clang`) and the emitted Rust on
+   a corpus of inputs: seeded randomness + edge cases (0, NaN/Inf, singular
+   matrices, empty arrays) + possibly property-based. Compare under
+   the port's declared tolerance.
+2. **Metamorphic test** when no reference runtime is available:
+   verify invariants (linearity, energy/mass conservation, symmetry,
+   monotonicity) that the port must preserve.
+3. **Signed report** hash-chained, reusing the existing audit
+   infrastructure (CCOS in `scirust-sciagent::ccos`, SHA-256 chain of
+   `scirust-mcp`). Every acceptable port produces a replayable proof.
+4. **CI gate.** No port merged without a green oracle; the tolerance and the
+   corpus are part of the deliverable, not an afterthought.
 
 ---
 
-## 9-bis. État d'implémentation (mesuré, pas revendiqué)
+## 9. Phased roadmap
 
-| Brique du pipeline (§2)                     | Statut | Emplacement |
+- **Phase 0 — MVP (thinnest vertical slice). ✅ DELIVERED.** Python/NumPy
+  subset → deterministic std-only Rust, **gated by a differential oracle
+  against real NumPy**. Goal achieved: **the pipeline is proven end to
+  end** (front-end → SIR → lowering → green oracle). Corpus delivered (7 cases,
+  200 trials each): **RK4** integrator (scalar), **dot**, Euclidean **norm**,
+  **weighted mean**, **cumsum** (loop + output array),
+  **saxpy** (broadcast), elementwise **tanh**. *Honest gap vs the initial
+  plan:* `np.linalg.solve` and `np.fft` are **not** yet delivered — they
+  require routing to `scirust-solvers`/`scirust-signal`, planned for Phase 1.
+- **Phase 1 — Broaden Python + route to verified kernels.** ✅ **in progress,
+  already delivered:** `if`/`elif`/`else` flow control + `while`, and the first
+  **routing `np.linalg.solve` → `scirust-solvers`** (verified LU resolution,
+  oracle case compiled via cargo). ⏳ **remaining:** `np.fft` → `scirust-signal`,
+  general 2-D arrays, multiple functions. Sectors unlocked by the
+  routing: robotics, finance, imaging.
+- **Phase 2 — MATLAB + tuples/SVD.** ✅ **delivered:** (1) second front-end (dedicated lexer +
+  parser + lowering) on the **same** SIR + emitter as Python, proven against
+  **real Octave** (differential oracle, 9 cases × 200 trials) — **1-based**
+  indexing (`a(i)` → `a[i-1]`), inclusive `for` ranges (`1:n` → `1..n+1`),
+  elementwise operators `.*`/`./`/`.^` vs scalar `*`/`/`, return via
+  **output variable**, hoisting of locals assigned in branches (`if`/`else`)
+  validated by Rust's definite-assignment analysis; (2) first **multi-output
+  kernel**: `U, S, Vh = np.linalg.svd(A)` (tuple destructuring +
+  `np.diag`) → verified fine SVD from `scirust-solvers`, proven against NumPy by
+  the singular values *and* the `U·diag(S)·Vᵀ` reconstruction; (3) **broadened
+  Python**: **user** function calls (one `def` calling another
+  defined earlier, with annotation-free inter-function type inference) and
+  **literal lists** `[a, b, c]` → `Vec<f64>`. ⏳ **remaining:** matrix routing
+  from MATLAB, `zeros(m,n)` 2-D, scalar↔array broadcasting without `.*`,
+  other decompositions (`qr`, `eig`), general tuple returns. Target sectors:
+  aero, automotive, control, imaging.
+- **Phase 3 — Fortran.** Legacy numerical routines; sectors: weather,
+  geophysics, space, physics.
+- **Phase 4 — C/C++.** Numerical subset via `c2rust` pre-pass.
+
+Each phase delivers: subset contract + oracle corpus + matrix of the
+sectors actually unlocked.
+
+---
+
+## 9-bis. Implementation status (measured, not claimed)
+
+| Pipeline brick (§2)                     | Status | Location |
 |---------------------------------------------|--------|-------------|
-| Front-end Python/NumPy (lexer + parser)     | ✅ livré | `scirust-transpiler/src/front_python/` |
-| Scientific IR typée (scalaire/tableau/int)  | ✅ livré | `scirust-transpiler/src/sir.rs` |
-| Lowering + inférence de types/formes        | ✅ livré | `scirust-transpiler/src/lower.rs` |
-| Émission Rust déterministe (ordre pinné)    | ✅ livré | `scirust-transpiler/src/emit.rs` |
-| Oracle différentiel contre NumPy réel **et Octave réel** | ✅ livré | `scirust-transpiler/examples/oracle.rs` |
-| Tests unitaires (gate CI, sans Python/Octave) | ✅ livré | `scirust-transpiler/src/lib.rs` (97 tests) |
-| Contrôle de flux `if`/`elif`/`else` + comparaisons | ✅ livré (Phase 1) | `front_python/` + `sir.rs` + `emit.rs` |
-| Boucles `while` (algorithmes itératifs)     | ✅ livré (Phase 1) | `front_python/` + `sir.rs` + `emit.rs` |
-| Routage `np.linalg.solve`/`det`/`eigvalsh`/`inv` + `A @ b` (matvec) → `scirust-solvers` (retour matrice 2-D pour `inv`) | ✅ livré (Phase 1) | `sir.rs` (`LinSolve`, `Det`, `Eigvalsh`, `Matvec`, `Inv`, `Ty::MatrixVal`) + `emit.rs` |
-| Routage `np.fft.fft`/`rfft`/`ifft` → `scirust-signal` (+ type complexe) | ✅ livré (Phase 1) | `sir.rs` (`Ty::ComplexArray`, `Fft`, `Rfft`, `Ifft`, `ComplexAbs`) + `emit.rs` |
-| **Tuples multi-sorties + `np.linalg.svd`/`qr`** (déstructuration `U, S, Vh = …` / `Q, R = …`, `np.diag`) → `scirust-solvers` | ✅ livré (Phase 2) | `sir.rs` (`TupleExpr`, `SirStmt::LetTuple`, `SirExpr::Diag`) + `emit.rs` |
-| **Retours de tuple généraux** (`return a, b`, éléments scalaires) | ✅ livré (Phase 2) | `sir.rs` (`RetTy`, `SirStmt::ReturnTuple`) + `emit.rs` |
-| **Appels de fonctions utilisateur** (composition, inférence de type inter-fonctions) + **listes littérales** | ✅ livré (Phase 2) | `lower.rs` (`FuncSig`/`Sigs`) + `sir.rs` (`SirExpr::UserCall`, `ArrayLit`) |
-| Tableaux 2-D généraux                       | ⏳ Phase 1 | — |
-| **Front-end MATLAB/Octave** (lexer + parser + lowering, prouvé vs Octave ; **multi-sorties `[a,b]=f(…)`**, intrinsèques math/réductions alignés sur Python, **algèbre linéaire `det`/`inv`/`\`/`eig` + produit matriciel `A*b`/`A*B` → `scirust-solvers`**, **`fft`/`ifft` → `scirust-signal`** (complexe), `norm`/`dot`, `.^`, vecteur→vecteur, `linspace`) | ✅ livré (Phase 2) | `scirust-transpiler/src/front_matlab/` + `lower_matlab.rs` |
-| Front-ends Fortran / C++                     | ⏳ Phases 3-4 | — |
+| Python/NumPy front-end (lexer + parser)     | ✅ delivered | `scirust-transpiler/src/front_python/` |
+| Typed Scientific IR (scalar/array/int)  | ✅ delivered | `scirust-transpiler/src/sir.rs` |
+| Lowering + type/shape inference        | ✅ delivered | `scirust-transpiler/src/lower.rs` |
+| Deterministic Rust emission (pinned order)    | ✅ delivered | `scirust-transpiler/src/emit.rs` |
+| Differential oracle against real NumPy **and real Octave** | ✅ delivered | `scirust-transpiler/examples/oracle.rs` |
+| Unit tests (CI gate, without Python/Octave) | ✅ delivered | `scirust-transpiler/src/lib.rs` (97 tests) |
+| `if`/`elif`/`else` flow control + comparisons | ✅ delivered (Phase 1) | `front_python/` + `sir.rs` + `emit.rs` |
+| `while` loops (iterative algorithms)     | ✅ delivered (Phase 1) | `front_python/` + `sir.rs` + `emit.rs` |
+| Routing `np.linalg.solve`/`det`/`eigvalsh`/`inv` + `A @ b` (matvec) → `scirust-solvers` (2-D matrix return for `inv`) | ✅ delivered (Phase 1) | `sir.rs` (`LinSolve`, `Det`, `Eigvalsh`, `Matvec`, `Inv`, `Ty::MatrixVal`) + `emit.rs` |
+| Routing `np.fft.fft`/`rfft`/`ifft` → `scirust-signal` (+ complex type) | ✅ delivered (Phase 1) | `sir.rs` (`Ty::ComplexArray`, `Fft`, `Rfft`, `Ifft`, `ComplexAbs`) + `emit.rs` |
+| **Multi-output tuples + `np.linalg.svd`/`qr`** (destructuring `U, S, Vh = …` / `Q, R = …`, `np.diag`) → `scirust-solvers` | ✅ delivered (Phase 2) | `sir.rs` (`TupleExpr`, `SirStmt::LetTuple`, `SirExpr::Diag`) + `emit.rs` |
+| **General tuple returns** (`return a, b`, scalar elements) | ✅ delivered (Phase 2) | `sir.rs` (`RetTy`, `SirStmt::ReturnTuple`) + `emit.rs` |
+| **User function calls** (composition, inter-function type inference) + **literal lists** | ✅ delivered (Phase 2) | `lower.rs` (`FuncSig`/`Sigs`) + `sir.rs` (`SirExpr::UserCall`, `ArrayLit`) |
+| General 2-D arrays                       | ⏳ Phase 1 | — |
+| **MATLAB/Octave front-end** (lexer + parser + lowering, proven vs Octave; **multi-output `[a,b]=f(…)`**, math/reduction intrinsics aligned with Python, **linear algebra `det`/`inv`/`\`/`eig` + matrix product `A*b`/`A*B` → `scirust-solvers`**, **`fft`/`ifft` → `scirust-signal`** (complex), `norm`/`dot`, `.^`, vector→vector, `linspace`) | ✅ delivered (Phase 2) | `scirust-transpiler/src/front_matlab/` + `lower_matlab.rs` |
+| Fortran / C++ front-ends                     | ⏳ Phases 3-4 | — |
 
-**Résultat de l'oracle (reproductible).** 140 cas au total : 43 Python prouvés
-contre **NumPy réel**, 97 MATLAB prouvés contre **Octave réel** (chacun 200 essais).
+**Oracle result (reproducible).** 140 cases in total: 43 Python proven
+against **real NumPy**, 97 MATLAB proven against **real Octave** (200 trials each).
 
 ```
 $ cargo run -p scirust-transpiler --example oracle
@@ -379,7 +381,7 @@ tolerance: |Δ| ≤ 1e-7 + 1e-9·|ref|, 200 trials/case
   ✓ qr reconstruction Q@R (tuple unpack → scirust-solvers — Phase 2)
   ✓ user calls: sumsq / sumdbl / chain (function composition, hint-free inference — Phase 2)
   ✓ list literal: weighted average (Python list → Vec — Phase 2)
-  ✓ log/log10 / floor/ceil / sinh/cosh/arctan / max-min-mean / prod (vocabulaire élargi — Phase 2)
+  ✓ log/log10 / floor/ceil / sinh/cosh/arctan / max-min-mean / prod (broadened vocabulary — Phase 2)
   ✓ sin/cos/abs / exp / ** / ones  (full intrinsic & operator coverage)
   ✓ M: norm2 / dot / relu / sign / clamp / poly / mysum / newton / ew_scale (MATLAB → Octave — Phase 2)
   ✓ M: sumdiff / normstats / stats3 [a,b]=f(…) + mathx (MATLAB multi-output + log/floor/atan/min/max/mean — Phase 2)
@@ -419,82 +421,82 @@ tolerance: |Δ| ≤ 1e-7 + 1e-9·|ref|, 200 trials/case
   ORACLE GREEN — 140/140 cases match their reference runtime within tolerance
 ```
 
-Un point d'entrée unique lance toute la suite (tests unitaires + oracle) avec
-un rapport et un code de sortie non nul à la moindre divergence :
+A single entry point runs the whole suite (unit tests + oracle) with
+a report and a non-zero exit code at the slightest divergence:
 
 ```
 $ ./scripts/test_transpiler.sh
 ```
 
-Vérification de non-vacuité : l'injection d'un opérateur faux dans l'émetteur
-(`*` → `+`) fait passer plusieurs cas Python au ROUGE ; côté MATLAB, casser
-l'indexation 1-based (`i-1` → `i-2`) fait planter `mysum` et passe l'oracle au
-ROUGE — le gate mord réellement des deux côtés.
+Non-vacuity check: injecting a wrong operator into the emitter
+(`*` → `+`) turns several Python cases RED; on the MATLAB side, breaking
+the 1-based indexing (`i-1` → `i-2`) makes `mysum` fail and turns the oracle
+RED — the gate really bites on both sides.
 
-> **Note de réutilisation `codetrans`.** Le §10 vise `codetrans::Expr` comme
-> backend d'émission. En pratique son nœud `Function` porte des paramètres
-> **non typés** (`Vec<String>`), ce qui ne permet pas d'émettre des signatures
-> Rust typées (`&[f64]` vs `f64`) qui *compilent*. Le MVP utilise donc un
-> émetteur dédié typé ; unifier avec `codetrans` (en étendant son `Function`
-> avec des types de paramètres) reste un travail ultérieur.
+> **`codetrans` reuse note.** §10 targets `codetrans::Expr` as the
+> emission backend. In practice its `Function` node carries **untyped**
+> parameters (`Vec<String>`), which does not allow emitting typed Rust
+> signatures (`&[f64]` vs `f64`) that *compile*. The MVP therefore uses a
+> dedicated typed emitter; unifying with `codetrans` (by extending its `Function`
+> with parameter types) remains future work.
 
 ---
 
-## 10. Réutilisation concrète de l'existant (points d'ancrage dans le code)
+## 10. Concrete reuse of the existing (code anchor points)
 
-| Besoin | Réutiliser | Fichier |
+| Need | Reuse | File |
 |--------|-----------|---------|
-| Backend d'émission Rust | `codetrans::Expr` + pretty-printer | `scirust-codetrans/src/lib.rs` (`Display for Expr`, l.249) |
-| Passes d'optimisation | 20 règles (`optimization_rules`, CSE, DCE, LICM) | `scirust-codetrans/src/lib.rs` (l.1958+) |
-| Vocabulaire cible | solvers, signal, estimation, core, vision… | crates `scirust-*` (§4-5) |
-| Preuve / audit | CCOS + chaîne SHA-256 | `scirust-sciagent::ccos`, `scirust-mcp` |
-| Pilotage agent | exposer le transpileur comme outil MCP | `scirust-mcp` |
-| Déterminisme flottant | réductions à ordre pinné, fingerprint | `scirust-core` |
+| Rust emission backend | `codetrans::Expr` + pretty-printer | `scirust-codetrans/src/lib.rs` (`Display for Expr`, l.249) |
+| Optimization passes | 20 rules (`optimization_rules`, CSE, DCE, LICM) | `scirust-codetrans/src/lib.rs` (l.1958+) |
+| Target vocabulary | solvers, signal, estimation, core, vision… | `scirust-*` crates (§4-5) |
+| Proof / audit | CCOS + SHA-256 chain | `scirust-sciagent::ccos`, `scirust-mcp` |
+| Agent orchestration | expose the transpiler as an MCP tool | `scirust-mcp` |
+| Floating-point determinism | pinned-order reductions, fingerprint | `scirust-core` |
 
-Un nouveau crate `scirust-transpiler` (front-ends + SIR + lowering + oracle)
-se poserait **au-dessus** de ces briques, sans les dupliquer.
-
----
-
-## 11. Frontière honnête — ce qui ne sera PAS livré (à court terme)
-
-Fidèle à la doctrine du dépôt, on énonce d'emblée les non-objectifs :
-
-- **Pas de « tout langage / tout programme ».** Sous-ensembles scientifiques
-  statiquement analysables uniquement. Un `eval`, une réflexion, un
-  monkeypatch Python → **refus diagnostiqué**, pas de devinette.
-- **Pas de reproductibilité bit-exacte *cross-language* garantie.** L'ordre des
-  opérations de NumPy/BLAS n'est pas spécifié ; on garantit (a) une **tolérance
-  déclarée** source ⇄ Rust et (b) la **bit-exactitude *interne* Rust**
-  (indépendante du nombre de threads, via `scirust-core`). Prétendre l'égalité
-  bit-à-bit avec CPython serait malhonnête.
-- **Pas de traduction de l'UB C/C++.** Comportement indéfini → signalé, jamais
-  « interprété ».
-- **La performance vient du routage, pas d'une magie de transpilation.** Le
-  Rust émis vise d'abord correction + déterminisme ; la vitesse provient des
-  noyaux SIMD/GPU `scirust-*` ciblés, mesurée, pas supposée.
+A new crate `scirust-transpiler` (front-ends + SIR + lowering + oracle)
+would sit **on top of** these bricks, without duplicating them.
 
 ---
 
-## 12. Critères d'acceptation — « comment être sûr »
+## 11. Honest boundary — what will NOT be delivered (short term)
 
-Un port est réputé livrable si et seulement si :
+Faithful to the repository's doctrine, the non-goals are stated upfront:
 
-1. l'**oracle est vert** sur le corpus déclaré (différentiel et/ou
-   métamorphique) ;
-2. la **tolérance déclarée** est respectée sur tout le corpus ;
-3. la **bit-exactitude interne** est vérifiée (fingerprint identique
-   1/2/4/8 threads) ;
-4. **zéro `unsafe` non justifié** ; aliasing tracé ;
-5. un **rapport signé** hash-chaîné est produit et rejouable ;
-6. le **sous-ensemble couvert** est documenté, ainsi que ce qui a été refusé.
-
-Tant que ces six gates ne sont pas outillés, la réponse honnête à « SciRust
-sait-il transpiler mon code ? » reste **« pas encore automatiquement — voici
-le plan et les garanties visées »**, et non un « oui » marketing.
+- **No "any language / any program".** Statically analyzable scientific
+  subsets only. A Python `eval`, reflection, or
+  monkeypatch → **diagnosed refusal**, no guessing.
+- **No guaranteed *cross-language* bit-exact reproducibility.** NumPy/BLAS
+  operation order is unspecified; we guarantee (a) a **declared tolerance**
+  source ⇄ Rust and (b) **internal Rust bit-exactness**
+  (independent of thread count, via `scirust-core`). Claiming bit-for-bit
+  equality with CPython would be dishonest.
+- **No translation of C/C++ UB.** Undefined behavior → reported, never
+  "interpreted".
+- **Performance comes from routing, not transpilation magic.** The
+  emitted Rust targets correctness + determinism first; speed comes from the
+  targeted SIMD/GPU `scirust-*` kernels, measured, not assumed.
 
 ---
 
-*Voir aussi : `docs/DOMAIN_ROADMAP.md` (secteurs régulés), `docs/ARCHITECTURE.md`
-(architecture du runtime), `scirust-codetrans` (backend d'émission),
-`scirust-mcp` (pilotage agent + audit).*
+## 12. Acceptance criteria — "how to be sure"
+
+A port is deemed deliverable if and only if:
+
+1. the **oracle is green** on the declared corpus (differential and/or
+   metamorphic);
+2. the **declared tolerance** is respected over the whole corpus;
+3. **internal bit-exactness** is verified (identical fingerprint
+   1/2/4/8 threads);
+4. **zero unjustified `unsafe`**; aliasing traced;
+5. a **signed report** hash-chained is produced and replayable;
+6. the **covered subset** is documented, as well as what was refused.
+
+As long as these six gates are not tooled, the honest answer to "does SciRust
+know how to transpile my code?" remains **"not yet automatically — here is
+the plan and the targeted guarantees"**, not a marketing "yes".
+
+---
+
+*See also: `docs/DOMAIN_ROADMAP.md` (regulated sectors), `docs/ARCHITECTURE.md`
+(runtime architecture), `scirust-codetrans` (emission backend),
+`scirust-mcp` (agent orchestration + audit).*

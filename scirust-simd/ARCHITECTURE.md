@@ -1,226 +1,228 @@
 # Architecture — `scirust-simd`
 
-Ce document cartographie le crate `scirust-simd` : un **socle BLAS + Transformer
-portable**, du datacenter x86_64 à l'embarqué ARM, construit autour d'une seule
-idée directrice — **un binaire, sélection du backend à l'exécution, repli
-scalaire garanti**.
+This document maps the `scirust-simd` crate: a **portable BLAS + Transformer
+foundation**, from the x86_64 datacenter to embedded ARM, built around a single
+guiding idea — **one binary, backend selection at runtime, guaranteed scalar
+fallback**.
 
-Il est le fruit d'un chantier incrémental (≈ 20 PR) partant de simples kernels
-`add`/`mul` pour aboutir à un pipeline d'inférence **et** d'entraînement complet.
+It is the fruit of an incremental effort (≈ 20 PRs) starting from simple
+`add`/`mul` kernels and ending with a complete inference **and** training
+pipeline.
 
-## Toolchains et features SIMD
+## Toolchains and SIMD features
 
-Le build par défaut est compatible avec Rust stable et avec le **MSRV 1.89**. Il
-inclut le repli scalaire, SSE2/AVX2/AVX-512 sur x86_64 et NEON sur aarch64. Les
-extensions qui utilisent encore des API `core::arch` instables sont explicites :
+The default build is compatible with Rust stable and with the **MSRV 1.89**. It
+includes the scalar fallback, SSE2/AVX2/AVX-512 on x86_64 and NEON on aarch64.
+Extensions that still use unstable `core::arch` APIs are explicit:
 
-- `nightly-simd` active Intel AMX, ARM SVE/SME et les chemins int8 ARM
-  `dotprod`/`i8mm` ; cette feature exige la nightly épinglée par le dépôt ;
-- `portable-simd` active les kernels génériques `std::simd` et exige également
-  la nightly épinglée.
+- `nightly-simd` enables Intel AMX, ARM SVE/SME and the ARM int8 paths
+  `dotprod`/`i8mm`; this feature requires the nightly pinned by the repository;
+- `portable-simd` enables the generic `std::simd` kernels and also requires the
+  pinned nightly.
 
-Les deux features sont désactivées par défaut. Elles ont leurs propres jobs CI ;
-elles ne font donc pas partie du contrat MSRV stable.
+Both features are disabled by default. They have their own CI jobs; they
+therefore are not part of the stable MSRV contract.
 
 ---
 
-## 1. Le fil directeur : dispatch runtime + portabilité
+## 1. The guiding thread: runtime dispatch + portability
 
-Toute la performance repose sur une **couche d'abstraction unique** qui choisit,
-au premier appel, le meilleur jeu d'instructions disponible sur le CPU courant,
-puis le met en cache :
+All the performance rests on a **single abstraction layer** that selects, on the
+first call, the best instruction set available on the current CPU, then caches
+it:
 
 ```
-                 detect_backend()  (OnceLock, coût amorti = 1 load atomique)
+                 detect_backend()  (OnceLock, amortized cost = 1 atomic load)
                         │
      ┌──────────┬───────┴────┬──────────┬──────┬──────┬──────────┐
-   AVX-512    AVX2/FMA      SSE2       SVE    NEON        Scalaire
-  (x86_64)   (x86_64)     (x86_64)  (aarch64)(aarch64)   (partout)
+   AVX-512    AVX2/FMA      SSE2       SVE    NEON        Scalar
+  (x86_64)   (x86_64)     (x86_64)  (aarch64)(aarch64)   (everywhere)
 ```
 
-- **x86_64** : `AVX-512F` (+ `VNNI`/`BW` selon les kernels) → `AVX2+FMA` →
-  `SSE2`. Détection via `std::is_x86_feature_detected!`.
-- **aarch64** : **`NEON`** (baseline ARMv8) sur stable. Avec `nightly-simd`,
-  **`SVE`** (kernels scalables `saxpy`/`sdot`/`sscal`/`sgemm`, longueur
-  vectorielle runtime — Graviton 3/A64FX/Neoverse V2) est choisi s'il est
-  présent, et les chemins int8 `dotprod`/`i8mm` sont activés. Le backend est
-  choisi par `detect_backend()` (SVE avant NEON) et sert tout le trait
-  `SimdBackend`.
-- **Partout ailleurs** : chemin scalaire, toujours correct.
+- **x86_64**: `AVX-512F` (+ `VNNI`/`BW` depending on the kernels) → `AVX2+FMA` →
+  `SSE2`. Detection via `std::is_x86_feature_detected!`.
+- **aarch64**: **`NEON`** (ARMv8 baseline) on stable. With `nightly-simd`,
+  **`SVE`** (scalable `saxpy`/`sdot`/`sscal`/`sgemm` kernels, runtime vector
+  length — Graviton 3/A64FX/Neoverse V2) is chosen when present, and the int8
+  `dotprod`/`i8mm` paths are enabled. The backend is chosen by
+  `detect_backend()` (SVE before NEON) and serves the whole `SimdBackend`
+  trait.
+- **Everywhere else**: scalar path, always correct.
 
-Conséquence : **le même code source** tourne du serveur AVX-512 à un Jetson /
-Raspberry Pi / Rockchip RK3588, sans recompilation conditionnelle par le
-développeur. Le repli scalaire est la **référence de correction** contre
-laquelle tous les kernels vectoriels sont testés.
+Consequence: **the same source code** runs from an AVX-512 server to a Jetson /
+Raspberry Pi / Rockchip RK3588, without conditional recompilation by the
+developer. The scalar fallback is the **correctness reference** against which
+all vector kernels are tested.
 
-Modules concernés : [`dispatch`](src/dispatch.rs), [`matrix`](src/matrix/),
+Modules involved: [`dispatch`](src/dispatch.rs), [`matrix`](src/matrix/),
 [`portable`](src/portable.rs).
 
 ---
 
-## 2. Carte des couches
+## 2. Layer map
 
-Du bas (silicium) vers le haut (application) :
+From the bottom (silicon) to the top (application):
 
-| Couche | Module(s) | Contenu |
+| Layer | Module(s) | Content |
 |---|---|---|
-| **Dispatch / backends** | `dispatch`, `matrix`, `portable` | Détection CPU, trait `SimdBackend` (saxpy/sdot/…), backends AVX-512/AVX2/SSE2/NEON/scalaire ; **SVE** avec `nightly-simd` |
-| **BLAS — GEMM** | `gemm` | SGEMM (`f32`) & DGEMM (`f64`) tuilés/packés, multi-thread, GEMM fusionné `act(A·B+b)` |
-| **Activations** | `activations` | `exp` vectorisée (range-reduction + `scalef`) → `sigmoid`/`tanh`/`GELU`/`SiLU` |
-| **Quantification** | `quant` | dot int8 `u8·i8→i32` (VNNI et ARM `i8mm` USDOT avec `nightly-simd`), `i8·i8→i32` (ARM `dotprod` SDOT avec `nightly-simd` / AVX-512BW), bf16 (natif `avx512bf16` ou élargissement) — **cross-arch** |
-| **Accélérateurs matriciels** | `amx`, `sme` | Avec `nightly-simd` : GEMM à tuiles **Intel AMX** int8 (`_tile_dpbssd`) & bf16 (`_tile_dpbf16ps`) ; **ARM SME** (sonde + référence rang-1, en attente des intrinsèques ZA) |
-| **Vecteurs scalables** | `sve` | Avec `nightly-simd` : kernels SVE `saxpy`/`sdot`/`sscal` **et SGEMM packé register-blocked** (tuile `MR×VL`, C amortie sur K), longueur vectorielle runtime (aarch64) |
-| **Kernels x86 avancés** | `x86_ext` | masques `k` (axpy conditionnel), NT-stores, prefetch logiciel |
-| **Attention** | `attention`, `kv_cache`, `qkv_cache` | naïve, **flash**, **causale**, **multi-tête**, **cache KV** (`f32` **et int8** ÷4 mémoire) |
-| **Normalisations** | `norm` | RMSNorm, LayerNorm (vectorisées), RoPE |
-| **Assemblage** | `transformer`, `model` | Bloc décodeur pre-norm (prefill **+** decode `f32` **et int8**), modèle multi-couche + génération (`generate_hidden`/`_quant`) |
-| **Entraînement** | `grad` | Backward de tous les noyaux, validés par **gradcheck** |
-| **Application** | `scirust-learning::simd_nn` | `DenseLayer`/`Mlp` entraînables, optimiseur **AdamW** |
+| **Dispatch / backends** | `dispatch`, `matrix`, `portable` | CPU detection, `SimdBackend` trait (saxpy/sdot/…), AVX-512/AVX2/SSE2/NEON/scalar backends; **SVE** with `nightly-simd` |
+| **BLAS — GEMM** | `gemm` | Tiled/packed SGEMM (`f32`) & DGEMM (`f64`), multi-threaded, fused GEMM `act(A·B+b)` |
+| **Activations** | `activations` | Vectorized `exp` (range-reduction + `scalef`) → `sigmoid`/`tanh`/`GELU`/`SiLU` |
+| **Quantization** | `quant` | int8 dot `u8·i8→i32` (VNNI and ARM `i8mm` USDOT with `nightly-simd`), `i8·i8→i32` (ARM `dotprod` SDOT with `nightly-simd` / AVX-512BW), bf16 (native `avx512bf16` or widening) — **cross-arch** |
+| **Matrix accelerators** | `amx`, `sme` | With `nightly-simd`: tiled **Intel AMX** GEMM int8 (`_tile_dpbssd`) & bf16 (`_tile_dpbf16ps`); **ARM SME** (probe + rank-1 reference, awaiting ZA intrinsics) |
+| **Scalable vectors** | `sve` | With `nightly-simd`: SVE kernels `saxpy`/`sdot`/`sscal` **and packed register-blocked SGEMM** (`MR×VL` tile, C amortized over K), runtime vector length (aarch64) |
+| **Advanced x86 kernels** | `x86_ext` | `k` masks (conditional axpy), NT-stores, software prefetch |
+| **Attention** | `attention`, `kv_cache`, `qkv_cache` | naive, **flash**, **causal**, **multi-head**, **KV cache** (`f32` **and int8** ÷4 memory) |
+| **Normalizations** | `norm` | RMSNorm, LayerNorm (vectorized), RoPE |
+| **Assembly** | `transformer`, `model` | Pre-norm decoder block (prefill **+** decode `f32` **and int8**), multi-layer model + generation (`generate_hidden`/`_quant`) |
+| **Training** | `grad` | Backward of all kernels, validated by **gradcheck** |
+| **Application** | `scirust-learning::simd_nn` | Trainable `DenseLayer`/`Mlp`, **AdamW** optimizer |
 
 ---
 
-## 3. BLAS : le GEMM, cœur de la performance
+## 3. BLAS: the GEMM, performance core
 
-Le produit matriciel irrigue tout le reste (projections, FFN, backward). Trois
-propriétés le rendent rapide :
+The matrix product feeds everything else (projections, FFN, backward). Three
+properties make it fast:
 
-1. **Blocking cache** (`MC`/`KC`/`NC`) façon BLIS : les panneaux travaillés
-   tiennent en L2/L1.
-2. **Packing explicite** de `A` et `B` en buffers contigus → le micro-kernel les
-   lit en **stride unitaire** (prefetch matériel optimal).
-3. **Micro-kernel registre-bloqué 8×16** : 8 accumulateurs `zmm` gardés en
-   registres sur toute la dimension `KC` ; bords gérés par masque `k`.
-4. **Parallélisme** : découpe de la dimension `M` en blocs de lignes disjoints
-   via `std::thread::scope` (aucune dépendance externe).
+1. **Cache blocking** (`MC`/`KC`/`NC`) BLIS-style: the worked panels fit in
+   L2/L1.
+2. **Explicit packing** of `A` and `B` into contiguous buffers → the micro-kernel
+   reads them in **unit stride** (optimal hardware prefetch).
+3. **8×16 register-blocked micro-kernel**: 8 `zmm` accumulators held in
+   registers across the whole `KC` dimension; edges handled by `k` mask.
+4. **Parallelism**: splitting of the `M` dimension into disjoint blocks of rows
+   via `std::thread::scope` (no external dependency).
 
-Le **même GEMM packé est porté sur NEON** (aarch64) : structure identique
-(blocking `MC_N`/`KC_N`/`NC_N`, packing de `A`/`B`), tuile registre `8×8`
-(16 accumulateurs `float32x4_t`, épilogue par tampon car NEON n'a pas de store
-masqué). Conséquence : **tout le stack — Transformer et entraînement — passe du
-scalaire au vectorisé sur l'embarqué ARM** (Jetson, Raspberry Pi, RK3588), et
-non plus seulement les primitives `saxpy`/`sdot`. Le noyau est validé
-bit-à-tolérance contre le scalaire **sous `qemu-aarch64`** (exécution réelle,
-pas seulement compilation).
+The **same packed GEMM is ported to NEON** (aarch64): identical structure
+(`MC_N`/`KC_N`/`NC_N` blocking, packing of `A`/`B`), `8×8` register tile (16
+`float32x4_t` accumulators, buffer epilogue because NEON has no masked store).
+Consequence: **the whole stack — Transformer and training — goes from scalar to
+vectorized on embedded ARM** (Jetson, Raspberry Pi, RK3588), and no longer only
+the `saxpy`/`sdot` primitives. The kernel is validated bit-to-tolerance against
+the scalar **under `qemu-aarch64`** (real execution, not just compilation).
 
-### Perfs mesurées (machine AVX-512, 4 cœurs)
+### Measured performance (AVX-512 machine, 4 cores)
 
-| Kernel | Débit | Gain vs naïf |
+| Kernel | Throughput | Gain vs naive |
 |---|---:|---:|
 | SGEMM 1024³, 1 thread | 56.8 GFLOP/s | ~84× |
 | SGEMM 1024³, 4 threads | 110 GFLOP/s | ~163× |
 | DGEMM 1024³, 4 threads | 127 GFLOP/s | — |
-| Couche dense fusionnée 4096×1024×1024 (ReLU) | 53.9 GFLOP/s | ~86× |
-| **AMX int8** 512³ (`_tile_dpbssd`, silicium) | 47.5 GOP/s | ~23× |
-| **AMX bf16** 512³ (`_tile_dpbf16ps`, silicium) | 44 GFLOP/s | ~21× |
-| **Bloc décodeur int8 W8A8** (s=128, d=1024, d_ff=4096) | ×1.97 vs `f32` | poids ÷4, erreur RMS 0,01 % |
+| Fused dense layer 4096×1024×1024 (ReLU) | 53.9 GFLOP/s | ~86× |
+| **AMX int8** 512³ (`_tile_dpbssd`, silicon) | 47.5 GOP/s | ~23× |
+| **AMX bf16** 512³ (`_tile_dpbf16ps`, silicon) | 44 GFLOP/s | ~21× |
+| **int8 W8A8 decoder block** (s=128, d=1024, d_ff=4096) | ×1.97 vs `f32` | weights ÷4, RMS error 0.01 % |
 
-Le **GEMM fusionné** (`sgemm_bias_act`) calcule `act(α·A·B + biais)` : `A·B` par
-le GEMM tuilé (n'importe quel `k`), puis un épilogue biais+activation vectorisé
-en un seul passage `O(m·n)`. Son analogue **quantifié int8**
-([`amx::qlinear_i8`](src/amx.rs)) déquantifie `X·W` (GEMM AMX) par canal + biais.
+The **fused GEMM** (`sgemm_bias_act`) computes `act(α·A·B + bias)`: `A·B` by the
+tiled GEMM (any `k`), then a vectorized bias+activation epilogue in a single
+`O(m·n)` pass. Its **int8 quantized** analogue
+([`amx::qlinear_i8`](src/amx.rs)) dequantizes `X·W` (AMX GEMM) per channel +
+bias.
 
-Le **bloc décodeur quantifié int8 (W8A8)** ([`qtransformer`](src/qtransformer.rs))
-branche les six projections (`Wq`/`Wk`/`Wv`/`Wo`/`W1`/`W2`) sur le GEMM AMX : poids
-quantifiés **par canal** et **pré-empaquetés** une fois en disposition tuile
-(`amx::prepack_b_i8`, packing VNNI hors du chemin chaud), activations quantifiées
-**par token** à l'exécution. Résultat mesuré (silicium) : plus rapide que le `f32`,
-poids ÷4, sortie fidèle (le résidu non quantifié dilue le bruit int8) — cf.
-[`examples/qtransformer_bench.rs`](examples/qtransformer_bench.rs).
+The **quantized int8 (W8A8) decoder block** ([`qtransformer`](src/qtransformer.rs))
+routes the six projections (`Wq`/`Wk`/`Wv`/`Wo`/`W1`/`W2`) onto the AMX GEMM:
+weights quantized **per channel** and **pre-packed** once into tile layout
+(`amx::prepack_b_i8`, VNNI packing out of the hot path), activations quantized
+**per token** at runtime. Measured result (silicon): faster than `f32`,
+weights ÷4, faithful output (the non-quantized residual dilutes the int8 noise)
+— cf. [`examples/qtransformer_bench.rs`](examples/qtransformer_bench.rs).
 
-Les chiffres AMX sont mesurés **sur silicium AMX** (la machine expose
+The AMX figures are measured **on AMX silicon** (the machine exposes
 `amx_tile`/`amx_int8`/`amx_bf16`) — cf. [`examples/amx_bench.rs`](examples/amx_bench.rs).
-Deux optimisations de packing : (1) les tampons de tuiles ne sont remis à zéro que
-pour les blocs `K` partiels (les pleins les réécrivent) ; (2) les panneaux `A`
-sont packés **une seule fois par bloc de lignes** puis réutilisés sur tous les
-panneaux `N` (élimine la redondance `n/16`×, ~+25 % de débit), et les poids
-statiques sont **pré-empaquetés** hors du chemin chaud (`prepack_b_i8`). Les GEMM
-AMX sont **mono-thread par conception** : la variante multi-thread corrompt l'état de tuiles au
-changement de contexte sur plateforme virtualisée (~0,1 %) ; le parallélisme
-fiable passe par le GEMM `f32` [`sgemm_parallel`](src/gemm.rs). Voir aussi
+Two packing optimizations: (1) tile buffers are only zeroed for partial `K`
+blocks (full ones rewrite them); (2) `A` panels are packed **once per block of
+rows** then reused over all `N` panels (eliminates the `n/16`× redundancy,
+~+25 % throughput), and the static weights are **pre-packed** out of the hot
+path (`prepack_b_i8`). AMX GEMMs are **single-threaded by design**: the
+multi-threaded variant corrupts the tile state on context switch on a
+virtualized platform (~0.1 %); reliable parallelism goes through the `f32` GEMM
+[`sgemm_parallel`](src/gemm.rs). See also
 [`examples/bench.rs`](examples/bench.rs).
 
 ---
 
-## 4. Pipeline Transformer
+## 4. Transformer pipeline
 
-Toutes les briques d'un bloc décodeur, chaînables :
+All the bricks of a decoder block, chainable:
 
 ```
-RMSNorm → Q,K,V = proj(·)      (GEMM tuilé)
-        → RoPE(Q,K)            (par tête)
-        → Attention causale multi-tête
-        → + proj·Wo  (résidu)
-RMSNorm → FFN : SiLU(·W₁+b₁)·W₂ (GEMM fusionné + GEMM)
-        → + (résidu)
+RMSNorm → Q,K,V = proj(·)      (tiled GEMM)
+        → RoPE(Q,K)            (per head)
+        → Causal multi-head attention
+        → + proj·Wo  (residual)
+RMSNorm → FFN : SiLU(·W₁+b₁)·W₂ (fused GEMM + GEMM)
+        → + (residual)
 ```
 
-- **Attention** ([`attention`](src/attention.rs)) : version naïve, **flash**
-  (softmax en ligne, mémoire `O(d)` par requête), **causale** (triangle, ~2× moins
-  de travail), **multi-tête**.
-- **Cache KV** ([`kv_cache`](src/kv_cache.rs)) : décodage autoregressif
-  incrémental, `O(t·d)` par token au lieu de recalculer le préfixe.
-- **Bloc & modèle** ([`transformer`](src/transformer.rs),
-  [`model`](src/model.rs)) : deux régimes — *prefill* (séquence entière) et
-  *decode* (token par token via cache). Un invariant clé garantit leur
-  cohérence : **`prefill ≡ decode`** ligne par ligne, propagé sur toute la pile.
+- **Attention** ([`attention`](src/attention.rs)): naive, **flash** (online
+  softmax, `O(d)` memory per query), **causal** (triangle, ~2× less work),
+  **multi-head** versions.
+- **KV cache** ([`kv_cache`](src/kv_cache.rs)): incremental autoregressive
+  decoding, `O(t·d)` per token instead of recomputing the prefix.
+- **Block & model** ([`transformer`](src/transformer.rs),
+  [`model`](src/model.rs)): two regimes — *prefill* (whole sequence) and
+  *decode* (token by token via cache). A key invariant guarantees their
+  consistency: **`prefill ≡ decode`** line by line, propagated through the
+  whole stack.
 
 ---
 
-## 5. Entraînement
+## 5. Training
 
-[`grad`](src/grad.rs) fournit la **rétropropagation** de tous les noyaux :
+[`grad`](src/grad.rs) provides the **backpropagation** of all kernels:
 
-- `linear_backward` (réutilise le GEMM tuilé), `relu`/`silu`/`gelu_backward`,
-  `rmsnorm`/`layernorm_backward`, `softmax_backward`, et
-  **`attention_backward`** (chaîne `dV = Pᵀ·dO`, `dScores = softmax'`, `dQ`, `dK`).
+- `linear_backward` (reuses the tiled GEMM), `relu`/`silu`/`gelu_backward`,
+  `rmsnorm`/`layernorm_backward`, `softmax_backward`, and
+  **`attention_backward`** (chain `dV = Pᵀ·dO`, `dScores = softmax'`, `dQ`, `dK`).
 
-Côté application, [`scirust-learning::simd_nn`](../scirust-learning/src/simd_nn.rs) :
-`DenseLayer` et `Mlp` entraînables (forward fusionné + backward chaîné), et
-l'optimiseur **`AdamW`** (moments, correction de biais, weight decay découplé).
+On the application side, [`scirust-learning::simd_nn`](../scirust-learning/src/simd_nn.rs):
+trainable `DenseLayer` and `Mlp` (fused forward + chained backward), and the
+**`AdamW`** optimizer (moments, bias correction, decoupled weight decay).
 
 ---
 
-## 6. Philosophie de test
+## 6. Testing philosophy
 
-Chaque affirmation est vérifiée mécaniquement :
+Every claim is verified mechanically:
 
-- **Correction vectorielle** : chaque kernel SIMD est comparé au repli scalaire
-  (souvent bit-à-bit ou à tolérance serrée), sur toutes les longueurs (y compris
-  les épilogues masqués `1..15`).
-- **Gradients** : tous les backward sont validés par **différences finies
-  centrées** (gradcheck) contre un forward de référence indépendant.
-- **Équivalences structurelles** : `prefill ≡ decode` (bloc et pile),
-  `incrémental ≡ batch` (cache KV), `AdamW < SGD` à budget égal.
-- **Portabilité** : le workspace compile sous
+- **Vector correctness**: each SIMD kernel is compared to the scalar fallback
+  (often bit-for-bit or with a tight tolerance), on all lengths (including the
+  masked `1..15` epilogues).
+- **Gradients**: all backward passes are validated by **centered finite
+  differences** (gradcheck) against an independent reference forward.
+- **Structural equivalences**: `prefill ≡ decode` (block and stack),
+  `incremental ≡ batch` (KV cache), `AdamW < SGD` at equal budget.
+- **Portability**: the workspace compiles under
   `RUSTFLAGS="-D warnings" cargo +nightly-2026-07-02 check --workspace --all-targets --features scirust-simd/nightly-simd --target aarch64-unknown-linux-gnu`.
 
 ---
 
-## 7. Index des modules
+## 7. Module index
 
-| Module | Rôle |
+| Module | Role |
 |---|---|
-| [`dispatch`](src/dispatch.rs) | Détection CPU + backends arch-spécifiques |
-| [`matrix`](src/matrix/) | Trait `SimdBackend`, vues matricielles |
-| [`gemm`](src/gemm.rs) | SGEMM/DGEMM tuilés, parallèles, fusionnés |
-| [`activations`](src/activations.rs) | `exp`/`sigmoid`/`tanh`/`GELU`/`SiLU` vectorisés |
+| [`dispatch`](src/dispatch.rs) | CPU detection + arch-specific backends |
+| [`matrix`](src/matrix/) | `SimdBackend` trait, matrix views |
+| [`gemm`](src/gemm.rs) | Tiled, parallel, fused SGEMM/DGEMM |
+| [`activations`](src/activations.rs) | Vectorized `exp`/`sigmoid`/`tanh`/`GELU`/`SiLU` |
 | [`quant`](src/quant.rs) | int8 (VNNI/USDOT/SDOT), bf16 mixed-precision — cross-arch x86/ARM |
-| [`amx`](src/amx.rs) | `nightly-simd` — GEMM Intel AMX à tuiles, int8/bf16, poids pré-empaquetés, `qlinear_i8` (x86) |
-| [`qtransformer`](src/qtransformer.rs) | `nightly-simd` — bloc décodeur **quantifié int8 W8A8** (projections AMX) (x86) |
-| [`sve`](src/sve.rs) | `nightly-simd` — kernels SVE scalables `saxpy`/`sdot`/`sscal` + SGEMM packé `MR×VL` (aarch64) |
-| [`sme`](src/sme.rs) | `nightly-simd` — ARM SME, sonde + référence rang-1 (accumulateur ZA), aarch64 |
-| [`x86_ext`](src/x86_ext.rs) | masques `k`, NT-stores, prefetch (x86) |
-| [`attention`](src/attention.rs) | Attention naïve/flash/causale/multi-tête |
-| [`kv_cache`](src/kv_cache.rs) | Cache KV `f32`, décodage incrémental |
-| [`qkv_cache`](src/qkv_cache.rs) | Cache KV **int8** (÷4 mémoire, scores dot int8 VNNI/SDOT) |
+| [`amx`](src/amx.rs) | `nightly-simd` — tiled Intel AMX GEMM, int8/bf16, pre-packed weights, `qlinear_i8` (x86) |
+| [`qtransformer`](src/qtransformer.rs) | `nightly-simd` — **quantized int8 W8A8** decoder block (AMX projections) (x86) |
+| [`sve`](src/sve.rs) | `nightly-simd` — scalable SVE kernels `saxpy`/`sdot`/`sscal` + packed `MR×VL` SGEMM (aarch64) |
+| [`sme`](src/sme.rs) | `nightly-simd` — ARM SME, probe + rank-1 reference (ZA accumulator), aarch64 |
+| [`x86_ext`](src/x86_ext.rs) | `k` masks, NT-stores, prefetch (x86) |
+| [`attention`](src/attention.rs) | Naive/flash/causal/multi-head attention |
+| [`kv_cache`](src/kv_cache.rs) | `f32` KV cache, incremental decoding |
+| [`qkv_cache`](src/qkv_cache.rs) | **int8** KV cache (÷4 memory, int8 dot VNNI/SDOT scores) |
 | [`norm`](src/norm.rs) | RMSNorm, LayerNorm, RoPE |
-| [`transformer`](src/transformer.rs) | Bloc décodeur (prefill + decode) |
-| [`model`](src/model.rs) | Modèle multi-bloc + génération |
-| [`grad`](src/grad.rs) | Backward de tous les noyaux (gradcheck) |
-| [`complex`](src/complex.rs) | Arithmétique complexe SIMD |
+| [`transformer`](src/transformer.rs) | Decoder block (prefill + decode) |
+| [`model`](src/model.rs) | Multi-block model + generation |
+| [`grad`](src/grad.rs) | Backward of all kernels (gradcheck) |
+| [`complex`](src/complex.rs) | SIMD complex arithmetic |
 
 ---
 
-*Ce document est vivant : il accompagne l'évolution du crate. Le fil rouge reste
-constant — maîtrise fine du matériel x86_64 **et** couverture de toute la grille
-de plateformes, derrière une abstraction unique.*
+*This document is alive: it tracks the evolution of the crate. The guiding
+thread stays constant — fine-grained mastery of x86_64 hardware **and**
+coverage of the whole platform grid, behind a single abstraction.*

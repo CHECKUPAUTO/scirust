@@ -1,21 +1,21 @@
 # scirust-cayley-filter
 
-Filtrage expérimental déterministe en Rust fondé sur les sédénions.
+Deterministic experimental filtering in Rust based on sedenions.
 
-## Règle de sécurité
+## Safety rule
 
-Le filtre Cayley est activé uniquement si :
+The Cayley filter is enabled only if:
 
 `development_loss < 1.0`
 
-Sinon, la sortie reste identique à l’entrée.
+Otherwise, the output remains identical to the input.
 
-## Résultats
+## Results
 
-- succès sur les bruits synthétiques alignés ;
-- abstention sur VoiceBank, MIT-BIH ECG et CWRU ;
-- 71 tests validés ;
-- Clippy strict validé ;
-- code unsafe interdit.
+- successful on aligned synthetic noise;
+- abstains on VoiceBank, MIT-BIH ECG, and CWRU;
+- 71 tests passing;
+- strict Clippy passing;
+- unsafe code forbidden.
 
-Voir `docs/ARCHITECTURE.md`.
+See `docs/ARCHITECTURE.md`.

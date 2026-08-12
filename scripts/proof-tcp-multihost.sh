@@ -59,7 +59,7 @@
 # Le PASS/FAIL est imprimé UNIQUEMENT par le rang 0 (les autres rangs ne font
 # qu'envoyer leur contribution) : c'est lui qui recalcule la référence et
 # compare. Reporter le verdict et les adresses/architectures utilisées dans
-# LIVESTATE.md.
+# docs/archive/LIVESTATE.md.
 # =============================================================================
 set -euo pipefail
 

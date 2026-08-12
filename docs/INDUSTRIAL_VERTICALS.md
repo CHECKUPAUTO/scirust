@@ -1,89 +1,89 @@
-# SciRust — Verticaux industriels : plan d'implémentation
+# SciRust — Industrial verticals: implementation plan
 
-Complément technique de `INDUSTRIAL_ROADMAP.md` (qui couvre l'adoption /
-go-to-market). Ici : les **domaines industriels** à approfondir (présents)
-et à ouvrir (absents), chacun monté sur l'ADN du projet — **des garanties**,
-pas seulement de la précision.
+Technical complement to `INDUSTRIAL_ROADMAP.md` (which covers adoption /
+go-to-market). Here: the **industrial domains** to deepen (present)
+and to open (absent), each built on the project's DNA — **guarantees**,
+not just accuracy.
 
-## Non-négociables (= Definition of Done par item)
+## Non-negotiables (= Definition of Done per item)
 
-1. **Rust pur, zéro FFI** ; **déterminisme bit-exact** (PRNG germé, ordre fixe).
-2. **Aucune affirmation sans test** : oracle honnête ou test de propriété — pas
-   de stub. Le test mesure la garantie revendiquée.
-3. Le différenciateur est **toujours une garantie** : déterminisme, couverture
-   conforme (sans hypothèse de distribution), borne certifiée (IBP/CROWN),
-   inférence vérifiable (Freivalds), audit hash-chaîné, sûreté ASIL/SIL.
-4. **CLI/démo** quand pertinent ; **docs** quand une commande CLI est ajoutée.
-5. **8 gates verts** (fmt, clippy `-D warnings --all-targets`, build, test, simd,
-   aarch64, doc, deny) + `--features wgpu` si concerné. **Commit + push** par item.
-
----
-
-## Phase 1 — Approfondir la PdM (gains rapides, relier l'existant)
-
-- **I1 · RUL à intervalles conformes** — `scirust-pdm` (`rul` × `conformal_guard`).
-  Durée de vie restante avec **intervalle à couverture garantie** `[t_bas, t_haut]`
-  sans hypothèse de distribution. Oracle : couverture empirique ≥ 1−α sur
-  trajectoires de dégradation simulées germées.
-
-- **I2 · Sévérité vibratoire ISO 10816/20816** — `scirust-pdm`.
-  Zones normalisées A/B/C/D par classe de machine → verdict de conformité.
-  Oracle : seuils de la norme vérifiés par cas de table.
-
-- **I3 · MCSA — signature du courant moteur** — `scirust-signal`/`pdm`.
-  Barres rotoriques / excentricité / défauts stator par bandes latérales
-  `(1±2ks)·f` autour du fondamental. Oracle : signaux synthétiques à défaut
-  connu → sidebands au bon offset.
-
-## Phase 2 — Infrastructure d'estimation partagée
-
-- **I4 · Kalman/EKF/UKF déterministes à bornes certifiées** —
-  nouveau `scirust-estimation`. Estimation d'état bit-exacte + **filtrage
-  ensembliste (set-membership)** à enveloppe d'erreur prouvée. Débloque I7.
-  Oracle : convergence vs système linéaire connu ; l'ensemble certifié contient
-  toujours l'état vrai.
-
-## Phase 3 — Sûreté & sécurité OT (monter sur les garanties)
-
-- **I5 · Moniteur « Simplex » certifié** — `scirust-func-safety` ×
-  `scirust-core::nn::ibp` (CROWN). Contrôleur simple vérifié en repli, activé
-  dès que la sortie NN quitte l'enveloppe sûre prouvée. Oracle : sur une boîte
-  L∞, le moniteur ne laisse jamais passer une sortie hors enveloppe.
-
-- **I6 · IDS pour protocoles OT/ICS** — `scirust-ids` × `opcua`/`mqtt`.
-  Anomalies Modbus/DNP3/OPC-UA avec **taux de fausse-alarme garanti** (conformal).
-  Oracle : FAR empirique ≤ α sur trafic normal ; injection détectée.
-
-## Phase 4 — Nouveaux verticaux (nouveaux crates, même ADN)
-
-- **I7 · BMS — gestion batterie** — nouveau `scirust-bms` (utilise I4).
-  SoC/SoH par EKF, alerte précoce d'emballement thermique, **bornes SoH
-  conformes**. Oracle : SoC suivi sur modèle de cellule simulé ; couverture SoH.
-
-- **I8 · Réseaux électriques / smart grid** — nouveau `scirust-grid`.
-  Fréquence/RoCoF, phaseurs synchronisés, îlotage, THD/harmoniques. Oracle :
-  signaux réseau synthétiques à fréquence/THD connus.
-
-- **I9 · SHM — surveillance structurelle** — nouveau `scirust-shm`.
-  Analyse modale (fréquences propres, amortissement), dommage par dérive
-  fréquentielle, fatigue (loi de Paris) + RUL conforme. Oracle : masse-ressort
-  connu → fréquences propres exactes.
-
-- **I10 · Médical ECG/PPG (IEC 62304)** — nouveau `scirust-biomed`.
-  Arythmie avec **ensembles de prédiction conformes** + piste d'audit. Oracle :
-  R-pics sur ECG synthétique ; couverture des ensembles conformes.
-
-## Phase 5 — Preuve de certification
-
-- **I11 · Démonstrateur DO-178C / ferroviaire SIL** — `scirust-func-safety`
-  + `scirust-runtime`. Déterminisme bit-exact + inférence vérifiable +
-  attestation hash-chaînée + ASIL/SIL en un **evidence pack reproductible**.
-  Oracle : rejeu bit-identique + chaîne vérifiée + contre-exemple sur falsification.
+1. **Pure Rust, zero FFI**; **bit-exact determinism** (seeded PRNG, fixed order).
+2. **No claim without a test**: honest oracle or property test — no
+   stub. The test measures the claimed guarantee.
+3. The differentiator is **always a guarantee**: determinism, conformal
+   coverage (without distributional assumptions), certified bound (IBP/CROWN),
+   verifiable inference (Freivalds), hash-chained audit, ASIL/SIL safety.
+4. **CLI/demo** when relevant; **docs** when a CLI command is added.
+5. **8 green gates** (fmt, clippy `-D warnings --all-targets`, build, test, simd,
+   aarch64, doc, deny) + `--features wgpu` if relevant. **Commit + push** per item.
 
 ---
 
-## Ordre d'exécution
+## Phase 1 — Deepen PdM (quick wins, link the existing)
 
-I1→I3 (PdM) → I4 (estimation) → I5,I6 (sûreté/sécurité) → I7→I10 (verticaux)
-→ I11 (certification). Chaque item livré complet (code + oracle + gates +
-commit/push) avant le suivant. Statut suivi dans `CHANGELOG.md`.
+- **I1 · RUL with conformal intervals** — `scirust-pdm` (`rul` × `conformal_guard`).
+  Remaining useful life with a **guaranteed-coverage interval** `[t_low, t_high]`
+  without distributional assumptions. Oracle: empirical coverage ≥ 1−α on
+  seeded simulated degradation trajectories.
+
+- **I2 · ISO 10816/20816 vibration severity** — `scirust-pdm`.
+  Normalized A/B/C/D zones per machine class → compliance verdict.
+  Oracle: standard thresholds verified by table cases.
+
+- **I3 · MCSA — motor current signature analysis** — `scirust-signal`/`pdm`.
+  Rotor bars / eccentricity / stator faults via sidebands
+  `(1±2ks)·f` around the fundamental. Oracle: synthetic signals with known
+  faults → sidebands at the correct offset.
+
+## Phase 2 — Shared estimation infrastructure
+
+- **I4 · Deterministic Kalman/EKF/UKF with certified bounds** —
+  new `scirust-estimation`. Bit-exact state estimation + **set-membership
+  filtering** with proven error envelope. Unlocks I7.
+  Oracle: convergence vs known linear system; the certified set always
+  contains the true state.
+
+## Phase 3 — OT safety & security (build on the guarantees)
+
+- **I5 · Certified "Simplex" monitor** — `scirust-func-safety` ×
+  `scirust-core::nn::ibp` (CROWN). Simple verified controller in fallback, activated
+  as soon as the NN output leaves the proven safe envelope. Oracle: over an L∞
+  box, the monitor never lets an out-of-envelope output through.
+
+- **I6 · IDS for OT/ICS protocols** — `scirust-ids` × `opcua`/`mqtt`.
+  Modbus/DNP3/OPC-UA anomalies with **guaranteed false-alarm rate** (conformal).
+  Oracle: empirical FAR ≤ α on normal traffic; injection detected.
+
+## Phase 4 — New verticals (new crates, same DNA)
+
+- **I7 · BMS — battery management** — new `scirust-bms` (uses I4).
+  SoC/SoH via EKF, early thermal runaway alert, **conformal SoH
+  bounds**. Oracle: SoC tracked on simulated cell model; SoH coverage.
+
+- **I8 · Power grids / smart grid** — new `scirust-grid`.
+  Frequency/RoCoF, synchronized phasors, islanding, THD/harmonics. Oracle:
+  synthetic grid signals with known frequency/THD.
+
+- **I9 · SHM — structural health monitoring** — new `scirust-shm`.
+  Modal analysis (natural frequencies, damping), damage by frequency
+  drift, fatigue (Paris law) + conformal RUL. Oracle: known
+  mass-spring → exact natural frequencies.
+
+- **I10 · Medical ECG/PPG (IEC 62304)** — new `scirust-biomed`.
+  Arrhythmia with **conformal prediction sets** + audit trail. Oracle:
+  R-peaks on synthetic ECG; conformal set coverage.
+
+## Phase 5 — Certification proof
+
+- **I11 · DO-178C / rail SIL demonstrator** — `scirust-func-safety`
+  + `scirust-runtime`. Bit-exact determinism + verifiable inference +
+  hash-chained attestation + ASIL/SIL in a single **reproducible evidence pack**.
+  Oracle: bit-identical replay + verified chain + counterexample on falsification.
+
+---
+
+## Execution order
+
+I1→I3 (PdM) → I4 (estimation) → I5,I6 (safety/security) → I7→I10 (verticals)
+→ I11 (certification). Each item delivered complete (code + oracle + gates +
+commit/push) before the next. Status tracked in `CHANGELOG.md`.

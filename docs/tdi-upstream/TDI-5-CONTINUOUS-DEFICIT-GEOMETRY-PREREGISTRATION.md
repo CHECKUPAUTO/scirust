@@ -1,29 +1,29 @@
 # TDI-5 — Continuous Deficit Geometry
 
-## Préenregistrement expérimental
+## Experimental preregistration
 
-### Statut
+### Status
 
-Ce document définit l’expérience TDI-5 avant toute implémentation de
-l’évaluateur et avant toute génération des nouvelles populations.
+This document defines the TDI-5 experiment before any implementation of
+the evaluator and before any generation of the new populations.
 
-Aucun résultat TDI-5 ne doit être produit avant :
+No TDI-5 result must be produced before:
 
-1. le commit de ce préenregistrement ;
-2. son push sur GitHub ;
-3. l’implémentation séparée de l’évaluateur ;
-4. le gel SHA-256 de l’évaluateur et du code scientifique ;
-5. la validation complète de la CI.
+1. the commit of this preregistration;
+2. its push to GitHub;
+3. the separate implementation of the evaluator;
+4. the SHA-256 freeze of the evaluator and of the scientific code;
+5. the complete validation of the CI.
 
 ---
 
 ## 1. Motivation
 
-Les expériences antérieures ont étudié la capacité des observables TDI
-précoces à prédire le recouvrement futur entre une dynamique de référence
-et une dynamique perturbée.
+The previous experiments studied the ability of early TDI observables to
+predict the future recovery between a reference dynamics and a perturbed
+dynamics.
 
-Le recouvrement à l’horizon \(h\) est :
+The recovery at horizon \(h\) is:
 
 \[
 O_h
@@ -32,7 +32,7 @@ O_h
 \min\!\left(P_h(x),Q_h(x)\right).
 \]
 
-Il vérifie :
+It satisfies:
 
 \[
 O_h
@@ -40,41 +40,41 @@ O_h
 1-\operatorname{TV}(P_h,Q_h).
 \]
 
-TDI-4 a utilisé une architecture à deux têtes :
+TDI-4 used a two-head architecture:
 
 \[
 Z=\mathbf 1[O_6=1]
 \]
 
-et, conditionnellement à \(O_6<1\),
+and, conditionally on \(O_6<1\),
 
 \[
 U_6=-\log_2(1-O_6).
 \]
 
-Aucune récupération exacte \(O_6=1\) n’a été observée dans les 35 000
-systèmes TDI-4. La tête binaire était donc dégénérée.
+No exact recovery \(O_6=1\) was observed in the 35,000 TDI-4 systems. The
+binary head was therefore degenerate.
 
-En revanche, la composante continue a montré :
+In contrast, the continuous component showed:
 
-- une réduction de perte combinée de 25,305777 % aux largeurs 3 et 4 ;
-- une réduction de perte OOD de 50,033403 % à la largeur 5 ;
-- un Spearman OOD passant de 0,467776309 à 0,615705212 ;
-- un \(R^2\) OOD passant de -0,762078825 à 0,119549183.
+- a combined loss reduction of 25.305777 % at widths 3 and 4;
+- an OOD loss reduction of 50.033403 % at width 5;
+- an OOD Spearman going from 0.467776309 to 0.615705212;
+- an OOD \(R^2\) going from -0.762078825 to 0.119549183.
 
-TDI-5 étudie donc directement la géométrie continue du déficit.
+TDI-5 therefore directly studies the continuous geometry of the deficit.
 
 ---
 
-## 2. Définitions
+## 2. Definitions
 
-Le déficit de recouvrement est :
+The recovery deficit is:
 
 \[
 D_h=1-O_h.
 \]
 
-La coordonnée logarithmique du déficit est :
+The logarithmic coordinate of the deficit is:
 
 \[
 U_h=-\log_2(D_h)
@@ -82,15 +82,15 @@ U_h=-\log_2(D_h)
 -\log_2(1-O_h).
 \]
 
-L’expérience ne conserve que les systèmes vérifiant :
+The experiment retains only the systems satisfying:
 
 \[
 D_h>0
 \]
 
-aux horizons cibles concernés.
+at the target horizons concerned.
 
-Les observables TDI précoces sont :
+The early TDI observables are:
 
 \[
 \operatorname{TDI}_2
@@ -104,14 +104,13 @@ O_2-O_1
 
 ---
 
-## 3. Question scientifique principale
+## 3. Main scientific question
 
-Les observables TDI mesurées aux horizons 1 et 2 apportent-elles une
-information prédictive supplémentaire et transférable sur la trajectoire
-future du déficit, au-delà des variables structurelles et entropiques de
-la baseline ?
+Do the TDI observables measured at horizons 1 and 2 provide additional and
+transferable predictive information about the future trajectory of the
+deficit, beyond the structural and entropic variables of the baseline?
 
-La relation étudiée est :
+The studied relationship is:
 
 \[
 (O_1,O_2,O_2-O_1)
@@ -121,37 +120,37 @@ La relation étudiée est :
 
 ---
 
-## 4. Hypothèses
+## 4. Hypotheses
 
-### Hypothèse principale
+### Main hypothesis
 
-L’ajout des trois variables :
+The addition of the three variables:
 
 \[
 O_1,\qquad O_2,\qquad O_2-O_1
 \]
 
-réduit significativement l’erreur de prédiction de \(U_6\) sur des systèmes
-de largeurs 3 et 4 jamais vus pendant l’apprentissage.
+significantly reduces the prediction error of \(U_6\) on systems of widths
+3 and 4 never seen during training.
 
-### Hypothèse de transfert
+### Transfer hypothesis
 
-Le gain se transfère à des largeurs non observées pendant l’apprentissage :
+The gain transfers to widths not observed during training:
 
 \[
 w=5
 \]
 
-et :
+and:
 
 \[
 w=6.
 \]
 
-### Hypothèse de trajectoire
+### Trajectory hypothesis
 
-Le gain n’est pas limité à \(U_6\), mais reste observable sur plusieurs
-horizons futurs :
+The gain is not limited to \(U_6\), but remains observable on several
+future horizons:
 
 \[
 U_3,\ U_4,\ U_5,\ U_6,\ U_8.
@@ -159,88 +158,88 @@ U_3,\ U_4,\ U_5,\ U_6,\ U_8.
 
 ---
 
-## 5. Génération des populations
+## 5. Population generation
 
-Toutes les populations TDI-5 doivent être nouvelles et disjointes des
-populations TDI-3 et TDI-4.
+All TDI-5 populations must be new and disjoint from the TDI-3 and TDI-4
+populations.
 
-| Population | Largeur | Taille acceptée | Graine initiale |
+| Population | Width | Accepted size | Initial seed |
 |---|---:|---:|---:|
-| apprentissage | 3 | 15 000 | 60 000 000 |
-| apprentissage | 4 | 15 000 | 70 000 000 |
-| holdout | 3 | 5 000 | 61 000 000 |
-| holdout | 4 | 5 000 | 71 000 000 |
-| OOD principal | 5 | 10 000 | 80 000 000 |
-| OOD extrême | 6 | 5 000 | 90 000 000 |
+| training | 3 | 15,000 | 60,000,000 |
+| training | 4 | 15,000 | 70,000,000 |
+| holdout | 3 | 5,000 | 61,000,000 |
+| holdout | 4 | 5,000 | 71,000,000 |
+| main OOD | 5 | 10,000 | 80,000,000 |
+| extreme OOD | 6 | 5,000 | 90,000,000 |
 
-Une graine désigne un candidat généré.
+A seed denotes a generated candidate.
 
-Un candidat rejeté consomme définitivement sa graine.
+A rejected candidate definitively consumes its seed.
 
-La génération continue jusqu’à atteindre le nombre exact de systèmes
-acceptés pour chaque population.
+Generation continues until the exact number of accepted systems is reached
+for each population.
 
-Les graines finales exclusives et le nombre de candidats rejetés doivent
-être consignés dans le résultat brut.
+The final exclusive seeds and the number of rejected candidates must be
+recorded in the raw result.
 
 ---
 
 ## 6. Horizons
 
-Horizon d’observation :
+Observation horizon:
 
 \[
 h_{\mathrm{obs}}=2.
 \]
 
-Horizons cibles :
+Target horizons:
 
 \[
 \mathcal H=\{3,4,5,6,8\}.
 \]
 
-La cible confirmatoire principale est :
+The main confirmatory target is:
 
 \[
 U_6.
 \]
 
-Les cibles \(U_3\), \(U_4\), \(U_5\) et \(U_8\) sont des analyses
-secondaires préenregistrées.
+The targets \(U_3\), \(U_4\), \(U_5\) and \(U_8\) are preregistered
+secondary analyses.
 
 ---
 
-## 7. Critères d’exclusion
+## 7. Exclusion criteria
 
-Un système est exclu si l’une des conditions suivantes est satisfaite :
+A system is excluded if one of the following conditions is satisfied:
 
-1. le recouvrement exact \(O_2\) vaut 1 ;
-2. le déficit exact est nul à l’un des horizons cibles ;
-3. une variable requise n’est pas finie après transformation ;
-4. une opération exacte du moteur dynamique échoue ;
-5. la génération viole les invariants structurels déjà imposés par TDI-4.
+1. the exact recovery \(O_2\) equals 1;
+2. the exact deficit is zero at one of the target horizons;
+3. a required variable is not finite after transformation;
+4. an exact operation of the dynamics engine fails;
+5. the generation violates the structural invariants already imposed by
+   TDI-4.
 
-Aucune exclusion ne peut dépendre :
+No exclusion may depend:
 
-- des prédictions ;
-- des erreurs du modèle ;
-- de la valeur des variables TDI relativement à la baseline ;
-- de l’amélioration observée.
+- on the predictions;
+- on the model errors;
+- on the value of the TDI variables relative to the baseline;
+- on the observed improvement.
 
 ---
 
-## 8. Variables explicatives
+## 8. Explanatory variables
 
 ### Baseline
 
-La baseline conserve exactement les 13 variables structurelles utilisées
-par TDI-4.
+The baseline keeps exactly the 13 structural variables used by TDI-4.
 
-Aucune nouvelle variable structurelle ne doit être ajoutée.
+No new structural variable must be added.
 
-### Challenger principal
+### Main challenger
 
-Le challenger contient les mêmes 13 variables plus :
+The challenger contains the same 13 variables plus:
 
 \[
 O_1,
@@ -254,13 +253,13 @@ O_2,
 O_2-O_1.
 \]
 
-Le challenger possède donc 16 variables.
+The challenger therefore has 16 variables.
 
 ---
 
-## 9. Ablations secondaires
+## 9. Secondary ablations
 
-Les modèles secondaires sont :
+The secondary models are:
 
 \[
 M_0
@@ -286,19 +285,18 @@ M_3
 \text{baseline}+O_1+O_2+(O_2-O_1).
 \]
 
-Le modèle confirmatoire principal est \(M_3\).
+The main confirmatory model is \(M_3\).
 
-Les modèles \(M_1\) et \(M_2\) ne peuvent pas remplacer \(M_3\) pour les
-verdicts principaux.
+The models \(M_1\) and \(M_2\) cannot replace \(M_3\) for the main verdicts.
 
 ---
 
-## 10. Modèles
+## 10. Models
 
-Pour chaque horizon cible, la baseline et le challenger utilisent une
-régression ridge séparée.
+For each target horizon, the baseline and the challenger use a separate
+ridge regression.
 
-La fonction objectif est :
+The objective function is:
 
 \[
 \min_{\beta_0,\beta}
@@ -314,30 +312,31 @@ La fonction objectif est :
 \lambda\|\beta\|_2^2.
 \]
 
-La pénalisation est fixée à :
+The penalty is fixed at:
 
 \[
 \lambda=1.
 \]
 
-L’intercept n’est pas pénalisé.
+The intercept is not penalized.
 
-La baseline et le challenger doivent utiliser :
+The baseline and the challenger must use:
 
-- le même algorithme ;
-- le même ordre d’accumulation ;
-- la même précision numérique ;
-- la même pénalisation ;
-- les mêmes populations ;
-- les mêmes transformations de cible.
+- the same algorithm;
+- the same accumulation order;
+- the same numerical precision;
+- the same penalty;
+- the same populations;
+- the same target transformations.
 
-La seule différence est l’ajout des trois variables TDI au challenger.
+The only difference is the addition of the three TDI variables to the
+challenger.
 
 ---
 
-## 11. Normalisation
+## 11. Normalization
 
-Pour chaque variable explicative :
+For each explanatory variable:
 
 \[
 \widetilde X_j
@@ -345,7 +344,7 @@ Pour chaque variable explicative :
 \frac{X_j-\mu_j}{s_j}.
 \]
 
-Pour chaque horizon cible :
+For each target horizon:
 
 \[
 \widetilde U_h
@@ -353,23 +352,23 @@ Pour chaque horizon cible :
 \frac{U_h-\mu_{U_h}}{s_{U_h}}.
 \]
 
-Toutes les moyennes et échelles sont apprises uniquement sur l’ensemble
-d’apprentissage combiné des largeurs 3 et 4.
+All means and scales are learned only on the combined training set of
+widths 3 and 4.
 
-Elles sont ensuite figées pour :
+They are then frozen for:
 
-- le holdout largeur 3 ;
-- le holdout largeur 4 ;
-- l’OOD largeur 5 ;
-- l’OOD largeur 6.
+- the width-3 holdout;
+- the width-4 holdout;
+- the OOD width 5;
+- the OOD width 6.
 
-Une échelle nulle est remplacée par 1.
+A zero scale is replaced by 1.
 
 ---
 
-## 12. Métrique principale
+## 12. Main metric
 
-Pour \(U_6\), la métrique principale est la MSE dans l’espace standardisé :
+For \(U_6\), the main metric is the MSE in the standardized space:
 
 \[
 \operatorname{MSE}_{U_6}
@@ -383,7 +382,7 @@ Pour \(U_6\), la métrique principale est la MSE dans l’espace standardisé :
 \right)^2.
 \]
 
-L’amélioration absolue est :
+The absolute improvement is:
 
 \[
 \Delta_{U_6}
@@ -393,7 +392,7 @@ L’amélioration absolue est :
 \operatorname{MSE}_{U_6}^{\mathrm{TDI}}.
 \]
 
-La réduction relative est :
+The relative reduction is:
 
 \[
 G_{U_6}
@@ -409,25 +408,25 @@ G_{U_6}
 
 ---
 
-## 13. Métriques secondaires
+## 13. Secondary metrics
 
-Pour chaque horizon et chaque population, l’évaluateur rapporte :
+For each horizon and each population, the evaluator reports:
 
-- MSE standardisée ;
-- MAE standardisée ;
-- \(R^2\) ;
-- corrélation de Spearman ;
-- biais moyen ;
-- moyenne observée ;
-- moyenne prédite ;
-- pente de calibration ;
-- intercept de calibration.
+- standardized MSE;
+- standardized MAE;
+- \(R^2\);
+- Spearman correlation;
+- mean bias;
+- observed mean;
+- predicted mean;
+- calibration slope;
+- calibration intercept.
 
 ---
 
-## 14. Reconstruction du recouvrement
+## 14. Recovery reconstruction
 
-La reconstruction est :
+The reconstruction is:
 
 \[
 \widehat O_h
@@ -435,241 +434,240 @@ La reconstruction est :
 1-2^{-\widehat U_h}.
 \]
 
-L’évaluateur rapporte également, dans l’espace de \(O_h\) :
+The evaluator also reports, in the space of \(O_h\):
 
-- MSE ;
-- MAE ;
-- \(R^2\) ;
-- Spearman ;
-- biais moyen ;
-- calibration ;
-- proportion de prédictions ramenées aux bornes numériques.
+- MSE;
+- MAE;
+- \(R^2\);
+- Spearman;
+- mean bias;
+- calibration;
+- proportion of predictions brought back to the numerical bounds.
 
-Ces métriques sont secondaires.
+These metrics are secondary.
 
 ---
 
-## 15. Bootstrap apparié
+## 15. Paired bootstrap
 
-Les différences de perte sont évaluées par bootstrap apparié.
+The loss differences are evaluated by paired bootstrap.
 
-Nombre de réplications :
+Number of replications:
 
 \[
 B=2000.
 \]
 
-Graine :
+Seed:
 
 \[
 \texttt{0x5444\_4935\_4344\_4745}.
 \]
 
-Chaque réplication rééchantillonne les indices des exemples avec remise.
+Each replication resamples the example indices with replacement.
 
-Les prédictions baseline et challenger restent appariées pour chaque indice.
+The baseline and challenger predictions remain paired for each index.
 
-L’intervalle à 95 % utilise les quantiles empiriques 2,5 % et 97,5 %.
+The 95 % interval uses the empirical 2.5 % and 97.5 % quantiles.
 
-Aucun réentraînement n’est effectué à l’intérieur du bootstrap.
+No retraining is performed inside the bootstrap.
 
 ---
 
-## 16. Critère principal TDI-5A
+## 16. Primary criterion TDI-5A
 
-Le critère principal est évalué sur le holdout combiné des largeurs 3 et 4
-pour la cible \(U_6\).
+The primary criterion is evaluated on the combined width-3 and width-4
+holdout for the target \(U_6\).
 
-TDI-5A est déclaré **RÉUSSI** si toutes les conditions suivantes sont
-satisfaites :
+TDI-5A is declared **PASSED** if all the following conditions are
+satisfied:
 
-1. réduction relative combinée :
+1. combined relative reduction:
 
 \[
 G_{U_6}^{(3+4)}\geq 10\%;
 \]
 
-2. borne inférieure de l’IC bootstrap à 95 % de
-   \(\Delta_{U_6}^{(3+4)}\) strictement positive ;
+2. lower bound of the 95 % bootstrap CI of
+   \(\Delta_{U_6}^{(3+4)}\) strictly positive;
 
-3. amélioration ponctuelle strictement positive en largeur 3 ;
+3. strictly positive point improvement at width 3;
 
-4. amélioration ponctuelle strictement positive en largeur 4 ;
+4. strictly positive point improvement at width 4;
 
-5. borne inférieure de l’IC bootstrap de largeur 3 strictement positive ;
+5. lower bound of the width-3 bootstrap CI strictly positive;
 
-6. borne inférieure de l’IC bootstrap de largeur 4 strictement positive ;
+6. lower bound of the width-4 bootstrap CI strictly positive;
 
-7. Spearman du challenger strictement supérieur à celui de la baseline sur
-   le holdout combiné ;
+7. challenger Spearman strictly greater than that of the baseline on the
+   combined holdout;
 
-8. Spearman du challenger strictement positif séparément aux largeurs 3 et 4 ;
+8. challenger Spearman strictly positive separately at widths 3 and 4;
 
-9. biais absolu standardisé du challenger ne dépassant pas celui de la
-   baseline de plus de 0,02 sur le holdout combiné.
+9. challenger standardized absolute bias not exceeding that of the
+   baseline by more than 0.02 on the combined holdout.
 
-Sinon :
+Otherwise:
 
 `CRITÈRE PRINCIPAL TDI-5A : ÉCHOUÉ`
 
-En cas de réussite :
+In case of success:
 
 `CRITÈRE PRINCIPAL TDI-5A : RÉUSSI`
 
 ---
 
-## 17. Critère de transfert TDI-5B
+## 17. Transfer criterion TDI-5B
 
-TDI-5B concerne la largeur 5 pour la cible \(U_6\).
+TDI-5B concerns width 5 for the target \(U_6\).
 
-Il est déclaré **RÉUSSI** si toutes les conditions suivantes sont
-satisfaites :
+It is declared **PASSED** if all the following conditions are satisfied:
 
-1. réduction relative :
+1. relative reduction:
 
 \[
 G_{U_6}^{(5)}\geq 20\%;
 \]
 
-2. borne inférieure de l’IC bootstrap à 95 % strictement positive ;
+2. lower bound of the 95 % bootstrap CI strictly positive;
 
-3. Spearman challenger strictement positif ;
+3. challenger Spearman strictly positive;
 
-4. Spearman challenger supérieur ou égal à celui de la baseline ;
+4. challenger Spearman greater than or equal to that of the baseline;
 
-5. \(R^2\) challenger strictement supérieur au \(R^2\) baseline ;
+5. challenger \(R^2\) strictly greater than the baseline \(R^2\);
 
-6. biais absolu challenger strictement inférieur au biais absolu baseline ;
+6. challenger absolute bias strictly lower than the baseline absolute bias;
 
-7. amélioration ponctuelle strictement positive de la MSE reconstruite ;
+7. strictly positive point improvement of the reconstructed MSE;
 
-8. amélioration ponctuelle strictement positive de la MAE reconstruite.
+8. strictly positive point improvement of the reconstructed MAE.
 
-Sinon :
+Otherwise:
 
 `CRITÈRE TRANSFERT TDI-5B : ÉCHOUÉ`
 
-En cas de réussite :
+In case of success:
 
 `CRITÈRE TRANSFERT TDI-5B : RÉUSSI`
 
 ---
 
-## 18. Critère de transfert extrême TDI-5C
+## 18. Extreme transfer criterion TDI-5C
 
-TDI-5C concerne la largeur 6 pour la cible \(U_6\).
+TDI-5C concerns width 6 for the target \(U_6\).
 
-Il est déclaré **RÉUSSI** si toutes les conditions suivantes sont
-satisfaites :
+It is declared **PASSED** if all the following conditions are satisfied:
 
-1. amélioration ponctuelle :
+1. point improvement:
 
 \[
 \Delta_{U_6}^{(6)}>0;
 \]
 
-2. borne inférieure de l’IC bootstrap à 95 % strictement positive ;
+2. lower bound of the 95 % bootstrap CI strictly positive;
 
-3. Spearman challenger strictement positif ;
+3. challenger Spearman strictly positive;
 
-4. Spearman challenger supérieur ou égal à celui de la baseline ;
+4. challenger Spearman greater than or equal to that of the baseline;
 
-5. biais absolu challenger inférieur ou égal au biais absolu baseline ;
+5. challenger absolute bias less than or equal to the baseline absolute
+   bias;
 
-6. amélioration ponctuelle strictement positive de la MSE reconstruite.
+6. strictly positive point improvement of the reconstructed MSE.
 
-Sinon :
+Otherwise:
 
 `CRITÈRE TRANSFERT EXTRÊME TDI-5C : ÉCHOUÉ`
 
-En cas de réussite :
+In case of success:
 
 `CRITÈRE TRANSFERT EXTRÊME TDI-5C : RÉUSSI`
 
 ---
 
-## 19. Critère de trajectoire TDI-5D
+## 19. Trajectory criterion TDI-5D
 
-Les horizons secondaires sont :
+The secondary horizons are:
 
 \[
 \{3,4,5,8\}.
 \]
 
-Pour chaque horizon, on calcule l’amélioration combinée des largeurs 3 et 4.
+For each horizon, the combined width-3 and width-4 improvement is computed.
 
-TDI-5D est déclaré **RÉUSSI** si :
+TDI-5D is declared **PASSED** if:
 
-1. au moins trois des quatre horizons présentent une amélioration ponctuelle
-   strictement positive ;
+1. at least three of the four horizons show a strictly positive point
+   improvement;
 
-2. \(U_8\) présente une amélioration ponctuelle strictement positive ;
+2. \(U_8\) shows a strictly positive point improvement;
 
-3. aucune cible ne présente une dégradation relative supérieure à 5 % ;
+3. no target shows a relative degradation greater than 5 %;
 
-4. la moyenne arithmétique des quatre réductions relatives est strictement
+4. the arithmetic mean of the four relative reductions is strictly
    positive.
 
-Sinon :
+Otherwise:
 
 `CRITÈRE TRAJECTOIRE TDI-5D : ÉCHOUÉ`
 
-En cas de réussite :
+In case of success:
 
 `CRITÈRE TRAJECTOIRE TDI-5D : RÉUSSI`
 
-Ce critère est secondaire et ne remplace pas TDI-5A.
+This criterion is secondary and does not replace TDI-5A.
 
 ---
 
-## 20. Comparateur direct secondaire
+## 20. Secondary direct comparator
 
-Un comparateur ridge prédit directement \(O_6\) avec :
+A ridge comparator directly predicts \(O_6\) with:
 
-- les 13 variables de baseline ;
-- puis les 13 variables plus les trois variables TDI.
+- the 13 baseline variables;
+- then the 13 variables plus the three TDI variables.
 
-Ce comparateur est secondaire.
+This comparator is secondary.
 
-Ses résultats ne peuvent pas modifier les verdicts TDI-5A, TDI-5B,
-TDI-5C ou TDI-5D.
-
----
-
-## 21. Déterminisme
-
-L’évaluateur doit garantir :
-
-- génération déterministe par graine ;
-- ordre fixe d’itération ;
-- ordre fixe d’accumulation flottante ;
-- absence de parallélisme dans les calculs qui modifient l’ordre des sommes ;
-- bootstrap déterministe ;
-- résultats textuels déterministes ;
-- exécution hors ligne ;
-- absence de dépendance réseau ;
-- absence de sélection après observation.
+Its results cannot modify the TDI-5A, TDI-5B, TDI-5C or TDI-5D verdicts.
 
 ---
 
-## 22. Sortie requise
+## 21. Determinism
 
-Le résultat brut doit inclure :
+The evaluator must guarantee:
 
-1. identité Git ;
-2. versions Rust et Cargo ;
-3. tailles des populations ;
-4. nombres d’exclusions ;
-5. graines finales exclusives ;
-6. statistiques de \(U_h\) pour chaque horizon et population ;
-7. normalisations apprises ;
-8. coefficients de tous les modèles confirmatoires ;
-9. résultats de \(M_0\), \(M_1\), \(M_2\) et \(M_3\) ;
-10. métriques dans l’espace de \(U_h\) ;
-11. métriques reconstruites dans l’espace de \(O_h\) ;
-12. intervalles bootstrap ;
-13. comparateur direct secondaire ;
-14. les quatre lignes finales exactes :
+- deterministic generation by seed;
+- fixed iteration order;
+- fixed floating-point accumulation order;
+- absence of parallelism in the computations that modify the order of the
+  sums;
+- deterministic bootstrap;
+- deterministic textual results;
+- offline execution;
+- absence of network dependency;
+- absence of selection after observation.
+
+---
+
+## 22. Required output
+
+The raw result must include:
+
+1. Git identity;
+2. Rust and Cargo versions;
+3. population sizes;
+4. numbers of exclusions;
+5. final exclusive seeds;
+6. statistics of \(U_h\) for each horizon and population;
+7. learned normalizations;
+8. coefficients of all the confirmatory models;
+9. results of \(M_0\), \(M_1\), \(M_2\) and \(M_3\);
+10. metrics in the space of \(U_h\);
+11. reconstructed metrics in the space of \(O_h\);
+12. bootstrap intervals;
+13. secondary direct comparator;
+14. the four exact final lines:
 
 `CRITÈRE PRINCIPAL TDI-5A : RÉUSSI|ÉCHOUÉ`
 
@@ -681,38 +679,38 @@ Le résultat brut doit inclure :
 
 ---
 
-## 23. Interdictions avant gel
+## 23. Prohibitions before freeze
 
-Avant le gel de l’évaluateur, il est interdit de :
+Before the freeze of the evaluator, it is forbidden to:
 
-- générer les populations TDI-5 complètes ;
-- consulter des métriques TDI-5 ;
-- modifier les critères en fonction d’un résultat intermédiaire ;
-- tester plusieurs valeurs de \(\lambda\) ;
-- sélectionner les graines ;
-- changer la baseline ;
-- retirer une largeur défavorable ;
-- retirer un horizon défavorable ;
-- modifier les seuils de réussite.
+- generate the complete TDI-5 populations;
+- consult TDI-5 metrics;
+- modify the criteria according to an intermediate result;
+- test several values of \(\lambda\);
+- select the seeds;
+- change the baseline;
+- remove an unfavorable width;
+- remove an unfavorable horizon;
+- modify the success thresholds.
 
-Les tests unitaires synthétiques et les tests de déterminisme sont autorisés,
-à condition qu’ils ne génèrent pas les populations préenregistrées.
+Synthetic unit tests and determinism tests are allowed, provided that they
+do not generate the preregistered populations.
 
 ---
 
-## 24. Ordre d’exécution
+## 24. Execution order
 
-L’ordre immuable est :
+The immutable order is:
 
-1. commit du préenregistrement ;
-2. push de la branche ;
-3. implémentation de l’évaluateur ;
-4. tests unitaires ;
-5. gel SHA-256 de l’évaluateur ;
-6. gel du code scientifique ;
-7. commit et push du gel ;
-8. validation de la CI ;
-9. première exécution unique ;
-10. archivage des résultats ;
-11. tag immuable ;
-12. PR vers `main`.
+1. commit of the preregistration;
+2. push of the branch;
+3. implementation of the evaluator;
+4. unit tests;
+5. SHA-256 freeze of the evaluator;
+6. freeze of the scientific code;
+7. commit and push of the freeze;
+8. CI validation;
+9. first unique execution;
+10. archiving of the results;
+11. immutable tag;
+12. PR to `main`.

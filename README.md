@@ -184,7 +184,7 @@ and exact command instead.
 - [Changelog](CHANGELOG.md)
 - [Research notes](docs/research-notes/)
 - [Audit archive](docs/audits/)
-- [Translations](docs/translations/)
+- [Documentation overview](docs/translations/Documentation_EN.md)
 
 Historical reports record the state and measurements of a particular revision.
 They should not be read as guarantees for the current `master` branch.

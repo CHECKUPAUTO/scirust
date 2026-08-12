@@ -1,151 +1,151 @@
-# Programme de recherche — Filtres Hypercomplexes à Scalaires Transformés (TSHF)
+# Research program — Transformed-Scalar Hypercomplex Filters (TSHF)
 
-**Date** : 2026-07-16 · **Statut** : investigation terminée, verdict rendu
-**Reproductibilité** : toutes les mesures de ce rapport proviennent de
-`cargo run -p scirust-signal --example tshf_experiments` (déterministe, graine fixe).
+**Date**: 2026-07-16 · **Status**: investigation complete, verdict rendered
+**Reproducibility**: all measurements in this report come from
+`cargo run -p scirust-signal --example tshf_experiments` (deterministic, fixed seed).
 
-## Résumé exécutif
+## Executive summary
 
-La proposition TSHF — transformer ponctuellement le scalaire (`φ(x)` avec
-`φ ∈ {1/Γ(x+1), ln Γ(x+1), log signé, loi de puissance, tanh, sigmoïde, atan,
-softsign, …}`), plonger dans une algèbre hypercomplexe (quaternion/octonion/sédénion),
-filtrer, puis inverser — a été soumise à une analyse mathématique, à six blocs
-d'expériences numériques de falsification et à une revue de littérature extensive.
+The TSHF proposal — pointwise transform the scalar (`φ(x)` with
+`φ ∈ {1/Γ(x+1), ln Γ(x+1), signed log, power law, tanh, sigmoid, atan,
+softsign, …}`), embed in a hypercomplex algebra (quaternion/octonion/sedenion),
+filter, then invert — was subjected to a mathematical analysis, six blocks of
+numerical falsification experiments, and an extensive literature review.
 
-**Verdict : la proposition, en tant que « nouvelle famille de filtres », n'est pas
-scientifiquement défendable.** Ses deux composantes sont séparables et chacune est,
-soit déjà couverte par une littérature abondante (stabilisation de variance,
-filtrage homomorphe, companding, moyennes quasi-arithmétiques), soit contredite par
-nos propres mesures (transformées Γ, plongements de dimension supérieure sans
-opérateur couplant). Un **sous-ensemble étroit et déjà connu** mérite en revanche
-une implémentation dans SciRust : les transformées stabilisatrices de variance
-(Anscombe, Box-Cox/log signé, racine signée) **avec inverse à biais corrigé**, pour
-le bruit dépendant du signal — voir §12–13.
+**Verdict: the proposal, as a "new family of filters", is not
+scientifically defensible.** Its two components are separable and each is,
+either already covered by an abundant literature (variance stabilization,
+homomorphic filtering, companding, quasi-arithmetic means), or contradicted by
+our own measurements (Γ transforms, higher-dimensional embeddings without a
+coupling operator). A **narrow, already-known subset** on the other hand
+deserves an implementation in SciRust: the variance-stabilizing transforms
+(Anscombe, Box-Cox/signed log, signed root) **with bias-corrected inverse**,
+for signal-dependent noise — see §12–13.
 
-Les points saillants, chiffres à l'appui :
+The salient points, with supporting figures:
 
-- `1/Γ(x+1)` est **non injective** (φ(0) = φ(1) = 1) : rejet immédiat — aucune
+- `1/Γ(x+1)` is **non-injective** (φ(0) = φ(1) = 1): immediate rejection — no
   reconstruction possible (E2).
-- `ln Γ(x+1)` est non monotone sous x ≈ 0,4616 et son inversion numérique amplifie
-  le bruit ×27 : rejet pour un pipeline avec reconstruction (E2).
-- Pour du bruit **additif gaussien**, l'identité bat *toutes* les transformées
-  testées, sur les trois filtres testés (E3) — conforme à la théorie (le bruit est
-  déjà stationnaire ; toute φ non affine le rend dépendant du niveau, E1).
-- La **médiane est invariante** sous toute φ monotone : la colonne médiane de E3
-  est constante à 10⁻¹² près — le pipeline TSHF y est mathématiquement un no-op.
-- Les transformées saturantes (tanh/sigmoïde) infligent un **biais de
-  retransformation** (Jensen) mesuré jusqu'à −0,13 sur un niveau de 2 (−6,5 %) et
-  une amplification du bruit à l'inversion ×22–×101 (E2, E4) ; tanh + ondelettes
-  détruit le signal (10,4 dB < 12,6 dB brut, E3).
-- Le plongement hypercomplexe est **orthogonal** à la question : tout filtre
-  R-linéaire appliqué composante par composante est identique au filtrage par canal
-  (identité algébrique, E5a) ; l'ordre transformation/plongement ne compte que si la
-  transformée couple les coordonnées (E5c) ; et sur notre fixture d'impulsions
-  corrélées, le médian vectoriel (joint) a *perdu* contre le médian par canal
-  (12,7 dB vs 14,6 dB, E5b) — la dimension supérieure n'aide pas par défaut.
+- `ln Γ(x+1)` is non-monotonic below x ≈ 0.4616 and its numerical inversion
+  amplifies noise ×27: rejected for a pipeline with reconstruction (E2).
+- For **additive Gaussian** noise, the identity beats *all* tested transforms,
+  on the three filters tested (E3) — consistent with theory (the noise is
+  already stationary; any non-affine φ makes it level-dependent, E1).
+- The **median is invariant** under any monotone φ: the median column of E3
+  is constant to 10⁻¹² — the TSHF pipeline is mathematically a no-op there.
+- The saturating transforms (tanh/sigmoid) inflict a **retransformation bias**
+  (Jensen) measured up to −0.13 on a level of 2 (−6.5 %) and a noise
+  amplification at inversion ×22–×101 (E2, E4); tanh + wavelets destroys the
+  signal (10.4 dB < 12.6 dB raw, E3).
+- The hypercomplex embedding is **orthogonal** to the question: any
+  R-linear filter applied component-wise is identical to per-channel filtering
+  (algebraic identity, E5a); the transformation/embedding order only matters
+  if the transform couples the coordinates (E5c); and on our correlated-impulse
+  fixture, the vector (joint) median *lost* to the per-channel median
+  (12.7 dB vs 14.6 dB, E5b) — higher dimension does not help by default.
 
 ---
 
-## 1. Fondations mathématiques
+## 1. Mathematical foundations
 
-### 1.1 Le pipeline étudié
+### 1.1 The pipeline studied
 
-Deux architectures ont été analysées :
+Two architectures were analyzed:
 
 ```
-(A)  x → φ(x) → plongement H → filtre L → φ⁻¹ → x̂
-(B)  x → plongement H → φ (par composante ou couplée) → filtre L → inverses → x̂
+(A)  x → φ(x) → embedding H → filter L → φ⁻¹ → x̂
+(B)  x → embedding H → φ (component-wise or coupled) → filter L → inverses → x̂
 ```
 
-**Proposition 1 (séparabilité).** Si φ agit composante par composante et si L est
-R-linéaire appliqué composante par composante, alors (A) ≡ (B) ≡ filtrage par canal
-de φ(x) : le plongement hypercomplexe est transparent. *Preuve* : un plongement
-coordonnées-vers-coordonnées est une permutation de l'ordre des données ; un
-opérateur R-linéaire composante par composante commute avec elle. Vérifié
-numériquement (E5a, E5c : identité exacte). L'ordre ne devient significatif que si
-φ couple les coordonnées (ex. `v ↦ v·tanh(‖v‖)/‖v‖`, E5c : 0,426 ≠ 0,462) ou si L
-utilise le produit hypercomplexe.
+**Proposition 1 (separability).** If φ acts component-wise and if L is
+R-linear applied component-wise, then (A) ≡ (B) ≡ per-channel filtering of
+φ(x): the hypercomplex embedding is transparent. *Proof*: a
+coordinates-to-coordinates embedding is a permutation of the data order; a
+component-wise R-linear operator commutes with it. Verified
+numerically (E5a, E5c: exact identity). The order only becomes significant if
+φ couples the coordinates (e.g. `v ↦ v·tanh(‖v‖)/‖v‖`, E5c: 0.426 ≠ 0.462) or if L
+uses the hypercomplex product.
 
-**Corollaire.** La « nouveauté » éventuelle du TSHF ne peut PAS venir de la
-combinaison φ + plongement en soi ; elle doit venir soit de φ (question classique
-de stabilisation de variance, §2), soit d'opérateurs exploitant réellement le
-produit de l'algèbre (QFT, filtres widely-linear — littérature quaternionique
-établie, §3).
+**Corollary.** The possible "novelty" of TSHF cannot come from the φ +
+embedding combination per se; it must come either from φ (a classic
+variance-stabilization question, §2), or from operators that genuinely exploit
+the algebra's product (QFT, widely-linear filters — established quaternionic
+literature, §3).
 
-**Proposition 2 (invariance de la médiane).** Pour toute φ strictement monotone,
-`median(φ(x_i)) = φ(median(x_i))`, donc `φ⁻¹ ∘ median ∘ φ = median` : le pipeline
-TSHF avec un filtre de rang est l'identité du filtre. Confirmé par E3 (colonne
-médiane constante sur les 8 transformées). Toute une classe de filtres
-(rang/ordre) est donc *hors sujet* pour le TSHF.
+**Proposition 2 (median invariance).** For any strictly monotone φ,
+`median(φ(x_i)) = φ(median(x_i))`, hence `φ⁻¹ ∘ median ∘ φ = median`: the TSHF
+pipeline with a rank filter is the identity filter. Confirmed by E3 (median
+column constant across the 8 transforms). A whole class of filters
+(rank/order) is therefore *off-topic* for TSHF.
 
-**Proposition 3 (moyennes quasi-arithmétiques).** Pour L = moyenne mobile,
-`φ⁻¹(MA(φ(x)))` est la moyenne quasi-arithmétique de Kolmogorov-Nagumo de
-générateur φ (log → moyenne géométrique, x⁻¹ → harmonique…). Le pipeline TSHF-MA
-est donc un objet mathématique connu depuis 1930, pas une construction nouvelle.
+**Proposition 3 (quasi-arithmetic means).** For L = moving average,
+`φ⁻¹(MA(φ(x)))` is the Kolmogorov-Nagumo quasi-arithmetic mean with generator
+φ (log → geometric mean, x⁻¹ → harmonic…). The TSHF-MA pipeline is therefore a
+mathematical object known since 1930, not a new construction.
 
-### 1.2 Effet sur les statistiques du bruit (E1)
+### 1.2 Effect on the noise statistics (E1)
 
-Développement au premier ordre : pour x = s + n, `φ(x) − φ(s) ≈ φ′(s)·n`, donc
-`σ_φ(s) ≈ |φ′(s)|·σ(s)`. Trois régimes mesurés (σ après transformation, niveaux
-s = 0,6 / 1,2 / 1,8 / 2,4) :
+First-order expansion: for x = s + n, `φ(x) − φ(s) ≈ φ′(s)·n`, hence
+`σ_φ(s) ≈ |φ′(s)|·σ(s)`. Three regimes measured (σ after transformation,
+levels s = 0.6 / 1.2 / 1.8 / 2.4):
 
-| φ | additif σ=0,3 | multiplicatif 0,3·s | Poisson-like 0,3·√s |
+| φ | additive σ=0.3 | multiplicative 0.3·s | Poisson-like 0.3·√s |
 |---|---|---|---|
-| identité | 0,300 / 0,300 / 0,300 / 0,300 (plat ✓) | 0,18→0,72 (×4) | 0,23→0,46 (×2) |
-| log signé | 0,195→0,089 (dé-stabilise) | 0,114→0,226 (×2, aplati) | — |
-| racine signée | 0,252→0,098 (dé-stabilise) | — | 0,173→0,153 (**plat ✓**) |
-| Anscombe | 0,306→0,181 | 0,185→0,447 | 0,240→0,283 (**quasi plat ✓**) |
-| tanh | 0,214→0,013 (écrase) | — | — |
-| ln Γ(x+1) | 0,065→0,320 (**amplifie** la dépendance) | 0,029→0,759 (pire que l'identité) | — |
+| identity | 0.300 / 0.300 / 0.300 / 0.300 (flat ✓) | 0.18→0.72 (×4) | 0.23→0.46 (×2) |
+| signed log | 0.195→0.089 (de-stabilizes) | 0.114→0.226 (×2, flattened) | — |
+| signed root | 0.252→0.098 (de-stabilizes) | — | 0.173→0.153 (**flat ✓**) |
+| Anscombe | 0.306→0.181 | 0.185→0.447 | 0.240→0.283 (**near flat ✓**) |
+| tanh | 0.214→0.013 (squashes) | — | — |
+| ln Γ(x+1) | 0.065→0.320 (**amplifies** the dependence) | 0.029→0.759 (worse than identity) | — |
 
-Réponses aux questions scientifiques 1–2 : **oui**, une transformée scalaire
-modifie les statistiques du bruit — mais dans les deux sens. Sur bruit additif
-(déjà stationnaire), toute φ non affine *crée* une dépendance au niveau, ce qui
-dégrade les filtres à seuil global. La stabilisation n'apporte quelque chose que si
-le bruit d'origine est dépendant du signal ET si φ est *appariée au modèle de
-bruit* (racine ↔ Poisson, log ↔ multiplicatif) — ce qui est la définition exacte
-des transformées stabilisatrices de variance classiques. `ln Γ` fait l'inverse de
-ce qu'on attend d'une VST sur tous les modèles testés.
+Answers to scientific questions 1–2: **yes**, a scalar transform modifies the
+noise statistics — but in both directions. On additive noise (already
+stationary), any non-affine φ *creates* a level dependence, which degrades
+global-threshold filters. Stabilization only helps if the original noise is
+signal-dependent AND φ is *matched to the noise model* (root ↔ Poisson,
+log ↔ multiplicative) — which is exactly the definition of the classic
+variance-stabilizing transforms. `ln Γ` does the opposite of what is expected
+of a VST on all tested models.
 
-### 1.3 Inversibilité, domaines, branches, conditionnement (E2)
+### 1.3 Invertibility, domains, branches, conditioning (E2)
 
-| φ | injective ? | domaine | max \|dφ⁻¹/dy\| sur x∈[−3,3] | erreur aller-retour |
+| φ | injective? | domain | max \|dφ⁻¹/dy\| over x∈[−3,3] | round-trip error |
 |---|---|---|---|---|
-| identité | oui | ℝ | 1,0 | 0 |
-| log signé | oui | ℝ | 4,0 | 7·10⁻¹⁶ |
-| racine signée | oui | ℝ | 3,5 | 4·10⁻¹⁶ |
-| Anscombe | oui | x ≥ −0,375 | 1,8 | 4·10⁻¹⁶ |
-| atan | oui | ℝ | 10,0 | 9·10⁻¹⁶ |
-| softsign | oui | ℝ | 16,0 | 9·10⁻¹⁶ |
-| sigmoïde | oui | ℝ | 22,1 | 3·10⁻¹⁵ |
-| tanh | oui | ℝ | **101,4** | 2·10⁻¹⁴ |
-| ln Γ(x+1) | **non** (monotone seulement x > 0,4616) | x > −1 | 27,4 (+ inversion Newton) | 4·10⁻¹⁴ |
-| 1/Γ(x+1) | **NON** : φ(0) = φ(1) = 1, max en x ≈ 0,4616 | — | — | reconstruction impossible |
+| identity | yes | ℝ | 1.0 | 0 |
+| signed log | yes | ℝ | 4.0 | 7·10⁻¹⁶ |
+| signed root | yes | ℝ | 3.5 | 4·10⁻¹⁶ |
+| Anscombe | yes | x ≥ −0.375 | 1.8 | 4·10⁻¹⁶ |
+| atan | yes | ℝ | 10.0 | 9·10⁻¹⁶ |
+| softsign | yes | ℝ | 16.0 | 9·10⁻¹⁶ |
+| sigmoid | yes | ℝ | 22.1 | 3·10⁻¹⁵ |
+| tanh | yes | ℝ | **101.4** | 2·10⁻¹⁴ |
+| ln Γ(x+1) | **no** (monotone only x > 0.4616) | x > −1 | 27.4 (+ Newton inversion) | 4·10⁻¹⁴ |
+| 1/Γ(x+1) | **NO**: φ(0) = φ(1) = 1, max at x ≈ 0.4616 | — | — | reconstruction impossible |
 
-Le facteur `max |dφ⁻¹/dy|` borne l'amplification du bruit résiduel à la
-reconstruction (comportement de Lipschitz de l'inverse). Les transformées
-saturantes concentrent cette amplification exactement là où vit le signal fort —
-le pire endroit. Questions 5–6 : **oui**, l'instabilité numérique et les artefacts
-sont amplifiés, et de façon structurelle (pas corrigeable par implémentation).
+The factor `max |dφ⁻¹/dy|` bounds the residual-noise amplification at
+reconstruction (Lipschitz behavior of the inverse). The saturating transforms
+concentrate this amplification exactly where the strong signal lives — the
+worst place. Questions 5–6: **yes**, numerical instability and artifacts are
+amplified, and structurally (not fixable by implementation).
 
-### 1.4 Biais de retransformation (E4)
+### 1.4 Retransformation bias (E4)
 
-`E[φ⁻¹(L(φ(x)))] ≠ s` pour φ non affine (inégalité de Jensen). Mesuré sur signal
-plat s = 2, bruit g = 0,4, MA(9) : identité −0,001 ; Anscombe −0,017 ;
-racine signée −0,020 ; log signé −0,026 ; softsign −0,050 ; sigmoïde −0,054 ;
-atan −0,060 ; **tanh −0,131** (−6,5 % du niveau) ; ln Γ +0,030. C'est le biais de
-retransformation connu de la littérature (smearing de Duan, inverse exact non
-biaisé de Mäkitalo-Foi, §2) : l'inverse algébrique naïf de l'énoncé TSHF est
-précisément la variante que la littérature a montrée défectueuse.
+`E[φ⁻¹(L(φ(x)))] ≠ s` for non-affine φ (Jensen inequality). Measured on flat
+signal s = 2, noise g = 0.4, MA(9): identity −0.001; Anscombe −0.017;
+signed root −0.020; signed log −0.026; softsign −0.050; sigmoid −0.054;
+atan −0.060; **tanh −0.131** (−6.5 % of the level); ln Γ +0.030. This is the
+known retransformation bias of the literature (Duan's smearing, Mäkitalo-Foi
+exact unbiased inverse, §2): the naive algebraic inverse of the TSHF statement
+is precisely the variant the literature has shown to be defective.
 
 ---
 
-## 2–4. Revue de littérature, travaux existants, concepts déjà publiés
+## 2–4. Literature review, existing work, already-published concepts
 
-*(Section établie par recherche bibliographique extensive — voir les références in
-fine ; chaque composante du TSHF est mise en regard de l'art antérieur.)*
+*(Section established by extensive bibliographic research — see the references
+in fine; each TSHF component is set against the prior art.)*
 
-*Revue conduite par recherche web extensive (agent dédié) ; conservée en anglais, la langue des sources. Les recherches négatives sont documentées avec leur périmètre exact, pour que l'absence de résultat soit une donnée et non une supposition.*
+*Review conducted via extensive web research (dedicated agent); kept in English, the language of the sources. Negative searches are documented with their exact scope, so that an absence of results is data rather than an assumption.*
 
 **Method under evaluation:** apply pointwise analytic scalar transform φ (1/Γ(x+1), log Γ(x+1), signed log, power law, tanh, sigmoid, atan, softsign) → optionally embed in quaternion/octonion/sedenion algebra → filter → invert φ.
 
@@ -253,228 +253,230 @@ Sources (key URLs used): [Mäkitalo–Foi optimal inversion (IEEE TIP)](https://
 
 ---
 
-## 5. Aspects réellement nouveaux
+## 5. Actually novel aspects
 
-Après recherche extensive, les seuls éléments sans antécédent identifié sont :
+After extensive research, the only elements without identified precedent are:
 
-1. **L'usage de `1/Γ(x+1)` ou `ln Γ(x+1)` comme transformée ponctuelle de
-   débruitage** — aucun antécédent trouvé. Nos mesures montrent *pourquoi* : la
-   première est non injective, la seconde non monotone, mal conditionnée, et
-   anti-stabilisatrice (E1, E2). L'absence d'antécédent reflète ici une absence de
-   mérite, pas une opportunité.
-2. **Le terme « Transformed-Scalar Hypercomplex Filters » et l'assemblage
-   marketing des deux idées** — l'assemblage n'a pas d'antécédent *en tant que
-   famille nommée*, mais la Proposition 1 (§1.1) montre qu'il se décompose en deux
-   questions indépendantes, chacune classique.
+1. **The use of `1/Γ(x+1)` or `ln Γ(x+1)` as a pointwise denoising
+   transform** — no precedent found. Our measurements show *why*: the
+   first is non-injective, the second non-monotonic, ill-conditioned, and
+   anti-stabilizing (E1, E2). The absence of precedent here reflects an absence of
+   merit, not an opportunity.
+2. **The term "Transformed-Scalar Hypercomplex Filters" and the marketing
+   assembly of the two ideas** — the assembly has no precedent *as a named
+   family*, but Proposition 1 (§1.1) shows it decomposes into two independent
+   questions, each classic.
 
-Aucune propriété mathématique nouvelle, aucun gain empirique nouveau n'a émergé
-des expériences.
+No new mathematical property, no new empirical gain emerged from the
+experiments.
 
-## 6. Faiblesses
+## 6. Weaknesses
 
-1. **Séparabilité** (Prop. 1) : le cœur de la proposition se factorise en deux
-   idées indépendantes déjà étudiées ; l'assemblage n'ajoute rien par lui-même.
-2. **Auto-neutralisation sur les filtres de rang** (Prop. 2).
-3. Sur bruit additif gaussien — le cas le plus courant — le pipeline ne peut que
-   perdre (E1, E3) : Gauss-Markov ne se laisse pas améliorer par un changement de
-   coordonnées ponctuel suivi du même filtre.
-4. L'inverse naïf est biaisé (E4) ; corriger le biais exige exactement la
-   machinerie (inverse exact non biaisé) publiée par l'art antérieur.
-5. Les transformées proposées les plus « originales » (famille Γ) sont
-   mathématiquement disqualifiées (E2).
-6. Octonions/sédénions : la perte d'associativité supprime la représentation
-   matricielle fidèle, donc la théorie des systèmes linéaires (fonctions de
-   transfert, z-transformée) ne s'y transporte pas ; aucun bénéfice de filtrage
-   démontré dans la littérature, et le coût SIMD est déjà documenté dans SciRust
-   (#513/#517). Notre E5b montre qu'un opérateur joint peut même *perdre* contre
-   le traitement par canal.
+1. **Separability** (Prop. 1): the core of the proposal factorizes into two
+   independent, already-studied ideas; the assembly adds nothing by itself.
+2. **Self-neutralization on rank filters** (Prop. 2).
+3. On additive Gaussian noise — the most common case — the pipeline can only
+   lose (E1, E3): Gauss-Markov cannot be improved by a pointwise change of
+   coordinates followed by the same filter.
+4. The naive inverse is biased (E4); correcting the bias requires exactly the
+   machinery (exact unbiased inverse) published by the prior art.
+5. The most "original" proposed transforms (Γ family) are mathematically
+   disqualified (E2).
+6. Octonions/sedenions: the loss of associativity removes the faithful matrix
+   representation, so linear-systems theory (transfer functions, z-transform)
+   does not carry over; no filtering benefit demonstrated in the literature,
+   and the SIMD cost is already documented in SciRust (#513/#517). Our E5b
+   shows that even a joint operator can *lose* to per-channel processing.
 
-## 7. Applications potentielles (du sous-ensemble viable)
+## 7. Potential applications (of the viable subset)
 
-- **Comptage photonique / imagerie faible flux** (Poisson) : Anscombe + débruiteur
-  gaussien + inverse corrigé — pipeline standard, pertinent pour `scirust-vision`.
-- **Speckle radar/échographie, bruit multiplicatif industriel** : log signé
-  (filtrage homomorphe) + correction de biais.
-- **Capteurs à bruit dépendant du niveau** (photodiodes, jauges) : Box-Cox/racine.
-- **Multicanal corrélé** (couleur, IMU quaternionique) : filtres quaternioniques
-  *authentiques* (QFT, widely-linear) — voie distincte du TSHF, déjà balisée.
+- **Photon counting / low-flux imaging** (Poisson): Anscombe + Gaussian
+  denoiser + corrected inverse — standard pipeline, relevant for
+  `scirust-vision`.
+- **Radar/ultrasound speckle, industrial multiplicative noise**: signed log
+  (homomorphic filtering) + bias correction.
+- **Level-dependent-noise sensors** (photodiodes, gauges): Box-Cox/root.
+- **Correlated multichannel** (color, quaternionic IMU): *genuine* quaternion
+  filters (QFT, widely-linear) — a distinct path from TSHF, already mapped.
 
-## 8. Architecture proposée (sous-ensemble viable uniquement)
+## 8. Proposed architecture (viable subset only)
 
 ```
-x (bruit dépendant du signal, modèle identifié)
-  → VST appariée (anscombe | boxcox(λ) | signed_log)
-  → n'importe quel débruiteur gaussien existant de denoise::*
-  → inverse À BIAIS CORRIGÉ (exact-unbiased pour Anscombe ; smearing pour log)
+x (signal-dependent noise, identified model)
+  → matched VST (anscombe | boxcox(λ) | signed_log)
+  → any existing Gaussian denoiser of denoise::*
+  → BIAS-CORRECTED inverse (exact-unbiased for Anscombe; smearing for log)
   → x̂
 ```
 
-Module suggéré : `denoise::vst` — trois paires (φ, φ⁻¹ corrigé), un sélecteur par
-`NoiseProfile` (le classificateur détecte déjà la dépendance au niveau via la
-variance par bande), et l'intégration à `denoise_auto` comme pré/post-étape
-conditionnelle. **Pas** de plongement hypercomplexe dans ce module (Prop. 1).
+Suggested module: `denoise::vst` — three (φ, corrected φ⁻¹) pairs, a selector by
+`NoiseProfile` (the classifier already detects level dependence via
+per-band variance), and integration into `denoise_auto` as a conditional
+pre/post-step. **No** hypercomplex embedding in this module (Prop. 1).
 
-## 9. Protocole expérimental (pour la suite éventuelle)
+## 9. Experimental protocol (for any follow-up)
 
-1. Fixtures synthétiques à modèle contrôlé : Poisson à faible comptage (λ ∈ 1–20),
-   multiplicatif 10–40 %, mixte Poisson-gaussien (le cas Starck/Murtagh).
-2. Comparaisons : identité vs VST-naïve vs VST-corrigée, sur MA/ondelettes/BM3D-1D
-   (`collab1d`), métriques §10.
-3. Balayage du régime : tracer le gain VST vs intensité de la dépendance au signal
-   (notre E3 montre un gain ≈ nul en régime doux ×2 ; la littérature le situe en
-   régime fort — vérifier le seuil de croisement).
-4. Datasets publics recommandés (identification seule, pas de téléchargement) :
-   images — BSD68/Set12, FMD (fluorescence, vrai Poisson faible flux), SIDD ;
-   audio — VoiceBank-DEMAND ; hyperspectral — Indian Pines, Pavia ; IMU —
-   UCI-HAR ; radar — signaux SAR speckle (Sentinel-1 patchs) ; médical —
-   MIT-BIH (ECG), CHB-MIT (EEG) ; vibrations industrielles — CWRU Bearing,
-   NASA IMS. Chacun couvre un modèle de bruit distinct du protocole.
+1. Synthetic fixtures with controlled model: low-count Poisson (λ ∈ 1–20),
+   multiplicative 10–40 %, mixed Poisson-Gaussian (the Starck/Murtagh case).
+2. Comparisons: identity vs naive-VST vs corrected-VST, on MA/wavelets/BM3D-1D
+   (`collab1d`), metrics §10.
+3. Regime sweep: plot VST gain vs intensity of the signal dependence
+   (our E3 shows a gain ≈ zero in the mild ×2 regime; the literature locates it
+   in the strong regime — verify the crossover threshold).
+4. Recommended public datasets (identification only, no download):
+   images — BSD68/Set12, FMD (fluorescence, true low-flux Poisson), SIDD;
+   audio — VoiceBank-DEMAND; hyperspectral — Indian Pines, Pavia; IMU —
+   UCI-HAR; radar — SAR speckle signals (Sentinel-1 patches); medical —
+   MIT-BIH (ECG), CHB-MIT (EEG); industrial vibrations — CWRU Bearing,
+   NASA IMS. Each covers a distinct noise model of the protocol.
 
-## 10. Méthodologie de validation
+## 10. Validation methodology
 
-Métriques : SNR/PSNR/RMSE/MAE (dans les coordonnées *d'origine*), SSIM (2-D),
-biais moyen (le défaut de retransformation, cf. E4), conservation d'énergie
-`‖x̂‖/‖s‖`, distorsion de norme par canal, préservation d'arêtes (E6),
-préservation de corrélation inter-canaux (E5b), erreur aller-retour φ∘φ⁻¹ (E2),
-déterminisme bit-à-bit (convention SciRust), temps/mémoire. Seuils de succès à
-fixer *avant* mesure ; tout gain < 0,5 dB est déclaré nul.
+Metrics: SNR/PSNR/RMSE/MAE (in the *original* coordinates), SSIM (2-D),
+mean bias (the retransformation defect, cf. E4), energy conservation
+`‖x̂‖/‖s‖`, per-channel norm distortion, edge preservation (E6),
+inter-channel correlation preservation (E5b), φ∘φ⁻¹ round-trip error (E2),
+bit-for-bit determinism (SciRust convention), time/memory. Success thresholds
+to set *before* measurement; any gain < 0.5 dB is declared null.
 
-## 11. Risques
+## 11. Risks
 
-- **Risque scientifique** : requalifier du travail connu en nouveauté — mitigé par
-  ce rapport (citations explicites, §2–4).
-- **Risque d'ingénierie** : la correction de biais dépend du modèle de bruit ; un
-  mauvais appariement (log sur additif) *dégrade* (E1, E3) — le sélecteur doit
-  être conservateur (défaut = identité).
-- **Risque numérique** : domaines (Anscombe x ≥ −3/8 ; log x > 0) → clamps
-  documentés, jamais silencieux.
-- **Risque de périmètre** : la tentation octonion/sédénion — aucun résultat ne la
-  justifie ; s'y engager consommerait l'effort SIMD sans bénéfice de filtrage.
+- **Scientific risk**: reclassifying known work as novelty — mitigated by this
+  report (explicit citations, §2–4).
+- **Engineering risk**: the bias correction depends on the noise model; a bad
+  match (log on additive) *degrades* (E1, E3) — the selector must be
+  conservative (default = identity).
+- **Numerical risk**: domains (Anscombe x ≥ −3/8; log x > 0) → documented
+  clamps, never silent.
+- **Scope risk**: the octonion/sedenion temptation — no result justifies it;
+  engaging it would consume SIMD effort with no filtering benefit.
 
-## 12. Recommandations
+## 12. Recommendations
 
-1. **Rejeter** la famille TSHF comme « nouvelle famille de filtres » ; ne pas
-   implémenter de pipeline Γ ni de plongement octonion/sédénion de filtrage.
-2. **Implémenter le sous-ensemble viable et honnêtement nommé** : module
-   `denoise::vst` (Anscombe + inverse exact non biaisé, Box-Cox/log + smearing,
-   racine signée), branché au classificateur — Phase 1 du plan ci-dessous.
-3. Les transformées saturantes (tanh/sigmoïde/softsign/atan) : à réserver aux
-   usages *sans reconstruction* (features robustes, compression d'affichage) —
-   jamais comme φ de pipeline inversé (E2/E4/E6).
-4. La voie quaternionique légitime (QFT couleur, widely-linear, médian vectoriel
-   pour impulsions *désynchronisées*) est un chantier séparé, à évaluer sur ses
-   propres fixtures — notre E5b montre qu'elle ne gagne pas par défaut.
+1. **Reject** the TSHF family as a "new family of filters"; do not implement
+   any Γ pipeline or octonion/sedenion filtering embedding.
+2. **Implement the viable, honestly named subset**: module
+   `denoise::vst` (Anscombe + exact unbiased inverse, Box-Cox/log + smearing,
+   signed root), wired to the classifier — Phase 1 of the plan below.
+3. The saturating transforms (tanh/sigmoid/softsign/atan): reserve for uses
+   *without reconstruction* (robust features, display compression) — never as
+   the φ of an inverted pipeline (E2/E4/E6).
+4. The legitimate quaternionic path (color QFT, widely-linear, vector median
+   for *desynchronized* impulses) is a separate workstream, to evaluate on its
+   own fixtures — our E5b shows it does not win by default.
 
-### Feuille de route (sous-ensemble viable)
+### Roadmap (viable subset)
 
-- **Phase 1 — prototype scalaire pur** : `denoise::vst` (3 paires φ/φ⁻¹ corrigées,
-  sélecteur par profil, oracles Poisson/multiplicatif où VST-corrigée > identité
-  d'au moins 1 dB en régime fort — c'est le critère d'acceptation).
-- **Phase 2 — quaternion** : uniquement les opérateurs qui couplent réellement les
-  canaux (médian vectoriel, Wiener widely-linear) sur fixtures multicanal ; gate :
-  battre le par-canal sur ≥ 2 fixtures réalistes.
-- **Phase 3 — octonion** : *conditionnelle* à un résultat de littérature ou une
-  expérience Phase 2 démontrant un besoin à 8 canaux couplés ; sinon abandonner.
-- **Phase 4 — SIMD** : vectoriser les φ/φ⁻¹ (fonctions élémentaires) seulement si
-  Phase 1 est adoptée et profilée comme coûteuse.
-- **Phase 5 — GPU** : non justifiée par les volumes actuels de SciRust ; réévaluer
-  avec des charges image/hyperspectrales réelles.
+- **Phase 1 — pure scalar prototype**: `denoise::vst` (3 corrected φ/φ⁻¹ pairs,
+  per-profile selector, Poisson/multiplicative oracles where corrected-VST >
+  identity by at least 1 dB in the strong regime — that is the acceptance
+  criterion).
+- **Phase 2 — quaternion**: only the operators that genuinely couple the
+  channels (vector median, widely-linear Wiener) on multichannel fixtures;
+  gate: beat the per-channel on ≥ 2 realistic fixtures.
+- **Phase 3 — octonion**: *conditional* on a literature result or a Phase 2
+  experiment demonstrating a need for 8 coupled channels; otherwise abandon.
+- **Phase 4 — SIMD**: vectorize the φ/φ⁻¹ (elementary functions) only if
+  Phase 1 is adopted and profiled as expensive.
+- **Phase 5 — GPU**: not justified by SciRust's current volumes; re-evaluate
+  with real image/hyperspectral workloads.
 
-## 13. Le concept mérite-t-il une implémentation dans SciRust ?
+## 13. Does the concept deserve an implementation in SciRust?
 
-**En tant que TSHF : non.** Les expériences ne dégagent aucun régime où le
-pipeline générique bat l'existant, ses composantes originales (Γ) sont
-mathématiquement disqualifiées, et tout ce qui fonctionne porte déjà un nom dans
-la littérature.
+**As TSHF: no.** The experiments reveal no regime where the generic pipeline
+beats the existing state, its original components (Γ) are mathematically
+disqualified, and everything that works already has a name in the literature.
 
-**En tant que module VST ciblé : oui** — périmètre de la Phase 1 ci-dessus, avec
-critère d'acceptation chiffré et nommage honnête (Anscombe/Box-Cox, pas « TSHF »).
-
----
-
-*Rapport produit dans le cadre du programme de recherche SciRust. Expériences :
-`scirust-signal/examples/tshf_experiments.rs` (E1–E6, déterministes). Méthode :
-falsification d'abord — chaque bloc expérimental a été conçu pour pouvoir
-contredire l'hypothèse, et plusieurs l'ont fait.*
+**As a targeted VST module: yes** — the scope of Phase 1 above, with a
+quantified acceptance criterion and honest naming (Anscombe/Box-Cox, not
+"TSHF").
 
 ---
 
-## Addendum — exécution des recommandations (2026-07-16, même jour)
+*Report produced within the SciRust research program. Experiments:
+`scirust-signal/examples/tshf_experiments.rs` (E1–E6, deterministic). Method:
+falsification first — each experimental block was designed to be able to
+contradict the hypothesis, and several did.*
 
-Statut de chaque élément du §12 et de la feuille de route, avec les mesures
-d'acceptation obtenues :
+---
 
-- **Reco 1 (rejet TSHF/Γ/octonion-sédénion)** : respectée — rien de tel n'a été
-  implémenté.
-- **Reco 2 / Phase 1 — exécutée** : module `denoise::vst` (Anscombe + inverse
-  exact non biaisé de Mäkitalo-Foi en forme close ; log signé + smearing de Duan ;
-  racine signée ; Box-Cox(λ) manuel), sélecteur conservateur `detect_noise_model`
-  (défaut = identité), intégration en pré/post-étape conditionnelle de
-  `denoise_auto`. **Portes du §12 franchies** : Poisson λ∈[1,12] : +5,02 dB vs
-  identité (critère ≥ +1 dB), inverse corrigé > naïf de +3,90 dB ; multiplicatif
-  30 % fort : +4,88 dB ; régime doux : +0,04 dB (le gain ≈ nul prédit au §9.3 —
-  et aucune perte) ; biais résiduel 0,015 (naïf : 0,268 ≈ le gap de Jensen prédit
-  de 0,25). Note d'exécution : le débruiteur interne retenu est
-  `stft_wiener_auto` — l'ondelette à seuil global, pourtant la bénéficiaire
-  « classique » d'une VST, *perdait* ~1 dB après stabilisation sur signaux
-  corrélés au niveau (le calibrage MAD brut agissait comme seuil
-  accidentellement adaptatif) ; conforme au principe §11 « ne jamais dégrader ».
-- **Reco 3 — exécutée** : `denoise::compand` (`soft_clip`, `soft_clip_robust` ;
-  tanh/atan/softsign), sans inverse par conception.
-- **Reco 4 / Phase 2 — exécutée, verdict partagé** : module
-  `denoise::multichannel`, porte « battre le par-canal sur ≥ 2 fixtures » :
-  `wiener_spatial` (Wiener spatial joint ≡ widely-linear réel) **passe** —
-  +2,48 dB (4 canaux corrélés) et +3,67 dB (stéréo rang-1) contre sa restriction
-  diagonale ; `vector_median` **échoue** (0/2) — −1,81 dB sur impulsions
-  synchronisées (E5b reproduit) et −2,02 dB sur impulsions *désynchronisées* :
-  la conjecture du §12.4 (« médian vectoriel pour impulsions désynchronisées »)
-  est **falsifiée** — le médian vectoriel restitue un vecteur observé dont tout
-  le bruit de fond survit, quand la médiane scalaire moyenne ce bruit. Sa
-  préservation de corrélation inter-canaux est elle aussi inférieure (erreur
-  4,4e-3 vs 2,8e-3). Conservé comme implémentation de référence, verdict en doc ;
-  chiffres reproductibles par `phase2_gate_report()`.
-- **Phase 3 (octonion) — non déclenchée** : la condition (« un besoin démontré à
-  8 canaux couplés ») n'est pas remplie ; la Phase 2 a au contraire falsifié
-  l'opérateur joint de rang.
-- **Phase 4 (SIMD des φ/φ⁻¹) — non déclenchée** : φ/φ⁻¹ sont des passes O(n) de
-  fonctions élémentaires, négligeables devant le coût des débruiteurs internes.
-- **Phase 5 (GPU) — non déclenchée** : volumes inchangés depuis le rapport.
+## Addendum — execution of the recommendations (2026-07-16, same day)
 
-## Addendum 2 — protocole §9 exécuté, extensions GAT et 2-D (2026-07-16)
+Status of each §12 item and of the roadmap, with the acceptance measurements
+obtained:
 
-Le protocole expérimental du §9 est désormais rejouable
-(`cargo run --release -p scirust-signal --example vst_protocol`, blocs P1–P5
-déterministes) et ses questions ouvertes sont **mesurées** :
+- **Reco 1 (rejection of TSHF/Γ/octonion-sedenion)**: respected — nothing of
+  the sort was implemented.
+- **Reco 2 / Phase 1 — executed**: module `denoise::vst` (Anscombe + the
+  Mäkitalo-Foi exact unbiased inverse in closed form; signed log + Duan
+  smearing; signed root; manual Box-Cox(λ)), conservative selector
+  `detect_noise_model` (default = identity), integration as a conditional
+  pre/post-step of `denoise_auto`. **§12 gates passed**: Poisson λ∈[1,12]:
+  +5.02 dB vs identity (criterion ≥ +1 dB), corrected inverse > naive by
+  +3.90 dB; strong 30 % multiplicative: +4.88 dB; mild regime: +0.04 dB (the
+  ≈ zero gain predicted in §9.3 — and no loss); residual bias 0.015 (naive:
+  0.268 ≈ the Jensen gap of 0.25 predicted). Execution note: the internal
+  denoiser retained is `stft_wiener_auto` — the global-threshold wavelet,
+  although the "classic" VST beneficiary, *lost* ~1 dB after stabilization on
+  level-correlated signals (the raw MAD calibration acted as an accidentally
+  adaptive threshold); consistent with the §11 principle "never degrade".
+- **Reco 3 — executed**: `denoise::compand` (`soft_clip`, `soft_clip_robust`;
+  tanh/atan/softsign), no inverse by design.
+- **Reco 4 / Phase 2 — executed, split verdict**: module
+  `denoise::multichannel`, gate "beat the per-channel on ≥ 2 fixtures":
+  `wiener_spatial` (joint spatial Wiener ≡ real widely-linear) **passes** —
+  +2.48 dB (4 correlated channels) and +3.67 dB (rank-1 stereo) against its
+  diagonal restriction; `vector_median` **fails** (0/2) — −1.81 dB on
+  synchronized impulses (E5b reproduced) and −2.02 dB on *desynchronized*
+  impulses: the §12.4 conjecture ("vector median for desynchronized
+  impulses") is **falsified** — the vector median returns an observed vector
+  whose entire background noise survives, whereas the scalar median averages
+  that noise. Its inter-channel correlation preservation is also inferior
+  (error 4.4e-3 vs 2.8e-3). Kept as a reference implementation, verdict in
+  the doc; figures reproducible via `phase2_gate_report()`.
+- **Phase 3 (octonion) — not triggered**: the condition ("a demonstrated need
+  for 8 coupled channels") is not met; Phase 2 on the contrary falsified the
+  rank joint operator.
+- **Phase 4 (SIMD of φ/φ⁻¹) — not triggered**: φ/φ⁻¹ are O(n) passes of
+  elementary functions, negligible before the internal denoisers' cost.
+- **Phase 5 (GPU) — not triggered**: volumes unchanged since the report.
 
-- **§9.3, seuil de croisement (P4)** : à ×10 de dynamique de niveaux, le gain
-  VST est déjà matériel (≥ +0,5 dB) à 2 % de bruit multiplicatif (le croisement
-  est ≤ 2 %) ; à 30 % de bruit, le croisement en *dynamique de niveaux* est à
-  **≈ ×3** — et à ×2 la VST est une perte matérielle de −0,77 dB, ce qui
-  *précise et durcit* le « gain ≈ nul en régime doux ×2 » du §9.3. Conséquence
-  codée : la porte de dynamique du sélecteur `detect_noise_model` est resserrée
-  de ×2 à **×3** (constante `DETECT_MIN_RANGE`, documentée par cette mesure).
-- **Régime de porteuse (P5, limitation nouvelle)** : le gain Anscombe s'effondre
-  de +5,17 dB (porteuse à 3 cycles/4096) à **−0,93 dB (40 cycles)** — une φ
-  ponctuelle ne commute pas avec le spectre : la racine convertit une porteuse
-  rapide en pile d'harmoniques que le rétrécissement linéaire interne rogne.
-  Documenté dans la doc du module `vst` (« Known limitation: fast carriers »)
-  et épinglé par test. La VST s'adresse aux intensités *lentes*.
-- **GAT (§9.1c, le cas Starck-Murtagh)** : `VstKind::Gat { gain, sigma }` avec
-  l'inverse exact non biaisé en forme close (Mäkitalo-Foi 2013) : +1,54 à
-  +2,87 dB selon la calibration (pire cas : lecture dominante (1.3, 1.5)) ;
-  gain=1, σ=0 se réduit exactement à Anscombe. Fait notable de scalabilité : les
-  calibrations à σ/gain constant sont des re-mises à l'échelle exactes (la GAT
-  normalise le gain, chaque étage est équivariant d'échelle).
-- **Transposition 2-D (`scirust_vision::denoise`)** : `vst_denoise2d` /
-  `vst_denoise2d_auto`. Trois résultats 1-D se transposent tels quels : le
-  VisuShrink 2-D perd sous stabilisation (−0,6 dB — calibrage MAD brut
-  accidentellement adaptatif) ; la médiane 2-D est *invariante* bit à bit
-  (Prop. 2 du rapport, confirmée empiriquement) ; le meilleur partenaire mesuré
-  est **NLM 2-D** (+5,4 dB Poisson, +3,0 dB GAT — ses distances de patchs à `h`
-  global supposent exactement l'homoscédasticité que la VST restaure). Le
-  détecteur 1-D fonctionne sur images lisses en segments de lignes, avec une
-  corrélation plus serrée (la dispersion log-niveau est le facteur limitant) ;
-  les ratés échouent vers Identity (sûr).
-- **Bras ondelette (P2)** : VisuShrink ne bénéficie de la stabilisation sur
-  *aucune* fraction testée (−4,4 à −1,2 dB) — le choix `stft_wiener_auto` (1-D)
-  / `nlm2d` (2-D) comme partenaires internes est confirmé.
+## Addendum 2 — §9 protocol executed, GAT and 2-D extensions (2026-07-16)
+
+The §9 experimental protocol is now replayable
+(`cargo run --release -p scirust-signal --example vst_protocol`, deterministic
+blocks P1–P5) and its open questions are **measured**:
+
+- **§9.3, crossover threshold (P4)**: at ×10 level dynamic range, the VST
+  gain is already material (≥ +0.5 dB) at 2 % multiplicative noise (the
+  crossover is ≤ 2 %); at 30 % noise, the crossover in *level dynamic range*
+  is at **≈ ×3** — and at ×2 the VST is a material loss of −0.77 dB, which
+  *refines and strengthens* the §9.3 "≈ zero gain in the mild ×2 regime".
+  Consequence coded: the dynamic-range gate of the `detect_noise_model`
+  selector is tightened from ×2 to **×3** (constant `DETECT_MIN_RANGE`,
+  documented by this measurement).
+- **Carrier regime (P5, new limitation)**: the Anscombe gain collapses from
+  +5.17 dB (carrier at 3 cycles/4096) to **−0.93 dB (40 cycles)** — a
+  pointwise φ does not commute with the spectrum: the root converts a fast
+  carrier into a stack of harmonics that the internal linear shrinkage crops.
+  Documented in the `vst` module doc ("Known limitation: fast carriers")
+  and pinned by a test. The VST targets *slow* intensities.
+- **GAT (§9.1c, the Starck-Murtagh case)**: `VstKind::Gat { gain, sigma }` with
+  the exact unbiased inverse in closed form (Mäkitalo-Foi 2013): +1.54 to
+  +2.87 dB depending on calibration (worst case: read-dominated (1.3, 1.5));
+  gain=1, σ=0 reduces exactly to Anscombe. Notable scalability fact: the
+  constant-σ/gain calibrations are exact rescalings (the GAT normalizes the
+  gain, each stage is scale-equivariant).
+- **2-D transposition (`scirust_vision::denoise`)**: `vst_denoise2d` /
+  `vst_denoise2d_auto`. Three 1-D results transpose as-is: 2-D VisuShrink
+  loses under stabilization (−0.6 dB — raw MAD calibration accidentally
+  adaptive); the 2-D median is *invariant* bit for bit
+  (report Prop. 2, confirmed empirically); the best measured partner is
+  **2-D NLM** (+5.4 dB Poisson, +3.0 dB GAT — its patch distances with
+  global `h` assume exactly the homoscedasticity that the VST restores). The
+  1-D detector works on smooth images in line segments, with tighter
+  correlation (the log-level dispersion is the limiting factor); misses fall
+  back to Identity (safe).
+- **Wavelet arm (P2)**: VisuShrink benefits from stabilization on *no*
+  tested fraction (−4.4 to −1.2 dB) — the choice of `stft_wiener_auto` (1-D)
+  / `nlm2d` (2-D) as internal partners is confirmed.

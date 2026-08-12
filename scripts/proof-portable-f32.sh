@@ -29,7 +29,7 @@
 #   canonical.sha256  SHA-256 des lignes canoniques — doit être IDENTIQUE
 #                     sur toutes les plates-formes (pour un même mode --full)
 # Le bundle reste sur la machine (`.gitignore`d) ; le verdict et le SHA sont
-# reportés dans LIVESTATE.md.
+# reportés dans docs/archive/LIVESTATE.md.
 # =============================================================================
 set -euo pipefail
 

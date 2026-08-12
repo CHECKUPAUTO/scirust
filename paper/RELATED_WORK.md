@@ -1,118 +1,118 @@
-# Travaux connexes
+# Related work
 
-> Section rédigée pour être citable telle quelle dans le paper (Lot 3).
-> Base bibliographique volontairement restreinte aux références vérifiées ;
-> aucune référence inventée. L'étude empirique « dead guards »
-> (`docs/DEAD_GUARDS_STUDY.md`) ayant conclu NO-GO, cette section ne comporte
-> pas de sous-section « prévalence mesurée de la classe de bug ».
+> Section written to be citable as-is in the paper (Lot 3).
+> Bibliography deliberately restricted to verified references;
+> no invented reference. Since the empirical "dead guards" study
+> (`docs/DEAD_GUARDS_STUDY.md`) concluded NO-GO, this section does not contain
+> a "measured prevalence of the bug class" subsection.
 
-## 1. Reproductibilité flottante classique
+## 1. Classical floating-point reproducibility
 
-Les pièges de l'arithmétique flottante sont documentés depuis longtemps.
+The pitfalls of floating-point arithmetic have been documented for a long time.
 Goldberg (1991, *What Every Computer Scientist Should Know About
-Floating-Point Arithmetic*) établit le socle : l'addition flottante n'est pas
-associative, l'arrondi dépend du format intermédiaire, et deux évaluations
-mathématiquement équivalentes peuvent différer bit à bit. Monniaux (2008,
-*The pitfalls of verifying floating-point computations*) montre que ces
-écarts ne sont pas seulement algébriques mais **matériels et
-compilatoires** : registres x87 à 80 bits, contraction FMA, modes
-flush-to-zero (FTZ/DAZ), options fast-math — le *même* code source produit
-des résultats différents selon la plateforme et le compilateur. Ces deux
-références fondent notre position : la reproductibilité bit-à-bit n'est
-jamais un acquis par défaut, c'est une propriété qu'il faut **construire puis
-prouver par exécution**.
+Floating-Point Arithmetic*) establishes the foundation: floating-point addition is not
+associative, rounding depends on the intermediate format, and two
+mathematically equivalent evaluations can differ bit by bit. Monniaux (2008,
+*The pitfalls of verifying floating-point computations*) shows that these
+discrepancies are not only algebraic but **material and
+compilatory**: 80-bit x87 registers, FMA contraction, flush-to-zero (FTZ/DAZ)
+modes, fast-math options — the *same* source code produces
+different results depending on the platform and the compiler. These two
+references ground our position: bit-for-bit reproducibility is
+never a given by default, it is a property that must be **built then
+proven by execution**.
 
-Côté construction, ReproBLAS (Demmel & Nguyen) est la fondation classique :
-des sommations **reproductibles indépendantes de l'ordre** des opérandes,
-qui rendent le résultat d'une réduction insensible à l'ordonnancement
-parallèle. SciRust adopte l'autre voie possible vers le même invariant :
-plutôt que de rendre la somme insensible à l'ordre, **figer l'ordre**
-(réduction séquentielle en ordre de worker fixe, orthogonalisations
-séquentielles, budgets d'itération fixes). Les deux approches livrent un
-résultat bit-identique face au parallélisme ; la nôtre est plus simple à
-auditer — le prix est un point de séquentialisation, mesuré plutôt que nié.
+On the construction side, ReproBLAS (Demmel & Nguyen) is the classical foundation:
+summations that are **reproducible and independent of the order** of the operands,
+which make a reduction's result insensitive to parallel
+scheduling. SciRust adopts the other possible route to the same invariant:
+rather than making the sum order-insensitive, **freeze the order**
+(sequential reduction in fixed worker order, sequential
+orthogonalizations, fixed iteration budgets). Both approaches deliver a
+bit-identical result in the face of parallelism; ours is simpler to
+audit — the price is a sequentialization point, measured rather than denied.
 
-## 2. Déterminisme pour l'apprentissage profond
+## 2. Determinism for deep learning
 
-Les frameworks établis traitent le déterminisme comme un **mode
-best-effort**. `torch.use_deterministic_algorithms` (PyTorch) force des
-noyaux déterministes *à configuration fixée* : même machine, même version,
-même nombre de threads. La garantie est run-to-run ; elle n'est **ni
-bit-identique entre nombres de threads différents, ni entre plateformes**,
-et certaines opérations n'ont simplement pas de variante déterministe.
-EasyScale (arXiv:2208.14228) étend la portée au distribué élastique :
-entraînement **bit-identique** sous variation du nombre de GPU hétérogènes,
-en préservant l'état par worker logique et en figeant l'ordre effectif des
-réductions — la preuve que l'invariance au degré de parallélisme est
-atteignable à l'échelle, au prix d'une ingénierie dédiée.
+Established frameworks treat determinism as a **best-effort
+mode**. `torch.use_deterministic_algorithms` (PyTorch) forces
+deterministic kernels *at fixed configuration*: same machine, same version,
+same number of threads. The guarantee is run-to-run; it is **neither
+bit-identical across different thread counts, nor across platforms**,
+and some operations simply have no deterministic variant.
+EasyScale (arXiv:2208.14228) extends the scope to elastic distributed:
+**bit-identical** training under variation of the number of heterogeneous GPUs,
+by preserving state per logical worker and freezing the effective order of
+reductions — the proof that invariance to the degree of parallelism is
+achievable at scale, at the price of dedicated engineering.
 
-RepDL (Microsoft Research, 2025, arXiv:2510.09180) est, à notre
-connaissance, le travail le plus fort sur l'axe portabilité : entraînement et
-inférence **bit-à-bit reproductibles entre plateformes** (CPU/GPU
-différents), obtenus par (a) arrondi correct des opérations, dans la lignée
-des bibliothèques à la MPFR/RLIBM, et (b) invariance d'ordre (sommations
-séquentielles figées, graphes fixés). Le positionnement respectif mérite
-d'être énoncé sans détour. **Sur l'axe cross-platform float32, RepDL est plus
-fort que la voie f32 *sanitized* de SciRust**, qui n'est déterministe
-qu'intra-architecture. Réciproquement, RepDL est une **surcouche d'un runtime
-PyTorch** — un TCB C++/Python de plusieurs millions de lignes hors du
-périmètre d'audit — limitée à un sous-ensemble d'opérations float32, sans
-basse précision (bf16/int8 explicitement hors périmètre), et son rapport
-technique ne comporte pas de section d'évaluation (ni benchmark, ni overhead
-mesuré). SciRust occupe le créneau complémentaire : une pile **100 % Rust
-auditable de bout en bout, sans FFI dans le chemin de calcul**, où le
-déterminisme n'est pas seulement une propriété d'exécution mais une **pièce
-d'évidence** — fingerprints d'inférence 64 bits, journaux hash-chaînés,
-reconstruction par manifeste, chaque claim adossée à un test CI — avec un
-pipeline int8 entièrement entier (bit-exact cross-platform par construction,
-noyau NEON validé sur ARM embarqué) que l'approche « arrondi correct f32 »
-ne couvre pas. Les deux travaux sont ainsi moins concurrents
-qu'orthogonaux : RepDL renforce le *noyau numérique* d'un écosystème
-existant ; SciRust reconstruit la *chaîne de confiance* entière au-dessus
-d'un noyau volontairement plus simple.
+RepDL (Microsoft Research, 2025, arXiv:2510.09180) is, to our
+knowledge, the strongest work on the portability axis: training and
+inference **bit-for-bit reproducible across platforms** (different CPU/GPU),
+obtained by (a) correct rounding of operations, in the lineage
+of MPFR/RLIBM-style libraries, and (b) order invariance (frozen
+sequential summations, fixed graphs). The respective positioning deserves
+to be stated without beating around the bush. **On the cross-platform float32 axis, RepDL is
+stronger than SciRust's f32 *sanitized* path**, which is only deterministic
+intra-architecture. Conversely, RepDL is an **overlay on a PyTorch
+runtime** — a C++/Python TCB of several million lines outside the
+audit scope — limited to a subset of float32 operations, without
+low precision (bf16/int8 explicitly out of scope), and its technical
+report contains no evaluation section (neither benchmark nor measured
+overhead). SciRust occupies the complementary niche: a **100% Rust
+stack auditable end to end, without FFI in the compute path**, where
+determinism is not only an execution property but a **piece of
+evidence** — 64-bit inference fingerprints, hash-chained journals,
+manifest-based reconstruction, every claim backed by a CI test — with a
+fully integer int8 pipeline (bit-exact cross-platform by construction,
+NEON kernel validated on embedded ARM) that the "correct f32 rounding" approach
+does not cover. The two works are thus less competitors
+than orthogonal: RepDL strengthens the *numerical kernel* of an existing
+ecosystem; SciRust rebuilds the entire *chain of trust* above
+a deliberately simpler kernel.
 
-## 3. Divergences GPU inter-constructeurs : pourquoi une voie « sanitized »
+## 3. Cross-vendor GPU divergences: why a "sanitized" path
 
-La comparaison systématique NVIDIA/AMD (arXiv:2410.09172) documente des
-différences numériques entre GPU de constructeurs différents exécutant le
-même calcul, aggravées par le fait que les **exceptions flottantes ne sont
-pas signalées** sur GPU : underflow, arrondis divergents et comportements
-sous-normaux passent silencieusement. C'est précisément le régime que la
-voie 3 de SciRust neutralise *à l'intérieur d'une architecture* :
-`sanitize_f32` écrase tout sous-normal (seuil = `f32::MIN_POSITIVE`,
-aligné par test sur la constante σ de `scirust-sigma`), retirant du chemin
-de calcul la classe de valeurs dont le traitement diffère le plus entre
-matériels et modes (FTZ/DAZ des drivers). La campagne de minage de
-`docs/DEAD_GUARDS_STUDY.md` confirme le réalisme de ce modèle de menace —
-9 des 22 dépôts numériques majeurs scannés activent fast-math ou contrôlent
-FTZ dans leurs builds — tout en constatant honnêtement (verdict NO-GO)
-que la classe de bug « garde sous-normale » n'y a pas été observée : la
-motivation de la voie sanitized est la *portabilité des comportements*, pas
-une prévalence de bugs chez autrui. Pour les régimes où l'identité
-inter-plateformes est exigée, SciRust fournit les voies entière et virgule
-fixe, bit-exactes cross-platform par construction — ainsi, depuis 2026-07-10,
-qu'une **voie f32 portable** (`scirust-core/src/portable_f32.rs`) : exp/ln
-Rust pur sans libm (réduction d'argument + séries, évaluation interne f64),
-softmax et GEMM de référence n'employant que des opérations IEEE-754 de base
-en ordre fixe, donc bit-exacts inter-plateformes *par construction*
-(fidèlement arrondis ; goldens bit-à-bit et empreintes FNV commis comme
-contrat de portabilité). L'arrondi correct *prouvé* de ces transcendantales
-(dilemme du fabricant de tables) reste un travail futur explicite, en
-dialogue avec l'approche RepDL.
+The systematic NVIDIA/AMD comparison (arXiv:2410.09172) documents
+numerical differences between GPUs from different vendors executing the
+same computation, aggravated by the fact that **floating-point exceptions are
+not signaled** on GPU: underflow, divergent roundings, and subnormal
+behaviors pass silently. This is precisely the regime that
+SciRust's path 3 neutralizes *within one architecture*:
+`sanitize_f32` flushes any subnormal (threshold = `f32::MIN_POSITIVE`,
+aligned by test on the σ constant of `scirust-sigma`), removing from the
+compute path the class of values whose handling differs the most between
+hardware and modes (driver FTZ/DAZ). The mining campaign of
+`docs/DEAD_GUARDS_STUDY.md` confirms the realism of this threat model —
+9 of the 22 major numerical repositories scanned enable fast-math or control
+FTZ in their builds — while honestly noting (NO-GO verdict)
+that the "subnormal guard" bug class was not observed there: the
+motivation of the sanitized path is the *portability of behaviors*, not
+a prevalence of bugs in others. For the regimes where cross-platform
+identity is required, SciRust provides the integer and fixed-point
+paths, bit-exact cross-platform by construction — and, since 2026-07-10,
+a **portable f32 path** (`scirust-core/src/portable_f32.rs`): pure-Rust exp/ln
+without libm (argument reduction + series, internal f64 evaluation),
+reference softmax and GEMM using only basic IEEE-754 operations
+in fixed order, therefore bit-exact cross-platform *by construction*
+(faithfully rounded; bit-for-bit goldens and FNV fingerprints committed as
+a portability contract). The *proven* correct rounding of these transcendentals
+(table-maker's dilemma) remains an explicit future work, in
+dialogue with the RepDL approach.
 
-## Références
+## References
 
 - D. Goldberg, *What Every Computer Scientist Should Know About
   Floating-Point Arithmetic*, ACM Computing Surveys, 1991.
 - D. Monniaux, *The pitfalls of verifying floating-point computations*,
   ACM TOPLAS, 2008.
-- J. Demmel, H. D. Nguyen, *ReproBLAS — Reproducible BLAS* (sommation
-  reproductible indépendante de l'ordre).
-- PyTorch, `torch.use_deterministic_algorithms` (documentation officielle) —
-  déterminisme run-to-run à configuration fixée.
-- EasyScale, arXiv:2208.14228 — entraînement élastique bit-identique sur
-  GPU hétérogènes.
+- J. Demmel, H. D. Nguyen, *ReproBLAS — Reproducible BLAS* (order-independent
+  reproducible summation).
+- PyTorch, `torch.use_deterministic_algorithms` (official documentation) —
+  run-to-run determinism at fixed configuration.
+- EasyScale, arXiv:2208.14228 — bit-identical elastic training on
+  heterogeneous GPUs.
 - RepDL (Microsoft Research), arXiv:2510.09180, 2025 —
   github.com/microsoft/RepDL.
-- arXiv:2410.09172 — différences numériques NVIDIA vs AMD ; exceptions FP
-  non signalées sur GPU.
+- arXiv:2410.09172 — NVIDIA vs AMD numerical differences; unsignaled FP
+  exceptions on GPU.
