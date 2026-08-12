@@ -28,7 +28,7 @@ jobs:
     env:
       CARGO_INCREMENTAL: 0
       RUSTFLAGS: "-D warnings"
-      SCIRUST_THOR_GPU_LOCK: /var/lib/github-runner/.scirust-thor-gpu.lock
+      SCIRUST_THOR_GPU_LOCK: /dev/nvidia0
       SCIRUST_SOURCE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
       SCIRUST_M28_WARMUPS: "3"
       SCIRUST_M28_REPEATS: "9"
@@ -85,6 +85,7 @@ jobs:
           set -euo pipefail
           command -v flock >/dev/null
           command -v pgrep >/dev/null
+          command -v stat >/dev/null
           if ! command -v nvidia-smi >/dev/null 2>&1; then
             echo "::error::nvidia-smi is required to qualify the physical Thor state"
             exit 1
@@ -102,25 +103,25 @@ jobs:
             nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null
           }
 
-          if [[ ! -d /var/lib/github-runner ]]; then
-            echo "::error::persistent Thor shared-state directory is unavailable"
+          if [[ ! -c "$SCIRUST_THOR_GPU_LOCK" ]]; then
+            echo "::error::physical Thor lock target is not an NVIDIA character device: $SCIRUST_THOR_GPU_LOCK"
+            ls -l /dev/nvidia* 2>/dev/null || true
             exit 1
           fi
-          if [[ ! -e "$SCIRUST_THOR_GPU_LOCK" ]]; then
-            old_umask="$(umask)"
-            umask 000
-            : > "$SCIRUST_THOR_GPU_LOCK"
-            umask "$old_umask"
-          fi
           if [[ ! -r "$SCIRUST_THOR_GPU_LOCK" || ! -w "$SCIRUST_THOR_GPU_LOCK" ]]; then
-            echo "::error::shared Thor lock is not readable/writable by this persistent runner"
+            echo "::error::physical Thor device lock is not readable/writable by this persistent runner"
             ls -l "$SCIRUST_THOR_GPU_LOCK" || true
             exit 1
           fi
-          stat -Lc 'gpu_lock_path=%n device_inode=%d:%i mode=%a owner=%U:%G' "$SCIRUST_THOR_GPU_LOCK"
+          stat -Lc 'gpu_lock_target=%n st_dev=%d inode=%i rdev_hex=%t:%T mode=%a owner=%U:%G type=%F' "$SCIRUST_THOR_GPU_LOCK"
           exec 9<>"$SCIRUST_THOR_GPU_LOCK"
           flock -x 9
           echo "gpu_lock_acquired=true runner=$RUNNER_NAME"
+          if flock -n "$SCIRUST_THOR_GPU_LOCK" -c 'true'; then
+            echo "::error::physical GPU lock does not contend across independent file descriptions"
+            exit 1
+          fi
+          echo "gpu_lock_self_contention=pass"
 
           gpu_inventory="$(nvidia-smi --query-gpu=name,driver_version --format=csv,noheader)" || {
             echo "::error::cannot query NVIDIA GPU inventory"
