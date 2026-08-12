@@ -36,12 +36,14 @@ jobs:
           s = p.read_text()
           if 'configure_flat_autotune_persisted' in s or 'from_model_with_persisted_flat_plans' in s:
               raise SystemExit('persisted startup API already present unexpectedly')
+          impl_start = s.index('impl ResidentModel {')
           marker = '    /// Name of the underlying GPU adapter.\n'
-          count = s.count(marker)
-          if count != 1:
-              raise SystemExit(f'unexpected adapter marker count: {count}')
+          marker_index = s.index(marker, impl_start)
+          next_impl = s.find('\nimpl ', impl_start + len('impl ResidentModel {'))
+          if next_impl != -1 and marker_index > next_impl:
+              raise SystemExit('adapter marker escaped ResidentModel impl')
           addition = '''    /// Replace the default Cold FLAT Elastic runtime with caller-supplied\n    /// persisted plans before decode begins. Record discovery and file I/O stay\n    /// outside the resident model; this method only validates encoded bytes and\n    /// installs the resulting in-memory cache.\n    #[cfg(feature = "flat-autotune")]\n    pub fn configure_flat_autotune_persisted(\n        &mut self,\n        config: ElasticConfig,\n        encoded_records: &[Vec<u8>],\n        required_invalidation_dependencies: &[Vec<u8>],\n    ) -> Result<(), scirust_gpu::flat_autotune::FlatElasticError> {\n        let runtime = FlatElasticRuntime::in_memory_with_persisted_records(\n            config,\n            self.flat_decode.context(),\n            encoded_records,\n            required_invalidation_dependencies,\n        )?;\n        self.flat_autotune = Mutex::new(runtime);\n        Ok(())\n    }\n\n    /// Build a resident model and install validated persisted FLAT plans at the\n    /// startup boundary. `Ok(None)` means no GPU adapter was available; invalid\n    /// or stale persisted input is returned separately as `Err`.\n    #[cfg(feature = "flat-autotune")]\n    pub fn from_model_with_persisted_flat_plans(\n        model: &SciAgentModel,\n        config: ElasticConfig,\n        encoded_records: &[Vec<u8>],\n        required_invalidation_dependencies: &[Vec<u8>],\n    ) -> Result<Option<Self>, scirust_gpu::flat_autotune::FlatElasticError> {\n        let Some(mut resident) = Self::from_model(model) else {\n            return Ok(None);\n        };\n        resident.configure_flat_autotune_persisted(\n            config,\n            encoded_records,\n            required_invalidation_dependencies,\n        )?;\n        Ok(Some(resident))\n    }\n\n'''
-          p.write_text(s.replace(marker, addition + marker, 1))
+          p.write_text(s[:marker_index] + addition + s[marker_index:])
           PY
           cargo +nightly-2026-07-02 fmt --all
           test "$(grep -c 'configure_flat_autotune_persisted' scirust-sciagent/src/gpu.rs)" -ge 2
