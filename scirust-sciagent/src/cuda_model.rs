@@ -547,6 +547,50 @@ impl CudaModel {
         tokens
     }
 
+    /// Diagnostic Route-B generation that records the full BF16 logit row used
+    /// for every sampled token. Downloads are intentional and make this unsuitable
+    /// for throughput measurements.
+    pub fn generate_cached_trace(
+        &self,
+        prompt: &[u32],
+        max_new: usize,
+        params: &SamplingParams,
+        seed: u64,
+    ) -> (Vec<u32>, Vec<Vec<f32>>) {
+        let mut tokens: Vec<u32> = if prompt.is_empty()
+        {
+            vec![0]
+        }
+        else
+        {
+            prompt.to_vec()
+        };
+        if max_new == 0
+        {
+            return (tokens, Vec::new());
+        }
+        let mut kcache: Vec<Option<CudaMatrix>> = (0..self.blocks.len()).map(|_| None).collect();
+        let mut vcache: Vec<Option<CudaMatrix>> = (0..self.blocks.len()).map(|_| None).collect();
+        let mut logits = self.prefill_cached(&tokens, &mut kcache, &mut vcache);
+        let mut rows = Vec::with_capacity(max_new);
+        let mut rng = seed_to_state(seed);
+
+        for generated_index in 0..max_new
+        {
+            let recent: Vec<usize> = tokens.iter().map(|&token| token as usize).collect();
+            let next = sample_row(&logits, params, &recent, &mut rng) as u32;
+            rows.push(logits);
+            let pos = tokens.len();
+            tokens.push(next);
+            if next == 0 || generated_index + 1 == max_new
+            {
+                break;
+            }
+            logits = self.decode_step_cached(next, pos, &mut kcache, &mut vcache);
+        }
+        (tokens, rows)
+    }
+
     /// Backward of [`Self::attention`] (the GQA analogue of Route A's
     /// `gqa_attention_backward`): given the forward `q`/`k`/`v` and the context
     /// grad `dout` (`t×d_model`), returns `(dq, dk, dv)`. Recomputes each head's
