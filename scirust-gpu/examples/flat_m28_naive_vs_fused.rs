@@ -274,36 +274,69 @@ fn main() -> Result<(), Box<dyn Error>> {
         let mut flat_reused_samples = Vec::with_capacity(repeats);
         for iteration in 0..repeats
         {
-            if iteration.is_multiple_of(2)
+            // Rotate all three measured paths through first/middle/last position. Over each
+            // complete three-iteration cycle every path occupies every position once, so the
+            // reused-output ratio is not structurally coupled to always running third.
+            match iteration % 3
             {
-                naive_samples.push(time_naive(&ctx, &q_naive, &k_naive, &v_naive, causal)?);
-                flat_fresh_samples.push(time_flat_fresh_output(
-                    &ctx,
-                    &pipeline,
-                    flat_inputs,
-                    shape,
-                    config,
-                )?);
+                0 =>
+                {
+                    naive_samples.push(time_naive(&ctx, &q_naive, &k_naive, &v_naive, causal)?);
+                    flat_fresh_samples.push(time_flat_fresh_output(
+                        &ctx,
+                        &pipeline,
+                        flat_inputs,
+                        shape,
+                        config,
+                    )?);
+                    flat_reused_samples.push(time_flat_reused(
+                        &ctx,
+                        &pipeline,
+                        flat_inputs,
+                        &reused_output,
+                        shape,
+                        config,
+                    )?);
+                },
+                1 =>
+                {
+                    flat_fresh_samples.push(time_flat_fresh_output(
+                        &ctx,
+                        &pipeline,
+                        flat_inputs,
+                        shape,
+                        config,
+                    )?);
+                    flat_reused_samples.push(time_flat_reused(
+                        &ctx,
+                        &pipeline,
+                        flat_inputs,
+                        &reused_output,
+                        shape,
+                        config,
+                    )?);
+                    naive_samples.push(time_naive(&ctx, &q_naive, &k_naive, &v_naive, causal)?);
+                },
+                _ =>
+                {
+                    flat_reused_samples.push(time_flat_reused(
+                        &ctx,
+                        &pipeline,
+                        flat_inputs,
+                        &reused_output,
+                        shape,
+                        config,
+                    )?);
+                    naive_samples.push(time_naive(&ctx, &q_naive, &k_naive, &v_naive, causal)?);
+                    flat_fresh_samples.push(time_flat_fresh_output(
+                        &ctx,
+                        &pipeline,
+                        flat_inputs,
+                        shape,
+                        config,
+                    )?);
+                },
             }
-            else
-            {
-                flat_fresh_samples.push(time_flat_fresh_output(
-                    &ctx,
-                    &pipeline,
-                    flat_inputs,
-                    shape,
-                    config,
-                )?);
-                naive_samples.push(time_naive(&ctx, &q_naive, &k_naive, &v_naive, causal)?);
-            }
-            flat_reused_samples.push(time_flat_reused(
-                &ctx,
-                &pipeline,
-                flat_inputs,
-                &reused_output,
-                shape,
-                config,
-            )?);
         }
 
         let naive_median = median_ns(&naive_samples);
