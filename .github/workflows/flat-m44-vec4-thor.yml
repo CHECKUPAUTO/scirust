@@ -38,6 +38,20 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
+      - name: Require persistent physical Thor runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "runner_name=$RUNNER_NAME"
+          case "$RUNNER_NAME" in
+            tarek-scirust-arm64-01|tarek-scirust-arm64-02|tarek-scirust-arm64-03|tarek-scirust-arm64-04)
+              ;;
+            *)
+              echo "::error::performance evidence requires one of the persistent tarek-scirust-arm64-01..04 runners; refusing $RUNNER_NAME before build"
+              exit 1
+              ;;
+          esac
+
       - name: Verify exact source revision
         shell: bash
         run: |
