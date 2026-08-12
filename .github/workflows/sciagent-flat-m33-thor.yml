@@ -28,7 +28,7 @@ jobs:
     env:
       CARGO_INCREMENTAL: 0
       RUSTFLAGS: "-D warnings"
-      SCIRUST_THOR_GPU_LOCK: /tmp/scirust-thor-gpu.lock
+      SCIRUST_THOR_GPU_LOCK: /dev/nvidia0
       SCIRUST_SOURCE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
       SCIRUST_THOR_IDLE_SETTLE_SECONDS: "300"
       SCIAGENT_FLAT_M33_PROMPT: "64"
@@ -65,13 +65,17 @@ jobs:
           actual="$(git rev-parse HEAD)"
           echo "source_revision=$actual"
           test "$actual" = "$SCIRUST_SOURCE_REVISION"
-      - name: Prepare executable temporary directory
+      - name: Prepare isolated executable build directory
         shell: bash
         run: |
           set -euo pipefail
           tmpdir="$(mktemp -d "$GITHUB_WORKSPACE/.ci-tmp.XXXXXX")"
           chmod 700 "$tmpdir"
+          mkdir -p "$tmpdir/cargo-home" "$tmpdir/rustup-home" "$tmpdir/target"
           echo "TMPDIR=$tmpdir" >> "$GITHUB_ENV"
+          echo "CARGO_HOME=$tmpdir/cargo-home" >> "$GITHUB_ENV"
+          echo "RUSTUP_HOME=$tmpdir/rustup-home" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_DIR=$tmpdir/target" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: nightly-2026-07-02
@@ -88,7 +92,7 @@ jobs:
             --features flat-attention --test flat_runtime_decode --locked --no-run
           rustup run nightly-2026-07-02 cargo build -p scirust-sciagent \
             --features flat-attention --release --locked --example flat_m33_thor_bench
-          test -x "$GITHUB_WORKSPACE/target/release/examples/flat_m33_thor_bench"
+          test -x "$CARGO_TARGET_DIR/release/examples/flat_m33_thor_bench"
       - name: Exclusive M33 correctness + real Thor model-level benchmark
         shell: bash
         timeout-minutes: 330
@@ -96,11 +100,12 @@ jobs:
           set -euo pipefail
           command -v flock >/dev/null
           command -v pgrep >/dev/null
+          command -v stat >/dev/null
           command -v nvidia-smi >/dev/null
           command -v vulkaninfo >/dev/null
 
           training_processes() {
-            pgrep -af 'cuda_pretrain' || true
+            pgrep -af '[c]uda_pretrain' || true
           }
 
           compute_processes() {
@@ -142,8 +147,25 @@ jobs:
             done
           }
 
-          exec 9>"$SCIRUST_THOR_GPU_LOCK"
+          if [[ ! -c "$SCIRUST_THOR_GPU_LOCK" ]]; then
+            echo "::error::physical Thor lock target is not an NVIDIA character device: $SCIRUST_THOR_GPU_LOCK"
+            ls -l /dev/nvidia* 2>/dev/null || true
+            exit 1
+          fi
+          if [[ ! -r "$SCIRUST_THOR_GPU_LOCK" || ! -w "$SCIRUST_THOR_GPU_LOCK" ]]; then
+            echo "::error::physical Thor device lock is not readable/writable by this persistent runner"
+            ls -l "$SCIRUST_THOR_GPU_LOCK" || true
+            exit 1
+          fi
+          stat -Lc 'gpu_lock_target=%n st_dev=%d inode=%i rdev_hex=%t:%T mode=%a owner=%U:%G type=%F' "$SCIRUST_THOR_GPU_LOCK"
+          exec 9<>"$SCIRUST_THOR_GPU_LOCK"
           flock -x 9
+          echo "gpu_lock_acquired=true runner=$RUNNER_NAME"
+          if flock -n "$SCIRUST_THOR_GPU_LOCK" -c 'true'; then
+            echo "::error::physical GPU lock does not contend across independent file descriptions"
+            exit 1
+          fi
+          echo "gpu_lock_self_contention=pass"
 
           gpu_inventory="$(nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader)" || {
             echo "::error::cannot query NVIDIA GPU inventory"
@@ -222,7 +244,7 @@ jobs:
           fi
           nvidia-smi --query-gpu=temperature.gpu,utilization.gpu,clocks.gr,clocks.sm,power.draw --format=csv,noheader || true
 
-          benchmark="$GITHUB_WORKSPACE/target/release/examples/flat_m33_thor_bench"
+          benchmark="$CARGO_TARGET_DIR/release/examples/flat_m33_thor_bench"
           test -x "$benchmark"
           "$benchmark" | tee "$RUNNER_TEMP/flat-m33-thor.csv"
 
