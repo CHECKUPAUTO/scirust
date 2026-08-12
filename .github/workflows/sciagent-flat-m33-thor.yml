@@ -24,7 +24,7 @@ jobs:
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Linux, ARM64, scirust-arm64, jetson-thor, internal]
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       CARGO_INCREMENTAL: 0
       RUSTFLAGS: "-D warnings"
@@ -52,7 +52,7 @@ jobs:
         with:
           toolchain: nightly-2026-07-02
           components: rustfmt, clippy
-      - name: Require idle physical Thor
+      - name: Wait safely for an idle physical Thor
         shell: bash
         run: |
           set -euo pipefail
@@ -61,12 +61,30 @@ jobs:
             exit 1
           fi
           nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader || true
-          active="$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null || true)"
-          if [[ -n "${active//[[:space:]]/}" ]]; then
-            echo "::error::M33 benchmark requires an idle Thor; active compute processes:"
-            printf '%s\n' "$active"
-            exit 1
-          fi
+          for attempt in $(seq 1 60); do
+            active="$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null || true)"
+            if [[ -z "${active//[[:space:]]/}" ]]; then
+              echo "Thor is idle and ready for M33 qualification"
+              exit 0
+            fi
+            unexpected=false
+            while IFS=',' read -r raw_pid raw_name; do
+              [[ -n "${raw_pid//[[:space:]]/}" ]] || continue
+              process_name="$(printf '%s' "$raw_name" | xargs)"
+              if [[ "$process_name" != "/root/scirust/target/release/examples/cuda_pretrain" ]]; then
+                unexpected=true
+              fi
+            done <<< "$active"
+            if [[ "$unexpected" == true ]]; then
+              echo "::error::Unknown GPU compute activity blocks deterministic M33 measurement:"
+              printf '%s\n' "$active"
+              exit 1
+            fi
+            echo "::notice::Managed SciAgent production training owns the Thor; leaving it untouched and waiting 30s ($attempt/60)."
+            sleep 30
+          done
+          echo "::error::Managed production training kept the Thor busy for the 30-minute qualification window."
+          exit 1
       - name: Format
         run: rustup run nightly-2026-07-02 cargo fmt --all -- --check
       - name: M33 lifecycle parity
