@@ -1,0 +1,45 @@
+name: tmp-m33-eos-api
+
+on:
+  push:
+    branches:
+      - feat/m33-sciagent-flat-decode-qualification
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: feat/m33-sciagent-flat-decode-qualification
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt
+      - name: Add EOS-aware resident cached generation
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('scirust-sciagent/src/gpu.rs')
+          text = path.read_text()
+          if 'pub fn generate_cached_until_eos(' not in text:
+              marker = '    /// **KV-cached sampled generation** — like [`Self::generate_cached`], but each\n'
+              if marker not in text:
+                  raise SystemExit('generate_sampled documentation marker not found')
+              method = '''    /// **EOS-aware KV-cached greedy generation** — the same resident M32 prefill\n    /// + M15 incremental decode route as [`Self::generate_cached`], terminating\n    /// immediately after a generated token matches `eos_tokens`. An empty EOS\n    /// set is behaviorally identical to ordinary cached greedy generation.\n    pub fn generate_cached_until_eos(\n        &self,\n        prompt: &[u32],\n        max_new: usize,\n        eos_tokens: &[u32],\n    ) -> Vec<u32> {\n        if prompt.is_empty()\n        {\n            return Vec::new();\n        }\n        self.assert_capacity(prompt.len(), max_new);\n        let capacity = prompt.len() + max_new;\n        let mut kcache = self.new_kv_caches(capacity);\n        let mut vcache = self.new_kv_caches(capacity);\n        let mut last_logits = self.prefill(prompt, &mut kcache, &mut vcache);\n\n        let mut toks = prompt.to_vec();\n        for i in 0..max_new\n        {\n            let next = argmax(&last_logits) as u32;\n            let pos = toks.len();\n            toks.push(next);\n            if eos_tokens.contains(&next)\n            {\n                break;\n            }\n            if i + 1 < max_new\n            {\n                last_logits = self.decode_step(next, pos, &mut kcache, &mut vcache);\n            }\n        }\n        toks\n    }\n\n'''
+              text = text.replace(marker, method + marker, 1)
+              path.write_text(text)
+          PY
+          rustup run nightly-2026-07-02 cargo fmt --all
+          git rm .github/workflows/tmp-m33-eos-api.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add scirust-sciagent/src/gpu.rs scirust-sciagent/tests/flat_m33_lifecycle.rs scirust-sciagent/examples/flat_m33_thor_bench.rs
+          git commit -m 'feat(sciagent): qualify FLAT M33 decode lifecycle'
+          git push origin HEAD:feat/m33-sciagent-flat-decode-qualification
