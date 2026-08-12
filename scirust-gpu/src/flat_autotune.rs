@@ -31,7 +31,7 @@ use std::collections::BTreeSet;
 const FLAT_ELASTIC_FAMILY: &str = "flat-attention-f32-wgpu";
 const FLAT_KERNEL_FAMILY: &str = "flat-m11-external-asymmetric-projection";
 const FLAT_M15_KERNEL_FAMILY: &str = "flat-m15-resident-decode";
-const FLAT_KERNEL_REVISION: &[u8] = b"flat-attention@24d3340edeb059e40e0fe0c400e814685701d855";
+const FLAT_KERNEL_REVISION: &[u8] = b"flat-attention@f8e1be6a073596b446d298910eb04c122c7e29b0";
 
 #[cfg(test)]
 #[test]
