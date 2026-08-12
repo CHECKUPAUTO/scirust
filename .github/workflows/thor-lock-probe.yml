@@ -1,0 +1,69 @@
+name: Thor lock identity probe
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - ".github/workflows/thor-lock-probe.yml"
+      - ".github/workflows/flat-m28-thor-release-evidence.yml"
+      - ".github/workflows/sciagent-flat-m33-thor.yml"
+      - "scirust-sciagent/PRODUCTION_PRETRAIN.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: physical Thor lock probe ${{ matrix.slot }}
+    strategy:
+      fail-fast: false
+      matrix:
+        slot: [1, 2, 3, 4]
+    runs-on: [self-hosted, Linux, ARM64, scirust-arm64, jetson-thor, internal]
+    timeout-minutes: 5
+    steps:
+      - name: Require persistent Thor runner and prove device-lock semantics
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "runner_name=$RUNNER_NAME slot=${{ matrix.slot }}"
+          case "$RUNNER_NAME" in
+            tarek-scirust-arm64-01|tarek-scirust-arm64-02|tarek-scirust-arm64-03|tarek-scirust-arm64-04)
+              ;;
+            *)
+              echo "::error::probe requires persistent tarek-scirust-arm64-01..04; refusing $RUNNER_NAME"
+              exit 1
+              ;;
+          esac
+
+          command -v flock >/dev/null
+          command -v stat >/dev/null
+          test -c /dev/nvidia0 || {
+            echo "::error::/dev/nvidia0 is not the physical NVIDIA character device"
+            ls -l /dev/nvidia* 2>/dev/null || true
+            exit 1
+          }
+
+          stat -Lc 'lock_target=%n st_dev=%d inode=%i rdev_hex=%t:%T mode=%a owner=%U:%G type=%F' /dev/nvidia0
+          ls -l /dev/nvidia0
+
+          exec 9<>/dev/nvidia0
+          flock -x 9
+          acquired_ns="$(date +%s%N)"
+          echo "device_lock_acquired_ns=$acquired_ns runner=$RUNNER_NAME slot=${{ matrix.slot }}"
+
+          if flock -n /dev/nvidia0 -c 'true'; then
+            echo "::error::a second file description acquired /dev/nvidia0 while descriptor 9 holds the exclusive flock"
+            exit 1
+          fi
+          echo "device_lock_self_contention=pass"
+
+          # Hold briefly so concurrently scheduled persistent probes must serialize
+          # on the same inode when the device node is genuinely shared.
+          sleep 15
+          flock -u 9
+          released_ns="$(date +%s%N)"
+          echo "device_lock_released_ns=$released_ns runner=$RUNNER_NAME slot=${{ matrix.slot }}"
+
+          flock -n /dev/nvidia0 -c 'echo device_lock_reacquire=pass'
