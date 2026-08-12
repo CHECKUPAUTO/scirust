@@ -478,6 +478,44 @@ impl ResidentModel {
         toks
     }
 
+    /// **EOS-aware KV-cached greedy generation** — the same resident M32 prefill
+    /// plus M15 incremental decode route as [`Self::generate_cached`], terminating
+    /// immediately after a generated token matches `eos_tokens`. An empty EOS
+    /// set is behaviorally identical to ordinary cached greedy generation.
+    pub fn generate_cached_until_eos(
+        &self,
+        prompt: &[u32],
+        max_new: usize,
+        eos_tokens: &[u32],
+    ) -> Vec<u32> {
+        if prompt.is_empty()
+        {
+            return Vec::new();
+        }
+        self.assert_capacity(prompt.len(), max_new);
+        let capacity = prompt.len() + max_new;
+        let mut kcache = self.new_kv_caches(capacity);
+        let mut vcache = self.new_kv_caches(capacity);
+        let mut last_logits = self.prefill(prompt, &mut kcache, &mut vcache);
+
+        let mut toks = prompt.to_vec();
+        for i in 0..max_new
+        {
+            let next = argmax(&last_logits) as u32;
+            let pos = toks.len();
+            toks.push(next);
+            if eos_tokens.contains(&next)
+            {
+                break;
+            }
+            if i + 1 < max_new
+            {
+                last_logits = self.decode_step(next, pos, &mut kcache, &mut vcache);
+            }
+        }
+        toks
+    }
+
     /// **KV-cached sampled generation** — like [`Self::generate_cached`], but each
     /// next token is drawn with the shared deterministic sampler
     /// [`crate::generate::sample_row`] (repetition penalty → temperature → top-k →
