@@ -25,9 +25,12 @@ jobs:
       SCIAGENT_DECODE_TRACE_TOKENS: "4"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
-        with:
-          toolchain: nightly-2026-07-02
+      - name: Require preinstalled nightly toolchain on Thor
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_NAME" = "tarek-scirust-arm64-01"
+          rustup toolchain list | grep -F 'nightly-2026-07-02' >/dev/null
       - name: Trace exact fourth-token divergence
         shell: bash
         run: |
