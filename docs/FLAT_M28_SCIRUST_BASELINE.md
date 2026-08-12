@@ -29,13 +29,13 @@ Environment overrides:
 - `SCIRUST_M28_WARMUPS`
 - `SCIRUST_M28_REPEATS`
 
-The CSV includes median/p95 timings, paired ratios and parity evidence. `performance_claim=none` is emitted deliberately: the numbers are benchmark evidence for the measured adapter and scope, not a universal speedup claim.
+The CSV includes the selected WGPU adapter/backend, median/p95 timings, paired ratios and parity evidence. `performance_claim=none` is emitted deliberately: the numbers are benchmark evidence for the measured adapter and scope, not a universal speedup claim.
 
 ## Physical Thor release-evidence gate
 
 `.github/workflows/flat-m28-thor-release-evidence.yml` runs the paired benchmark on the self-hosted physical Jetson Thor under the shared SciRust GPU lock. The idle observation and benchmark execute under the same lock boundary. An unreadable compute-occupancy query fails closed; a known detached production `cuda_pretrain` workload is never killed and is allowed to finish naturally while the workflow reserves the next idle boundary. Unknown GPU compute activity fails the qualification.
 
-The workflow checks out and verifies the exact source revision being reported, requires the physical NVIDIA Thor to be visible through Vulkan, forces the Vulkan WGPU backend, and rejects benchmark output unless the selected WGPU adapter reports `NVIDIA Tegra NVIDIA Thor`. NVIDIA inventory alone is not treated as proof that the measured WGPU work executed on Thor.
+The workflow checks out and verifies the exact source revision being reported, requires the physical NVIDIA Thor to be visible through Vulkan, forces the Vulkan WGPU backend, and rejects benchmark output unless the selected WGPU adapter reports `NVIDIA Tegra NVIDIA Thor` and the context reports the actual backend as `Vulkan`. NVIDIA inventory alone is not treated as proof that the measured WGPU work executed on Thor.
 
 The release-evidence sweep covers `seq_len` 128 and 512 with `head_dim` 64 and 128; each benchmark invocation measures both causal and non-causal attention with 3 warmups and 9 timed repeats. The same correctness oracle must pass before any timing row is emitted.
 
