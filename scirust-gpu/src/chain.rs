@@ -257,6 +257,16 @@ impl GpuChain {
         crate::WgpuFlatM11Bridge::from_context(self.ctx.clone())
     }
 
+    /// Build the M53 vec4 candidate on this chain's exact WGPU context while
+    /// retaining the portable fallback for unsupported shapes.
+    #[cfg(feature = "flat-attention")]
+    pub fn flat_m11_bridge_with_vectorization(
+        &self,
+        enabled: bool,
+    ) -> BackendResult<crate::WgpuFlatM11Bridge> {
+        crate::WgpuFlatM11Bridge::from_context_with_vectorization(self.ctx.clone(), enabled)
+    }
+
     /// Upload a row-major `rows×cols` matrix; it stays resident in VRAM.
     pub fn upload(&self, data: &[f32], rows: usize, cols: usize) -> GpuMatrix {
         self.ctx.upload(data, rows, cols)

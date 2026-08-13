@@ -43,9 +43,13 @@ scirust-core = { path = "../scirust-core", optional = true }
 scirust-cuda = { path = "../scirust-cuda", optional = true }
 scirust-license = { path = "../scirust-license", optional = true }
 wgpu = { version = "0.20", optional = true }
-flat-attention = { git = "https://github.com/Memorithm/FLAT-ATTENTION", rev = "31a33f5e7193dda5ab777c079154ec5ee49ddf4b", default-features = false, features = ["wgpu"], optional = true }
+flat-attention = { git = "https://github.com/Memorithm/FLAT-ATTENTION", rev = "0ffdbde743f86feb6d67b1aeaa177bcbfe28794f", default-features = false, features = ["wgpu"], optional = true }
 pollster = { version = "0.3", optional = true }
 bytemuck = { version = "1", optional = true }
+
+[[example]]
+name = "flat_m53_prefill_vec4_candidate"
+required-features = ["flat-attention"]
 
 # The device-parity probe uses the wgpu-gated `ops` / `GpuChain` / `WgpuContext`
 # API, so it can only build with the `wgpu` feature. Declaring required-features
