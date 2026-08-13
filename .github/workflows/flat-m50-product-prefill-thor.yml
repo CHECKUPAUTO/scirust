@@ -1,0 +1,221 @@
+name: FLAT M50 product prefill proof
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [master]
+    paths:
+      - "scirust-gpu/examples/flat_product_prefill_proof.rs"
+      - "scirust-gpu/Cargo.toml"
+      - "docs/FLAT_M50_PRODUCT_PREFILL_PROOF.md"
+      - ".github/workflows/flat-m50-product-prefill-thor.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flat-m50-product-prefill-thor-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  product-prefill-thor:
+    name: Product GQA prefill vs legacy on physical Thor
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, ARM64, scirust-arm64, jetson-thor, internal]
+    timeout-minutes: 360
+    env:
+      CARGO_INCREMENTAL: 0
+      RUSTFLAGS: "-D warnings"
+      SCIRUST_THOR_GPU_LOCK: /dev/nvidia0
+      SCIRUST_SOURCE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+      FLAT_PRODUCT_REVISION: 31a33f5e7193dda5ab777c079154ec5ee49ddf4b
+      SCIRUST_M50_Q_HEADS: "8"
+      SCIRUST_M50_KV_HEADS: "2"
+      SCIRUST_M50_WARMUPS: "3"
+      SCIRUST_M50_REPEATS: "12"
+      SCIRUST_THOR_IDLE_SETTLE_SECONDS: "300"
+      WGPU_BACKEND: vulkan
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Require persistent physical Thor runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "runner_name=$RUNNER_NAME"
+          case "$RUNNER_NAME" in
+            tarek-scirust-arm64-01|tarek-scirust-arm64-02|tarek-scirust-arm64-03|tarek-scirust-arm64-04) ;;
+            *)
+              echo "::error::M50 product proof requires one of tarek-scirust-arm64-01..04; refusing $RUNNER_NAME"
+              exit 1
+              ;;
+          esac
+
+      - name: Verify exact source and product revisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          echo "source_revision=$actual"
+          test "$actual" = "$SCIRUST_SOURCE_REVISION"
+          grep -F "rev = \"$FLAT_PRODUCT_REVISION\"" scirust-gpu/Cargo.toml >/dev/null
+          grep -F "#$FLAT_PRODUCT_REVISION" Cargo.lock >/dev/null
+
+      - name: Prepare isolated build directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmpdir="$(mktemp -d "$GITHUB_WORKSPACE/.ci-tmp.XXXXXX")"
+          chmod 700 "$tmpdir"
+          mkdir -p "$tmpdir/cargo-home" "$tmpdir/rustup-home" "$tmpdir/target"
+          echo "TMPDIR=$tmpdir" >> "$GITHUB_ENV"
+          echo "CARGO_HOME=$tmpdir/cargo-home" >> "$GITHUB_ENV"
+          echo "RUSTUP_HOME=$tmpdir/rustup-home" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_DIR=$tmpdir/target" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt
+
+      - name: Format product benchmark
+        run: rustup run nightly-2026-07-02 rustfmt --check --edition 2021 scirust-gpu/examples/flat_product_prefill_proof.rs
+
+      - name: Build exact product benchmark
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup run nightly-2026-07-02 cargo build --release --locked -p scirust-gpu \
+            --features flat-attention --example flat_product_prefill_proof
+          benchmark="$CARGO_TARGET_DIR/release/examples/flat_product_prefill_proof"
+          test -x "$benchmark"
+          echo "FLAT_M50_BENCHMARK=$benchmark" >> "$GITHUB_ENV"
+
+      - name: Exclusive physical Thor product benchmark
+        shell: bash
+        timeout-minutes: 330
+        run: |
+          set -euo pipefail
+          for prerequisite in flock pgrep stat nvidia-smi vulkaninfo; do
+            command -v "$prerequisite" >/dev/null || {
+              echo "::error::required physical-Thor prerequisite is missing: $prerequisite"
+              exit 1
+            }
+          done
+
+          training_processes() { pgrep -af '[c]uda_pretrain' || true; }
+          compute_processes() {
+            nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null
+          }
+
+          if [[ ! -c "$SCIRUST_THOR_GPU_LOCK" || ! -r "$SCIRUST_THOR_GPU_LOCK" || ! -w "$SCIRUST_THOR_GPU_LOCK" ]]; then
+            echo "::error::physical Thor lock target is not an accessible NVIDIA character device"
+            ls -l "$SCIRUST_THOR_GPU_LOCK" 2>/dev/null || true
+            exit 1
+          fi
+          stat -Lc 'gpu_lock_target=%n st_dev=%d inode=%i rdev_hex=%t:%T mode=%a owner=%U:%G type=%F' "$SCIRUST_THOR_GPU_LOCK"
+          exec 9<>"$SCIRUST_THOR_GPU_LOCK"
+          flock -x 9
+          echo "gpu_lock_acquired=true runner=$RUNNER_NAME"
+          if flock -n "$SCIRUST_THOR_GPU_LOCK" -c 'true'; then
+            echo "::error::physical GPU lock does not contend across independent file descriptions"
+            exit 1
+          fi
+
+          gpu_inventory="$(nvidia-smi --query-gpu=name,driver_version --format=csv,noheader)" || exit 1
+          printf '%s\n' "$gpu_inventory"
+          grep -F "NVIDIA Thor" <<< "$gpu_inventory" >/dev/null
+          vulkan_summary="$(vulkaninfo --summary 2>&1)" || exit 1
+          grep -F "NVIDIA Tegra NVIDIA Thor" <<< "$vulkan_summary" >/dev/null || {
+            printf '%s\n' "$vulkan_summary"
+            echo "::error::physical Thor is not exposed through Vulkan"
+            exit 1
+          }
+
+          deadline=$((SECONDS + 18000))
+          settle_step=5
+          settled=0
+          while (( settled < 10#$SCIRUST_THOR_IDLE_SETTLE_SECONDS )); do
+            training="$(training_processes)"
+            if ! active="$(compute_processes)"; then
+              echo "::error::M50 cannot verify Thor compute occupancy"
+              exit 1
+            fi
+            if [[ -n "${training//[[:space:]]/}" ]]; then
+              echo "SciAgent cuda_pretrain is active; M50 remains blocked."
+              printf '%s\n' "$training"
+              settled=0
+            elif [[ -n "${active//[[:space:]]/}" ]]; then
+              echo "::error::unknown GPU compute activity is active while M50 owns Thor:"
+              printf '%s\n' "$active"
+              exit 1
+            else
+              settled=$((settled + settle_step))
+              if (( settled == settle_step || settled % 60 == 0 )); then
+                echo "Thor continuously idle: ${settled}/${SCIRUST_THOR_IDLE_SETTLE_SECONDS}s"
+              fi
+            fi
+            if (( SECONDS >= deadline )); then
+              echo "::error::Thor never reached the required continuous idle window"
+              exit 1
+            fi
+            sleep "$settle_step"
+          done
+
+          contamination="$RUNNER_TEMP/flat-m50-contamination.txt"
+          : > "$contamination"
+          (
+            while true; do
+              training="$(training_processes)"
+              if [[ -n "${training//[[:space:]]/}" ]]; then
+                { date -u +'%Y-%m-%dT%H:%M:%SZ'; printf '%s\n' "$training"; } >> "$contamination"
+                exit 0
+              fi
+              sleep 1
+            done
+          ) &
+          watchdog_pid=$!
+          cleanup_watchdog() {
+            kill "$watchdog_pid" 2>/dev/null || true
+            wait "$watchdog_pid" 2>/dev/null || true
+          }
+          trap cleanup_watchdog EXIT
+
+          echo "source_revision=$(git rev-parse HEAD)"
+          echo "flat_product_revision=$FLAT_PRODUCT_REVISION"
+          echo "benchmark_scope=product_gqa_prefill_attention_same_context_upload_readback_excluded"
+          echo "q_heads=$SCIRUST_M50_Q_HEADS kv_heads=$SCIRUST_M50_KV_HEADS"
+          echo "warmups=$SCIRUST_M50_WARMUPS repeats=$SCIRUST_M50_REPEATS"
+
+          for seq in 128 512; do
+            for dim in 64 128; do
+              out="$RUNNER_TEMP/flat-m50-product-${seq}-${dim}.csv"
+              SCIRUST_M50_SEQ_LEN="$seq" \
+              SCIRUST_M50_HEAD_DIM="$dim" \
+              "$FLAT_M50_BENCHMARK" | tee "$out"
+              if [[ -s "$contamination" || -n "$(training_processes)" ]]; then
+                echo "::error::SciAgent training appeared during M50 timing; evidence is invalid"
+                cat "$contamination" || true
+                exit 1
+              fi
+              grep -F "NVIDIA Tegra NVIDIA Thor,Vulkan," "$out" >/dev/null
+              grep -F ',none' "$out" >/dev/null
+            done
+          done
+
+          cleanup_watchdog
+          trap - EXIT
+          if ! post_active="$(compute_processes)"; then
+            echo "::error::cannot verify post-benchmark Thor occupancy"
+            exit 1
+          fi
+          if [[ -n "${post_active//[[:space:]]/}" ]]; then
+            echo "::error::GPU compute activity is present after M50 timing"
+            printf '%s\n' "$post_active"
+            exit 1
+          fi
+          echo "performance_claim=none"
