@@ -29,7 +29,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$RUNNER_NAME" = "tarek-scirust-arm64-01"
+          test "$RUNNER_ARCH" = "ARM64"
+          test -e /dev/nvidia0
           rustup toolchain list | grep -F 'nightly-2026-07-02' >/dev/null
       - name: Trace exact fourth-token divergence
         shell: bash
@@ -42,4 +43,4 @@ jobs:
             echo "GPU compute activity is present; refusing diagnostic"
             exit 1
           fi
-          cargo run -p scirust-sciagent --features cuda --release --example cuda_decode_token_trace
+          rustup run nightly-2026-07-02 cargo run -p scirust-sciagent --features cuda --release --example cuda_decode_token_trace
