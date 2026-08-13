@@ -127,6 +127,20 @@ impl SpecStats {
     }
 }
 
+/// Selects the resident attention composition used while seeding a prompt's
+/// KV cache. The default remains [`Self::FlatRawK`] until physical model-level
+/// evidence justifies promoting another route.
+#[cfg(feature = "flat-attention")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResidentPrefillAttentionRoute {
+    /// Feature-off oracle: separate SciRust RoPE and multi-dispatch GQA.
+    Legacy,
+    /// Current M32 product route: FLAT fuses Q/K RoPE over raw projections.
+    FlatRawK,
+    /// Candidate: rotate K once in SciRust, then share it with FLAT and the cache.
+    FlatPreRotatedKReuse,
+}
+
 /// One GQA block's weights mirrored into VRAM.
 struct ResidentBlock {
     norm1: GpuMatrix,
@@ -172,6 +186,8 @@ pub struct ResidentModel {
     chain: GpuChain,
     #[cfg(feature = "flat-attention")]
     flat_decode: WgpuFlatM11Bridge,
+    #[cfg(feature = "flat-attention")]
+    prefill_attention_route: ResidentPrefillAttentionRoute,
     #[cfg(feature = "flat-autotune")]
     flat_autotune: Mutex<FlatElasticRuntime<InMemoryElasticPlanCache>>,
     embedding: GpuMatrix,
@@ -259,6 +275,8 @@ impl ResidentModel {
             chain,
             #[cfg(feature = "flat-attention")]
             flat_decode,
+            #[cfg(feature = "flat-attention")]
+            prefill_attention_route: ResidentPrefillAttentionRoute::FlatRawK,
             #[cfg(feature = "flat-autotune")]
             flat_autotune,
             embedding,
@@ -279,6 +297,21 @@ impl ResidentModel {
             v_blocks,
             step: 0,
         })
+    }
+
+    /// Return the resident prompt-prefill route selected for subsequent calls.
+    #[cfg(feature = "flat-attention")]
+    #[must_use]
+    pub const fn prefill_attention_route(&self) -> ResidentPrefillAttentionRoute {
+        self.prefill_attention_route
+    }
+
+    /// Select a prompt-prefill route without rebuilding or re-uploading the
+    /// model. This is primarily an evidence and fail-safe control: changing it
+    /// never changes the incremental decode route.
+    #[cfg(feature = "flat-attention")]
+    pub fn set_prefill_attention_route(&mut self, route: ResidentPrefillAttentionRoute) {
+        self.prefill_attention_route = route;
     }
 
     /// Replace the default Cold FLAT Elastic runtime with caller-supplied
@@ -476,6 +509,21 @@ impl ResidentModel {
             }
         }
         toks
+    }
+
+    /// Run the same batched prompt prefill used by [`Self::generate_cached`]
+    /// and return the last prompt position's resident-model logits. This keeps
+    /// cache construction, projections, attention, MLP and LM head in scope,
+    /// while avoiding token sampling and incremental decode.
+    pub fn prefill_last_logits(&self, prompt: &[u32]) -> Vec<f32> {
+        if prompt.is_empty()
+        {
+            return Vec::new();
+        }
+        self.assert_capacity(prompt.len(), 0);
+        let mut kcache = self.new_kv_caches(prompt.len());
+        let mut vcache = self.new_kv_caches(prompt.len());
+        self.prefill(prompt, &mut kcache, &mut vcache)
     }
 
     /// **EOS-aware KV-cached greedy generation** — the same resident M32 prefill
@@ -736,7 +784,7 @@ impl ResidentModel {
             // returns a resident context matrix. The legacy GpuChain attention path
             // remains the explicit feature-off oracle/fallback.
             #[cfg(feature = "flat-attention")]
-            let ctx = {
+            let (ctx, pre_rotated_k) = {
                 let d_model = q.cols();
                 let dh = d_model / self.n_heads;
                 let config = FlatM11ResidentConfig {
@@ -753,9 +801,41 @@ impl ResidentModel {
                     query_rope_position_offset: 0,
                     kv_rope_position_offset: 0,
                 };
-                self.flat_decode
-                    .forward(&q, &k, &v, config)
-                    .expect("FLAT M32 resident prefill")
+                match self.prefill_attention_route
+                {
+                    ResidentPrefillAttentionRoute::Legacy => (
+                        chain
+                            .gqa_attention(
+                                &q,
+                                &k,
+                                &v,
+                                self.n_heads,
+                                self.n_kv_heads,
+                                p,
+                                self.theta,
+                                true,
+                            )
+                            .expect("legacy resident GQA prefill"),
+                        None,
+                    ),
+                    ResidentPrefillAttentionRoute::FlatRawK => (
+                        self.flat_decode
+                            .forward(&q, &k, &v, config)
+                            .expect("FLAT M32 resident prefill"),
+                        None,
+                    ),
+                    ResidentPrefillAttentionRoute::FlatPreRotatedKReuse =>
+                    {
+                        let kr = chain
+                            .rope_heads(&k, self.n_kv_heads, p, 0, self.theta)
+                            .expect("head-local rope k");
+                        let ctx = self
+                            .flat_decode
+                            .forward_pre_rotated_k(&q, &kr, &v, config)
+                            .expect("FLAT pre-rotated-K resident prefill");
+                        (ctx, Some(kr))
+                    },
+                }
             };
 
             #[cfg(not(feature = "flat-attention"))]
@@ -774,6 +854,15 @@ impl ResidentModel {
             // Seed the caches with the prompt's roped keys / raw values. `kr` here
             // is the same head-local RoPE (positions 0..P) `decode_step` produces
             // one row at a time, so later appends line up exactly.
+            #[cfg(feature = "flat-attention")]
+            let kr = match pre_rotated_k
+            {
+                Some(kr) => kr,
+                None => chain
+                    .rope_heads(&k, self.n_kv_heads, p, 0, self.theta)
+                    .expect("head-local rope k"),
+            };
+            #[cfg(not(feature = "flat-attention"))]
             let kr = chain
                 .rope_heads(&k, self.n_kv_heads, p, 0, self.theta)
                 .expect("head-local rope k");

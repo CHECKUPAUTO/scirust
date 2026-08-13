@@ -106,6 +106,10 @@ required-features = ["gpu"]
 name = "resident_spec_bench"
 required-features = ["gpu"]
 
+[[example]]
+name = "flat_m51_prefill_routes"
+required-features = ["flat-attention"]
+
 # Route B forward-throughput bench needs both backends (wgpu + CUDA) to compare.
 [[example]]
 name = "cuda_forward_bench"
