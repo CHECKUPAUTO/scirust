@@ -131,6 +131,11 @@ required-features = ["cuda"]
 name = "cuda_decode_bench"
 required-features = ["cuda"]
 
+# I250 fourth-token full-logit diagnostics -- CUDA-only and never timed.
+[[example]]
+name = "cuda_decode_token_trace"
+required-features = ["cuda"]
+
 # Route B generation from a trained checkpoint — CUDA-only.
 [[example]]
 name = "cuda_generate"

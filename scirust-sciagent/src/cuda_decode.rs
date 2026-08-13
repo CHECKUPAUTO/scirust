@@ -383,6 +383,70 @@ impl CudaDecodeModel {
         tokens
     }
 
+    /// Diagnostic host-feedback generation that records every full BF16 logit row.
+    ///
+    /// This is deliberately separate from timed device-feedback decode: each row is
+    /// downloaded so two hidden-path implementations can be compared at the exact
+    /// token where their greedy streams first diverge. `modes.lm_head` is ignored
+    /// because tracing necessarily materializes full logits; FFN and down-projection
+    /// choices are preserved exactly.
+    pub fn generate_trace_with_modes(
+        &self,
+        prompt: &[u32],
+        max_new: usize,
+        params: &SamplingParams,
+        seed: u64,
+        modes: CudaDecodeModes,
+    ) -> (Vec<u32>, Vec<Vec<f32>>) {
+        let mut tokens = normalized_prompt(prompt);
+        if max_new == 0
+        {
+            return (tokens, Vec::new());
+        }
+        self.assert_capacity(tokens.len(), max_new);
+        let capacity = tokens.len() + max_new;
+        let mut caches = self.caches(capacity);
+        let mut workspace = self.workspace();
+
+        for (pos, &token) in tokens.iter().enumerate()
+        {
+            self.forward_host_token_hidden_resident(
+                token,
+                pos,
+                &mut caches,
+                &mut workspace,
+                modes.ffn,
+                modes.down,
+            );
+        }
+
+        let mut rows = Vec::with_capacity(max_new);
+        let mut rng = seed_to_state(seed);
+        for generated_index in 0..max_new
+        {
+            self.project_logits_resident(&mut workspace);
+            let logits = self.runtime.download(&workspace.logits);
+            let recent: Vec<usize> = tokens.iter().map(|&token| token as usize).collect();
+            let next = sample_row(&logits, params, &recent, &mut rng) as u32;
+            rows.push(logits);
+            let pos = tokens.len();
+            tokens.push(next);
+            if next == 0 || generated_index + 1 == max_new
+            {
+                break;
+            }
+            self.forward_host_token_hidden_resident(
+                next,
+                pos,
+                &mut caches,
+                &mut workspace,
+                modes.ffn,
+                modes.down,
+            );
+        }
+        (tokens, rows)
+    }
+
     /// Greedy batch-one generation with token feedback entirely on CUDA.
     ///
     /// After prompt prefill, the host submits a fixed burst. Every selected token is
