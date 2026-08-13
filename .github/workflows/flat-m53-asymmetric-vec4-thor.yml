@@ -69,7 +69,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tmpdir="$(mktemp -d "$GITHUB_WORKSPACE/.ci-tmp.XXXXXX")"
+          tmpdir="$(mktemp -d "$RUNNER_TEMP/flat-m53.XXXXXX")"
           chmod 700 "$tmpdir"
           mkdir -p "$tmpdir/cargo-home" "$tmpdir/rustup-home" "$tmpdir/target"
           echo "TMPDIR=$tmpdir" >> "$GITHUB_ENV"
