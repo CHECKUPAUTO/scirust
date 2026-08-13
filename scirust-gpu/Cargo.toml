@@ -47,6 +47,10 @@ flat-attention = { git = "https://github.com/Memorithm/FLAT-ATTENTION", rev = "0
 pollster = { version = "0.3", optional = true }
 bytemuck = { version = "1", optional = true }
 
+[[example]]
+name = "flat_m53_prefill_vec4_candidate"
+required-features = ["flat-attention"]
+
 # The device-parity probe uses the wgpu-gated `ops` / `GpuChain` / `WgpuContext`
 # API, so it can only build with the `wgpu` feature. Declaring required-features
 # makes `cargo build --all-targets` (without wgpu) skip it instead of failing to
