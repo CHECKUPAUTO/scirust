@@ -101,8 +101,18 @@ impl WgpuFlatM11Bridge {
     /// Compile FLAT on an existing SciRust context. The context clone shares the
     /// same device/queue and therefore the same resident-buffer ownership domain.
     pub fn from_context(ctx: WgpuContext) -> BackendResult<Self> {
-        let pipeline = ExternalAsymmetricProjectionRotaryGroupedPipeline::new(ctx.device())
-            .map_err(|error| BackendError::Execution(format!("FLAT M11 pipeline: {error}")))?;
+        Self::from_context_with_vectorization(ctx, false)
+    }
+
+    /// Compile the portable pipeline and, when requested, the M53 asymmetric
+    /// vec4 candidate on an existing SciRust context. The portable path remains
+    /// the default and is retained as the fallback for unsupported shapes.
+    pub fn from_context_with_vectorization(ctx: WgpuContext, enabled: bool) -> BackendResult<Self> {
+        let pipeline = ExternalAsymmetricProjectionRotaryGroupedPipeline::with_vectorization(
+            ctx.device(),
+            enabled,
+        )
+        .map_err(|error| BackendError::Execution(format!("FLAT M11 pipeline: {error}")))?;
         #[cfg(feature = "flat-autotune")]
         let m15_pipeline = WgpuResidentDecodePipeline::new(ctx.device()).ok();
         Ok(Self {
@@ -111,6 +121,12 @@ impl WgpuFlatM11Bridge {
             #[cfg(feature = "flat-autotune")]
             m15_pipeline,
         })
+    }
+
+    /// Whether this bridge compiled the opt-in M53 asymmetric vec4 candidate.
+    #[must_use]
+    pub fn vectorization_enabled(&self) -> bool {
+        self.pipeline.vectorization_enabled()
     }
 
     /// Underlying adapter name, useful for benchmark provenance.
