@@ -5,7 +5,7 @@ use scirust_compute::{DType, Shape, Strides};
 
 /// Logical placement carried by a canonical tensor value.
 ///
-/// `scirust-tensor-core` deliberately owns no backend buffer.  A non-host
+/// `scirust-tensor-core` deliberately owns no backend buffer. A non-host
 /// placement therefore describes where a runtime should materialise the value;
 /// the canonical byte payload remains host-visible and deterministic.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -42,7 +42,10 @@ impl fmt::Display for TensorError {
             Self::ByteLengthMismatch { expected, actual } => {
                 write!(f, "tensor byte length mismatch: expected {expected}, got {actual}")
             }
-            Self::RankMismatch { shape_rank, stride_rank } => write!(
+            Self::RankMismatch {
+                shape_rank,
+                stride_rank,
+            } => write!(
                 f,
                 "tensor rank mismatch: shape rank {shape_rank}, stride rank {stride_rank}"
             ),
@@ -52,10 +55,9 @@ impl fmt::Display for TensorError {
                 write!(f, "tensor axis {axis} is invalid for rank {rank}")
             }
             Self::InvalidSlice => f.write_str("invalid tensor slice"),
-            Self::BroadcastMismatch { source, target } => write!(
-                f,
-                "cannot broadcast shape {source:?} to {target:?}"
-            ),
+            Self::BroadcastMismatch { source, target } => {
+                write!(f, "cannot broadcast shape {source:?} to {target:?}")
+            }
             Self::ReshapeElementCount { current, requested } => write!(
                 f,
                 "reshape changes element count from {current} to {requested}"
@@ -115,7 +117,12 @@ impl Tensor {
         for value in data {
             bytes.extend_from_slice(&value.to_le_bytes());
         }
-        Self::from_bytes(bytes, DType::F32, Shape::new(shape), TensorDevice::Host)
+        Self::from_bytes(
+            bytes,
+            DType::F32,
+            Shape::new(shape.into()),
+            TensorDevice::Host,
+        )
     }
 
     pub fn from_f64(data: Vec<f64>, shape: impl Into<Vec<usize>>) -> Result<Self, TensorError> {
@@ -123,7 +130,12 @@ impl Tensor {
         for value in data {
             bytes.extend_from_slice(&value.to_le_bytes());
         }
-        Self::from_bytes(bytes, DType::F64, Shape::new(shape), TensorDevice::Host)
+        Self::from_bytes(
+            bytes,
+            DType::F64,
+            Shape::new(shape.into()),
+            TensorDevice::Host,
+        )
     }
 
     pub fn from_i64(data: Vec<i64>, shape: impl Into<Vec<usize>>) -> Result<Self, TensorError> {
@@ -131,7 +143,12 @@ impl Tensor {
         for value in data {
             bytes.extend_from_slice(&value.to_le_bytes());
         }
-        Self::from_bytes(bytes, DType::I64, Shape::new(shape), TensorDevice::Host)
+        Self::from_bytes(
+            bytes,
+            DType::I64,
+            Shape::new(shape.into()),
+            TensorDevice::Host,
+        )
     }
 
     pub fn zeros(dtype: DType, shape: Shape, device: TensorDevice) -> Result<Self, TensorError> {
@@ -167,8 +184,6 @@ impl Tensor {
     }
 
     pub fn numel(&self) -> usize {
-        // Construction validates this value, therefore a later failure is
-        // impossible without violating this type's private invariants.
         self.shape
             .checked_num_elements()
             .expect("validated tensor shape")
@@ -189,9 +204,6 @@ impl Tensor {
     }
 
     /// Return the logical tensor payload in row-major order.
-    ///
-    /// Contiguous tensors with a zero offset still return an owned vector so the
-    /// caller can hand it to a backend without aliasing tensor storage.
     pub fn to_contiguous_bytes(&self) -> Vec<u8> {
         let width = self.dtype.size_bytes();
         let mut out = Vec::with_capacity(self.numel().saturating_mul(width));
@@ -310,7 +322,11 @@ impl Tensor {
         let axis_stride = self.strides.values()[axis];
         let new_offset = self
             .offset_elements
-            .checked_add(start.checked_mul(axis_stride).ok_or(TensorError::ShapeOverflow)?)
+            .checked_add(
+                start
+                    .checked_mul(axis_stride)
+                    .ok_or(TensorError::ShapeOverflow)?,
+            )
             .ok_or(TensorError::ShapeOverflow)?;
         let new_axis_stride = axis_stride
             .checked_mul(step)
@@ -438,7 +454,6 @@ impl Iterator for LogicalOffsets<'_> {
         let mut offset = self.base;
         for axis in (0..self.shape.len()).rev() {
             let dim = self.shape[axis];
-            // `total > 0` guarantees every participating dimension is non-zero.
             let coordinate = remainder % dim;
             remainder /= dim;
             offset += coordinate * self.strides[axis];
@@ -501,7 +516,10 @@ mod tests {
         assert!(tensor.shares_storage_with(&sliced));
         assert_eq!(transposed.shape().dims(), &[4, 3]);
         assert_eq!(sliced.shape().dims(), &[2, 3]);
-        assert_eq!(sliced.to_f32_vec().unwrap(), vec![1., 5., 9., 3., 7., 11.]);
+        assert_eq!(
+            sliced.to_f32_vec().unwrap(),
+            vec![1., 5., 9., 3., 7., 11.]
+        );
     }
 
     #[test]
@@ -509,7 +527,10 @@ mod tests {
         let tensor = Tensor::from_f32(vec![1., 2., 3., 4., 5., 6.], vec![2, 3]).unwrap();
         let reshaped = tensor.reshape(Shape::new(vec![3, 2])).unwrap();
         assert!(tensor.shares_storage_with(&reshaped));
-        assert_eq!(reshaped.to_f32_vec().unwrap(), vec![1., 2., 3., 4., 5., 6.]);
+        assert_eq!(
+            reshaped.to_f32_vec().unwrap(),
+            vec![1., 2., 3., 4., 5., 6.]
+        );
     }
 
     #[test]
@@ -518,7 +539,10 @@ mod tests {
         let broadcast = row.broadcast_to(Shape::new(vec![2, 3])).unwrap();
         assert_eq!(broadcast.strides().values(), &[0, 1]);
         assert!(row.shares_storage_with(&broadcast));
-        assert_eq!(broadcast.to_f32_vec().unwrap(), vec![10., 20., 30., 10., 20., 30.]);
+        assert_eq!(
+            broadcast.to_f32_vec().unwrap(),
+            vec![10., 20., 30., 10., 20., 30.]
+        );
     }
 
     #[test]
@@ -530,7 +554,14 @@ mod tests {
             Err(TensorError::ReshapeRequiresContiguous)
         );
         let compact = transpose.contiguous().unwrap();
-        assert_eq!(compact.reshape(Shape::new(vec![4])).unwrap().to_f32_vec().unwrap(), vec![1., 3., 2., 4.]);
+        assert_eq!(
+            compact
+                .reshape(Shape::new(vec![4]))
+                .unwrap()
+                .to_f32_vec()
+                .unwrap(),
+            vec![1., 3., 2., 4.]
+        );
     }
 
     #[test]
