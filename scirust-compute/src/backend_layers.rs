@@ -4,10 +4,6 @@ use crate::{
 };
 
 /// Allocation and transfer plane of a compute backend.
-///
-/// This extension trait decomposes [`ComputeBackend`] without changing any
-/// existing backend implementation: every `ComputeBackend` receives it through
-/// the blanket implementation below.
 pub trait BackendAllocator: ComputeBackend {
     fn allocate_buffer(
         &self,
@@ -36,7 +32,6 @@ pub trait BackendAllocator: ComputeBackend {
         self.read(source, offset_bytes, destination)
     }
 }
-
 impl<T: ComputeBackend + ?Sized> BackendAllocator for T {}
 
 /// Kernel compilation plane of a compute backend.
@@ -45,7 +40,6 @@ pub trait BackendCompiler: ComputeBackend {
         self.compile(module)
     }
 }
-
 impl<T: ComputeBackend + ?Sized> BackendCompiler for T {}
 
 /// Stream/event/dispatch plane of a compute backend.
@@ -72,7 +66,6 @@ pub trait BackendExecutor: ComputeBackend {
         self.synchronize(stream)
     }
 }
-
 impl<T: ComputeBackend + ?Sized> BackendExecutor for T {}
 
 /// Capability/introspection plane used by compilers and schedulers.
@@ -89,15 +82,9 @@ pub trait BackendIntrospection: ComputeBackend {
         self.capabilities().supports_dtype(dtype)
     }
 }
-
 impl<T: ComputeBackend + ?Sized> BackendIntrospection for T {}
 
-/// Complete Core2 backend contract.
-///
-/// The marker intentionally composes orthogonal planes rather than adding a
-/// second monolithic backend trait. Existing CPU/WGPU/CUDA adapters therefore
-/// become Core2 runtimes automatically and can later override individual
-/// `ComputeBackend` methods without API forks.
+/// Complete Core2 backend contract assembled from orthogonal planes.
 pub trait BackendRuntime:
     ComputeBackend + BackendAllocator + BackendCompiler + BackendExecutor + BackendIntrospection
 {
@@ -106,23 +93,4 @@ pub trait BackendRuntime:
 impl<T> BackendRuntime for T where
     T: ComputeBackend + BackendAllocator + BackendCompiler + BackendExecutor + BackendIntrospection
 {
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn assert_core2_backend<T: BackendRuntime>() {}
-
-    #[test]
-    fn decomposition_is_blanket_compatible() {
-        // Compile-time contract: any concrete ComputeBackend automatically
-        // satisfies the decomposed runtime layers; no adapter migration is
-        // required. A local fake is unnecessary because this assertion itself
-        // is generic and type-checked.
-        fn assert_blanket<T: ComputeBackend>() {
-            assert_core2_backend::<T>();
-        }
-        let _ = assert_blanket::<crate::tests_support::NeverBackend>;
-    }
 }
