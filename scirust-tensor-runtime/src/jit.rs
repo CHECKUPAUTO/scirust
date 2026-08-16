@@ -88,7 +88,8 @@ impl<B: ComputeBackend> ReferenceJitSession<B> {
         constants: &GraphConstants<'_>,
         config: OptimizationConfig,
     ) -> Result<Self, JitPreparationError> {
-        let optimization = optimize_graph(graph, config).map_err(JitPreparationError::Optimization)?;
+        let optimization =
+            optimize_graph(graph, config).map_err(JitPreparationError::Optimization)?;
         let session = ReferenceGraphSession::prepare(runtime, &optimization.graph, constants)
             .map_err(JitPreparationError::Compilation)?;
 
@@ -168,7 +169,7 @@ fn source_input_for_optimized(
         .nodes()
         .iter()
         .enumerate()
-        .filter(|(_, node)| matches!(node.operation, Operation::Input { .. }))
+        .filter(|(_, node)| matches!(&node.operation, Operation::Input { .. }))
         .find_map(|(index, _)| {
             let source_id = NodeId::new(index as u32);
             match optimization.old_to_new.get(index).copied().flatten() {
