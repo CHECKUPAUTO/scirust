@@ -18,7 +18,9 @@ impl fmt::Display for VmapError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidGraph(error) => write!(f, "invalid graph during vmap: {error}"),
-            Self::InvalidSemantics(error) => write!(f, "invalid tensor semantics during vmap: {error}"),
+            Self::InvalidSemantics(error) => {
+                write!(f, "invalid tensor semantics during vmap: {error}")
+            }
             Self::InvalidMappedInput(node) => write!(
                 f,
                 "vmap node {} was requested as a mapped input but is not an Input node",
@@ -74,7 +76,7 @@ pub fn vmap(
         let Some(node) = source.nodes().get(input.get() as usize) else {
             return Err(VmapError::InvalidMappedInput(input));
         };
-        if !matches!(node.operation, Operation::Input { .. }) {
+        if !matches!(&node.operation, Operation::Input { .. }) {
             return Err(VmapError::InvalidMappedInput(input));
         }
         requested[input.get() as usize] = true;
@@ -120,7 +122,11 @@ pub fn vmap(
             Operation::Constant { id } => {
                 (graph.add_constant(*id, node.output.clone())?, false)
             }
-            Operation::Add | Operation::Sub | Operation::Mul | Operation::Div | Operation::ReluGrad => {
+            Operation::Add
+            | Operation::Sub
+            | Operation::Mul
+            | Operation::Div
+            | Operation::ReluGrad => {
                 let is_mapped = input_mapped.iter().copied().any(|value| value);
                 if !is_mapped {
                     (
@@ -359,9 +365,11 @@ mod tests {
         let transformed = vmap(&graph, 8, &[x]).unwrap();
         let output = &transformed.graph.nodes()[transformed.outputs[0].get() as usize].output;
         assert_eq!(output.shape.dims(), &[8, 3]);
-        assert!(transformed.graph.nodes().iter().any(|node| {
-            matches!(node.operation, Operation::BroadcastTo { .. })
-        }));
+        assert!(transformed
+            .graph
+            .nodes()
+            .iter()
+            .any(|node| matches!(&node.operation, Operation::BroadcastTo { .. })));
     }
 
     #[test]
@@ -379,7 +387,7 @@ mod tests {
 
         let transformed = vmap(&graph, 5, &[lhs, rhs]).unwrap();
         let output_node = &transformed.graph.nodes()[transformed.outputs[0].get() as usize];
-        assert!(matches!(output_node.operation, Operation::BatchMatMul));
+        assert!(matches!(&output_node.operation, Operation::BatchMatMul));
         assert_eq!(output_node.output.shape.dims(), &[5, 2, 4]);
     }
 
@@ -391,11 +399,21 @@ mod tests {
         let out_ty = TensorType::new(DType::F32, Shape::new(vec![2, 4]));
         let lhs = graph.add_input("lhs", lhs_ty).unwrap();
         let rhs = graph.add_input("rhs", rhs_ty).unwrap();
-        let out = graph.add_node(Operation::MatMul, vec![lhs, rhs], out_ty).unwrap();
+        let out = graph
+            .add_node(Operation::MatMul, vec![lhs, rhs], out_ty)
+            .unwrap();
         graph.set_outputs(vec![out]).unwrap();
 
         let first = vmap(&graph, 5, &[lhs, rhs]).unwrap();
-        let second = vmap(&first.graph, 7, &[first.mapping[lhs.get() as usize], first.mapping[rhs.get() as usize]]).unwrap();
+        let second = vmap(
+            &first.graph,
+            7,
+            &[
+                first.mapping[lhs.get() as usize],
+                first.mapping[rhs.get() as usize],
+            ],
+        )
+        .unwrap();
         let output = &second.graph.nodes()[second.outputs[0].get() as usize].output;
         assert_eq!(output.shape.dims(), &[7, 5, 2, 4]);
     }
