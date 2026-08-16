@@ -589,12 +589,6 @@ pub fn shard_map(
                     false,
                 )
             }
-            operation => {
-                return Err(ShardError::UnsupportedOperation {
-                    node: old_id,
-                    operation: operation.clone(),
-                });
-            }
         };
         mapping.push(new_id);
         sharded.push(is_sharded);
