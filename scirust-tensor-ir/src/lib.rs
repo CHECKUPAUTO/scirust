@@ -1,18 +1,23 @@
 //! Canonical backend-neutral tensor graph IR for SciRust.
 //!
-//! This crate contains graph structure and tensor metadata only. It does not
-//! embed tensor storage, executable kernels, devices, streams, or backend state.
+//! This crate contains graph structure, tensor metadata and pure graph
+//! transformations. It does not embed tensor storage, executable kernels,
+//! devices, streams, or backend state.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![forbid(unsafe_code)]
 
 extern crate alloc;
 
+mod autodiff;
 mod error;
 mod graph;
 mod ids;
 mod operation;
 
+pub use autodiff::{
+    AutodiffError, GradGraph, JvpGraph, VjpGraph, grad, jvp, value_and_grad, vjp,
+};
 pub use error::GraphError;
 pub use graph::{Graph, Node, TensorType};
 pub use ids::{ConstantId, NodeId};
