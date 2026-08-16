@@ -106,13 +106,11 @@ impl DpSgdConfig {
             ));
         }
         if let Some(epsilon) = self.epsilon
+            && (!epsilon.is_finite() || epsilon <= 0.0)
         {
-            if !epsilon.is_finite() || epsilon <= 0.0
-            {
-                return Err(SciRustError::InvalidConfig(
-                    "DP epsilon must be finite and > 0 when provided".to_string(),
-                ));
-            }
+            return Err(SciRustError::InvalidConfig(
+                "DP epsilon must be finite and > 0 when provided".to_string(),
+            ));
         }
         let noise_std = self.noise_multiplier * self.l2_norm_clip;
         if !noise_std.is_finite() || noise_std <= 0.0
@@ -264,12 +262,20 @@ pub fn clip_gradients(grads: &mut [f32], l2_norm_clip: f32) {
         grads.iter().all(|g| g.is_finite()),
         "clip_gradients: gradients must be finite"
     );
-    let norm_sq: f32 = grads.iter().map(|&g| g * g).sum();
+    // Accumulate in f64 so large but finite f32 gradients do not overflow while
+    // computing the norm and collapse to an artificial all-zero clipped vector.
+    let norm_sq: f64 = grads
+        .iter()
+        .map(|&g| {
+            let g = f64::from(g);
+            g * g
+        })
+        .sum();
     let norm = norm_sq.sqrt();
 
-    if norm > l2_norm_clip && norm > 1e-12
+    if norm > f64::from(l2_norm_clip) && norm > 1e-12
     {
-        let scale = l2_norm_clip / norm;
+        let scale = (f64::from(l2_norm_clip) / norm) as f32;
         for g in grads.iter_mut()
         {
             *g *= scale;
@@ -435,6 +441,15 @@ mod tests {
         // Scale = 1/5 = 0.2
         assert!((grads[0] - 0.6).abs() < 1e-6);
         assert!((grads[1] - 0.8).abs() < 1e-6);
+    }
+
+    #[test]
+    fn clip_large_finite_gradient_without_norm_overflow() {
+        let mut grads = vec![f32::MAX / 4.0, 0.0];
+        clip_gradients(&mut grads, 1.0);
+        assert!(grads.iter().all(|value| value.is_finite()));
+        assert!((grads[0].abs() - 1.0).abs() < 1e-6);
+        assert_eq!(grads[1], 0.0);
     }
 
     #[test]
