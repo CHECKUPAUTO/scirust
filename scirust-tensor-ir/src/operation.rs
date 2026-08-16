@@ -46,7 +46,7 @@ impl Scalar {
 ///
 /// Constants are referenced externally through [`ConstantId`]; tensor payloads
 /// are deliberately not embedded in the graph.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Operation {
     Input { name: String },
@@ -62,10 +62,21 @@ pub enum Operation {
     Exp,
     Log,
 
+    /// `cotangent * 1(primal > 0)`. This primitive makes reverse- and
+    /// forward-mode differentiation of ReLU executable without embedding a
+    /// comparison sub-language in the graph IR.
+    ReluGrad,
+
     MatMul,
 
     Reshape { shape: Shape },
     Transpose { permutation: Vec<usize> },
+
+    /// Identity in the primal program and a barrier to differentiation.
+    StopGradient,
+    /// Identity marker declaring that intermediates may be recomputed instead
+    /// of retained by a future execution planner.
+    Checkpoint,
 }
 
 impl Operation {
@@ -79,9 +90,16 @@ impl Operation {
             | Self::Log
             | Self::Scale { .. }
             | Self::Reshape { .. }
-            | Self::Transpose { .. } => 1,
+            | Self::Transpose { .. }
+            | Self::StopGradient
+            | Self::Checkpoint => 1,
 
-            Self::Add | Self::Sub | Self::Mul | Self::Div | Self::MatMul => 2,
+            Self::Add
+            | Self::Sub
+            | Self::Mul
+            | Self::Div
+            | Self::MatMul
+            | Self::ReluGrad => 2,
         }
     }
 }
