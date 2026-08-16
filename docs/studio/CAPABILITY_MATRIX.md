@@ -156,7 +156,7 @@ Three notes, because a table like this is easy to over-read:
    Help view says so in its own first line rather than implying it documents a
    complete product.
 
-**Desktop-exposed: 19 capabilities across all 16 `scirust-sim` module
+**Desktop-exposed: 28 capabilities across all 16 `scirust-sim` module
 families**, identical to adapter coverage — as it has been at every phase,
 because the desktop reads the registry rather than a list of its own.
 
