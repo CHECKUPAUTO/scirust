@@ -15,6 +15,7 @@ mod graph;
 mod ids;
 mod operation;
 mod optimize;
+mod shard;
 mod verify;
 mod vmap;
 
@@ -27,6 +28,10 @@ pub use ids::{ConstantId, NodeId};
 pub use operation::{Operation, Scalar};
 pub use optimize::{
     OptimizationConfig, OptimizationError, OptimizationStats, OptimizedGraph, optimize_graph,
+};
+pub use shard::{
+    AxisShard, DeviceMesh, MeshAxis, PartitionSpec, RankShard, ShardError, ShardMapGraph,
+    ShardPlan, ShardPolicy, plan_sharding, shard_map,
 };
 pub use verify::{SemanticError, validate_semantics};
 pub use vmap::{VmapError, VmapGraph, vmap};
