@@ -22,6 +22,10 @@ mod vmap;
 pub use autodiff::{
     AutodiffError, GradGraph, JvpGraph, VjpGraph, grad, jvp, value_and_grad, vjp,
 };
+/// Build a reusable first-order linearization graph. The returned [`JvpGraph`]
+/// exposes explicit tangent inputs, so it can be executed repeatedly for
+/// different tangent vectors without rebuilding the primal transform.
+pub use autodiff::jvp as linearize;
 pub use error::GraphError;
 pub use graph::{Graph, Node, TensorType};
 pub use ids::{ConstantId, NodeId};
