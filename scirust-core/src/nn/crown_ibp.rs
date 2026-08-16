@@ -62,7 +62,7 @@ impl CrownIbpMlp {
                 "CrownIbpMlp requires at least input and output dimensions".to_string(),
             ));
         }
-        if dims.iter().any(|&dim| dim == 0)
+        if dims.contains(&0)
         {
             return Err(SciRustError::InvalidConfig(
                 "CrownIbpMlp layer dimensions must all be > 0".to_string(),
@@ -449,8 +449,7 @@ mod tests {
                 assert!(
                     yk >= lo[k] - 1e-4 && yk <= hi[k] + 1e-4,
                     "unsound: y[{k}]={yk} not in [{}, {}]",
-                    lo[k],
-                    hi[k]
+                    lo[k], hi[k]
                 );
             }
         }
