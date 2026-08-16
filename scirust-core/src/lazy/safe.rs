@@ -1,4 +1,4 @@
-use super::plan::{Instr, Plan, PwOp};
+use super::plan::{Instr, Plan};
 use crate::autodiff::reverse::Tensor;
 use crate::error::{Result, SciRustError};
 use std::collections::HashMap;
@@ -17,122 +17,44 @@ impl Plan {
     ///
     /// Missing feeds are reported as [`SciRustError::InvalidConfig`]. A feed
     /// whose shape differs from the shape recorded at compilation is reported
-    /// as [`SciRustError::ShapeMismatch`].
+    /// as [`SciRustError::ShapeMismatch`]. After validating caller-controlled
+    /// feed input, execution is delegated to [`Plan::execute_with`] so there is
+    /// only one numerical execution implementation to maintain.
     ///
     /// The historical [`Plan::execute_with`] method remains available for
     /// compatibility; callers that process external or otherwise fallible input
     /// should prefer this method.
     pub fn try_execute_with(&self, feeds: &[(&str, Tensor)]) -> Result<Tensor> {
         let feed_map: HashMap<&str, &Tensor> = feeds.iter().map(|(k, v)| (*k, v)).collect();
-        let mut buffers: Vec<Option<Tensor>> = vec![None; self.n_buffers];
 
         for instr in &self.instructions
         {
-            match instr
+            let Instr::LoadFeed {
+                feed_name,
+                expected_shape,
+                ..
+            } = instr
+            else
             {
-                Instr::LoadConst { output_buf, value } =>
-                {
-                    buffers[*output_buf] = Some(value.clone());
-                },
-                Instr::LoadFeed {
-                    output_buf,
-                    feed_name,
-                    expected_shape,
-                } =>
-                {
-                    let t = feed_map.get(feed_name.as_str()).ok_or_else(|| {
-                        SciRustError::InvalidConfig(format!("missing lazy feed '{feed_name}'"))
-                    })?;
-                    let got = t.shape();
-                    if got != *expected_shape
-                    {
-                        return Err(SciRustError::ShapeMismatch {
-                            op: "Plan::try_execute_with",
-                            expected: *expected_shape,
-                            got,
-                        });
-                    }
-                    buffers[*output_buf] = Some((*t).clone());
-                },
-                Instr::PointwiseChain {
-                    output_buf,
-                    input_bufs,
-                    ops,
-                    shape,
-                } =>
-                {
-                    let result = run_pointwise_chain(&buffers, input_bufs, ops, *shape);
-                    buffers[*output_buf] = Some(result);
-                },
-                Instr::MatMul {
-                    output_buf,
-                    a_buf,
-                    b_buf,
-                    m,
-                    k,
-                    n,
-                } =>
-                {
-                    let a = buffers[*a_buf].as_ref().expect("buffer a non chargé");
-                    let b = buffers[*b_buf].as_ref().expect("buffer b non chargé");
-                    let mut out = Tensor::zeros(*m, *n);
-                    for i in 0..*m
-                    {
-                        for j in 0..*n
-                        {
-                            let mut acc = 0.0f32;
-                            for p in 0..*k
-                            {
-                                acc += a.data[i * k + p] * b.data[p * n + j];
-                            }
-                            out.data[i * n + j] = acc;
-                        }
-                    }
-                    buffers[*output_buf] = Some(out);
-                },
+                continue;
+            };
+
+            let t = feed_map.get(feed_name.as_str()).ok_or_else(|| {
+                SciRustError::InvalidConfig(format!("missing lazy feed '{feed_name}'"))
+            })?;
+            let got = t.shape();
+            if got != *expected_shape
+            {
+                return Err(SciRustError::ShapeMismatch {
+                    op: "Plan::try_execute_with",
+                    expected: *expected_shape,
+                    got,
+                });
             }
         }
 
-        Ok(buffers[self.output_buf]
-            .take()
-            .expect("buffer de sortie absent"))
+        Ok(self.execute_with(feeds))
     }
-}
-
-fn run_pointwise_chain(
-    buffers: &[Option<Tensor>],
-    input_bufs: &[usize],
-    ops: &[PwOp],
-    shape: (usize, usize),
-) -> Tensor {
-    let n = shape.0 * shape.1;
-    let mut acc = vec![0.0f32; n];
-    let inputs: Vec<&Tensor> = input_bufs
-        .iter()
-        .map(|b| buffers[*b].as_ref().expect("input non chargé"))
-        .collect();
-
-    for (i, slot) in acc.iter_mut().enumerate().take(n)
-    {
-        let mut a = 0.0f32;
-        for op in ops
-        {
-            match op
-            {
-                PwOp::LoadInput(k) => a = inputs[*k].data[i],
-                PwOp::Add(k) => a += inputs[*k].data[i],
-                PwOp::Sub(k) => a -= inputs[*k].data[i],
-                PwOp::Mul(k) => a *= inputs[*k].data[i],
-                PwOp::Scale(s) => a *= s,
-                PwOp::Relu => a = a.max(0.0),
-                PwOp::Exp => a = a.exp(),
-                PwOp::Log => a = a.max(1e-12).ln(),
-            }
-        }
-        *slot = a;
-    }
-
-    Tensor::from_vec(acc, shape.0, shape.1)
 }
 
 #[cfg(test)]
