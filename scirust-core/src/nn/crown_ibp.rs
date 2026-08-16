@@ -80,9 +80,7 @@ impl CrownIbpMlp {
                 ))
             })?;
             let scale = (1.0 / din as f32).sqrt();
-            let w: Vec<f32> = (0..n_weights)
-                .map(|_| rng.float_signed() * scale)
-                .collect();
+            let w: Vec<f32> = (0..n_weights).map(|_| rng.float_signed() * scale).collect();
             weights.push(TensorND::new(w, vec![din, dout]));
             biases.push(TensorND::zeros(&[1, dout]));
         }
@@ -378,10 +376,7 @@ mod tests {
         assert!(net.try_certified_box(&[0.0], 0.1).is_err());
         assert!(net.try_certified_box(&[0.0, 1.0], -0.1).is_err());
         assert!(net.try_certified_box(&[0.0, 1.0], f32::NAN).is_err());
-        assert!(
-            net.try_certified_box(&[0.0, f32::INFINITY], 0.1)
-                .is_err()
-        );
+        assert!(net.try_certified_box(&[0.0, f32::INFINITY], 0.1).is_err());
     }
 
     #[test]
@@ -391,10 +386,7 @@ mod tests {
 
         let tape = NdTape::new();
         let wrong_width = tape.input(TensorND::new(vec![0.0; 3], vec![1, 3]));
-        assert!(
-            net.try_robust_loss(&tape, wrong_width, 0.1, &[0])
-                .is_err()
-        );
+        assert!(net.try_robust_loss(&tape, wrong_width, 0.1, &[0]).is_err());
 
         let tape = NdTape::new();
         let x = tape.input(TensorND::new(vec![0.0; 4], vec![2, 2]));
