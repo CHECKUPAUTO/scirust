@@ -7,8 +7,10 @@
 //! migration proceeds incrementally.
 
 mod general;
+mod promotion;
 
 pub use general::{Tensor, TensorDevice, TensorError};
+pub use promotion::{PromotionError, promote_types};
 pub use scirust_compute::{DType, Shape, Strides};
 
 /// A dense, row-major N-dimensional tensor of `f32`.
