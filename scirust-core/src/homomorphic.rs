@@ -22,8 +22,8 @@
 
 use num_bigint::{BigInt, BigUint};
 use num_traits::{One, Signed, Zero};
-use rand::RngCore;
 use rand::rngs::OsRng;
+use rand::{CryptoRng, RngCore};
 
 #[derive(Debug, Clone)]
 pub struct PaillierPublicKey {
@@ -47,12 +47,23 @@ pub fn generate_keypair(bit_size: u64) -> (PaillierPublicKey, PaillierPrivateKey
     generate_keypair_with_rng(bit_size, &mut rng)
 }
 
-/// Like [`generate_keypair`] but with a caller-supplied RNG. For real use the
-/// RNG **must** be cryptographically secure (e.g. `OsRng`); a deterministic RNG
-/// is acceptable only for reproducible tests.
-pub fn generate_keypair_with_rng(
+/// Like [`generate_keypair`] but with a caller-supplied RNG.
+///
+/// The type system requires [`CryptoRng`] in addition to [`RngCore`], so a
+/// statistical RNG cannot accidentally be supplied to security-sensitive key
+/// generation. A fixed seed on a cryptographic RNG is appropriate only for
+/// reproducible tests, never for real keys.
+///
+/// ```compile_fail
+/// use rand::rngs::mock::StepRng;
+/// use scirust_core::homomorphic::generate_keypair_with_rng;
+///
+/// let mut predictable = StepRng::new(1, 1);
+/// let _ = generate_keypair_with_rng(64, &mut predictable);
+/// ```
+pub fn generate_keypair_with_rng<R: RngCore + CryptoRng>(
     bit_size: u64,
-    rng: &mut impl RngCore,
+    rng: &mut R,
 ) -> (PaillierPublicKey, PaillierPrivateKey) {
     let prime_bits = (bit_size / 2).max(8);
     // Pick distinct primes p, q such that gcd(n, (p-1)(q-1)) = 1 (required for
@@ -94,13 +105,15 @@ pub fn encrypt(plain: &BigUint, pk: &PaillierPublicKey) -> BigUint {
     encrypt_with_rng(plain, pk, &mut rng)
 }
 
-/// Like [`encrypt`] but with a caller-supplied RNG. The RNG **must** be
-/// cryptographically secure for the ciphertext to hide the plaintext; a
-/// deterministic RNG must only be used in tests.
-pub fn encrypt_with_rng(
+/// Like [`encrypt`] but with a caller-supplied cryptographic RNG.
+///
+/// The [`CryptoRng`] bound prevents predictable statistical RNGs from being
+/// used for the Paillier blinding factor. As with key generation, a fixed seed
+/// is suitable only for reproducible tests.
+pub fn encrypt_with_rng<R: RngCore + CryptoRng>(
     plain: &BigUint,
     pk: &PaillierPublicKey,
-    rng: &mut impl RngCore,
+    rng: &mut R,
 ) -> BigUint {
     let m = plain % &pk.n;
     // Fresh random r ∈ Z*_n — this is what makes Paillier semantically secure.
