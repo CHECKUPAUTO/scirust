@@ -1,0 +1,106 @@
+name: Rustdoc debt fix once
+
+on:
+  push:
+    branches: [codex/gate-workspace-rustdoc]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUSTDOCFLAGS: "-D warnings"
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: codex/gate-workspace-rustdoc
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: stable
+      - name: Apply exact documentation repairs
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_exact(path, old, new, expected=1):
+              p = Path(path)
+              text = p.read_text()
+              actual = text.count(old)
+              if actual != expected:
+                  raise SystemExit(f"{path}: expected {expected} occurrence(s) of {old!r}, found {actual}")
+              p.write_text(text.replace(old, new))
+
+          replace_exact(
+              "scirust-core/src/nn/nd_layers.rs",
+              "rank/shape mismatch (see [`take_state_dict_param`]).",
+              "rank/shape mismatch (see `take_state_dict_param`).",
+          )
+          replace_exact(
+              "scirust-core/src/nn/nd_layers.rs",
+              "input-gate argument `ĩₜ` is defensively clamped (see [`clamp_gate_arg`]) so",
+              "input-gate argument `ĩₜ` is defensively clamped (see `clamp_gate_arg`) so",
+          )
+          replace_exact(
+              "scirust-core/src/tensor/parity.rs",
+              "/// -log_softmax(logits)[target]. Algorithme logsumexp (stable).",
+              "/// `-log_softmax(logits)[target]`. Algorithme logsumexp (stable).",
+          )
+          replace_exact(
+              "scirust-core/src/formal_proof.rs",
+              "[`f64_to_exact_rational`]",
+              "`f64_to_exact_rational`",
+              expected=2,
+          )
+          replace_exact(
+              "scirust-core/src/lowprec.rs",
+              "/// Non biaisé : E[valeur] = x.",
+              "/// Non biaisé : `E[valeur] = x`.",
+          )
+          replace_exact(
+              "scirust-core/src/lowprec.rs",
+              "décomposition partagée [`fp8_pre_round`].",
+              "décomposition partagée `fp8_pre_round`.",
+          )
+          replace_exact(
+              "scirust-core/src/representation_graph.rs",
+              "matching [CANR]'s own",
+              "matching CANR's own",
+          )
+          replace_exact(
+              "scirust-core/src/representation_graph.rs",
+              "discipline ([TSA]/[ATRA]/[CANR]):",
+              "discipline (TSA/ATRA/CANR):",
+          )
+          replace_exact(
+              "scirust-core/src/representation_graph.rs",
+              "closed exactly as [TSA]'s Γ-transform and [ATRA]'s",
+              "closed exactly as TSA's Γ-transform and ATRA's",
+          )
+          replace_exact(
+              "scirust-core/src/representation_graph.rs",
+              "at [`QUANT_LEVELS`]),",
+              "at `QUANT_LEVELS`),",
+          )
+      - name: Verify strict workspace rustdoc
+        run: cargo +stable doc --workspace --no-deps --locked
+      - name: Commit verified repairs and remove one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/rustdoc-fix-once.yml
+          git add scirust-core/src/nn/nd_layers.rs \
+                  scirust-core/src/tensor/parity.rs \
+                  scirust-core/src/formal_proof.rs \
+                  scirust-core/src/lowprec.rs \
+                  scirust-core/src/representation_graph.rs
+          git diff --cached --check
+          git commit -m "docs: repair strict workspace rustdoc links"
+          git push origin HEAD:codex/gate-workspace-rustdoc
