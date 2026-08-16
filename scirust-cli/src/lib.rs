@@ -414,7 +414,7 @@ const GROUPS: &[(&str, &[Command])] = &[
             Command {
                 name: "catalog",
                 args: "[--format text|json]",
-                about: "List the capabilities this build can run as a scenario (currently: 5).",
+                about: "List the scenario capabilities registered in this build.",
             },
             Command {
                 name: "run",
