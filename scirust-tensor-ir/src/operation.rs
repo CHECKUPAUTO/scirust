@@ -43,9 +43,6 @@ impl Scalar {
 }
 
 /// One canonical tensor operation.
-///
-/// Constants are referenced externally through [`ConstantId`]; tensor payloads
-/// are deliberately not embedded in the graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Operation {
@@ -61,20 +58,23 @@ pub enum Operation {
     Relu,
     Exp,
     Log,
-
-    /// `cotangent * 1(primal > 0)`. This primitive makes reverse- and
-    /// forward-mode differentiation of ReLU executable without embedding a
-    /// comparison sub-language in the graph IR.
+    /// `cotangent * 1(primal > 0)`.
     ReluGrad,
-    /// Produce an all-zero tensor with the input's type.
     ZerosLike,
-    /// Produce an all-one tensor with the input's type.
     OnesLike,
 
+    /// Rank-2 matrix product.
     MatMul,
+    /// Matrix product over the last two dimensions, preserving an identical
+    /// batch prefix. This is the canonical lowering target of `vmap(MatMul)`.
+    BatchMatMul,
 
     Reshape { shape: Shape },
     Transpose { permutation: Vec<usize> },
+    /// NumPy-style right-aligned zero-stride broadcast in the value model.
+    BroadcastTo { shape: Shape },
+    /// Sum broadcasted axes so the result has exactly `shape`.
+    ReduceSumTo { shape: Shape },
 
     /// Identity in the primal program and a barrier to differentiation.
     StopGradient,
@@ -97,6 +97,8 @@ impl Operation {
             | Self::OnesLike
             | Self::Reshape { .. }
             | Self::Transpose { .. }
+            | Self::BroadcastTo { .. }
+            | Self::ReduceSumTo { .. }
             | Self::StopGradient
             | Self::Checkpoint => 1,
 
@@ -105,6 +107,7 @@ impl Operation {
             | Self::Mul
             | Self::Div
             | Self::MatMul
+            | Self::BatchMatMul
             | Self::ReluGrad => 2,
         }
     }
