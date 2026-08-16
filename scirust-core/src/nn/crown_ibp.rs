@@ -449,7 +449,8 @@ mod tests {
                 assert!(
                     yk >= lo[k] - 1e-4 && yk <= hi[k] + 1e-4,
                     "unsound: y[{k}]={yk} not in [{}, {}]",
-                    lo[k], hi[k]
+                    lo[k],
+                    hi[k]
                 );
             }
         }
