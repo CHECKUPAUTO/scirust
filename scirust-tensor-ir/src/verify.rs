@@ -10,7 +10,10 @@ pub enum SemanticError {
     BinaryTypeMismatch { node: NodeId },
     InvalidReshape { node: NodeId },
     InvalidTranspose { node: NodeId },
+    InvalidBroadcast { node: NodeId },
+    InvalidReduction { node: NodeId },
     InvalidMatMul { node: NodeId },
+    InvalidBatchMatMul { node: NodeId },
 }
 
 impl fmt::Display for SemanticError {
@@ -29,7 +32,10 @@ impl fmt::Display for SemanticError {
             ),
             Self::InvalidReshape { node } => write!(f, "node {} has an invalid reshape", node.get()),
             Self::InvalidTranspose { node } => write!(f, "node {} has an invalid transpose", node.get()),
+            Self::InvalidBroadcast { node } => write!(f, "node {} has an invalid broadcast", node.get()),
+            Self::InvalidReduction { node } => write!(f, "node {} has an invalid reduce-sum-to", node.get()),
             Self::InvalidMatMul { node } => write!(f, "node {} has an invalid rank-2 matmul", node.get()),
+            Self::InvalidBatchMatMul { node } => write!(f, "node {} has an invalid batched matmul", node.get()),
         }
     }
 }
@@ -57,10 +63,7 @@ pub fn validate_semantics(graph: &Graph) -> Result<(), SemanticError> {
         match &node.operation {
             Operation::Input { .. } | Operation::Constant { .. } => {}
             Operation::Add | Operation::Sub | Operation::Mul | Operation::Div => {
-                if inputs.len() != 2
-                    || *inputs[0] != node.output
-                    || *inputs[1] != node.output
-                {
+                if inputs.len() != 2 || *inputs[0] != node.output || *inputs[1] != node.output {
                     return Err(SemanticError::BinaryTypeMismatch { node: id });
                 }
             }
@@ -116,33 +119,103 @@ pub fn validate_semantics(graph: &Graph) -> Result<(), SemanticError> {
                 for (output_axis, &input_axis) in permutation.iter().enumerate() {
                     if input_axis >= permutation.len()
                         || seen[input_axis]
-                        || node.output.shape.dims()[output_axis]
-                            != input.shape.dims()[input_axis]
+                        || node.output.shape.dims()[output_axis] != input.shape.dims()[input_axis]
                     {
                         return Err(SemanticError::InvalidTranspose { node: id });
                     }
                     seen[input_axis] = true;
                 }
             }
+            Operation::BroadcastTo { shape } => {
+                let input = inputs[0];
+                if input.dtype != node.output.dtype
+                    || node.output.shape != *shape
+                    || !can_broadcast_to(input.shape.dims(), shape.dims())
+                {
+                    return Err(SemanticError::InvalidBroadcast { node: id });
+                }
+            }
+            Operation::ReduceSumTo { shape } => {
+                let input = inputs[0];
+                if input.dtype != node.output.dtype
+                    || node.output.shape != *shape
+                    || !can_reduce_sum_to(input.shape.dims(), shape.dims())
+                {
+                    return Err(SemanticError::InvalidReduction { node: id });
+                }
+            }
             Operation::MatMul => {
                 let lhs = inputs[0];
                 let rhs = inputs[1];
-                if lhs.dtype != rhs.dtype
-                    || lhs.dtype != node.output.dtype
-                    || lhs.shape.rank() != 2
-                    || rhs.shape.rank() != 2
-                    || node.output.shape.rank() != 2
-                    || lhs.shape.dims()[1] != rhs.shape.dims()[0]
-                    || node.output.shape.dims()[0] != lhs.shape.dims()[0]
-                    || node.output.shape.dims()[1] != rhs.shape.dims()[1]
-                {
+                if !valid_rank2_matmul(lhs, rhs, &node.output) {
                     return Err(SemanticError::InvalidMatMul { node: id });
+                }
+            }
+            Operation::BatchMatMul => {
+                let lhs = inputs[0];
+                let rhs = inputs[1];
+                if !valid_batch_matmul(lhs, rhs, &node.output) {
+                    return Err(SemanticError::InvalidBatchMatMul { node: id });
                 }
             }
             _ => {}
         }
     }
     Ok(())
+}
+
+fn can_broadcast_to(source: &[usize], target: &[usize]) -> bool {
+    if source.len() > target.len() {
+        return false;
+    }
+    let offset = target.len() - source.len();
+    source
+        .iter()
+        .zip(&target[offset..])
+        .all(|(&source_dim, &target_dim)| source_dim == target_dim || source_dim == 1)
+}
+
+fn can_reduce_sum_to(source: &[usize], target: &[usize]) -> bool {
+    if target.len() > source.len() {
+        return false;
+    }
+    let offset = source.len() - target.len();
+    target
+        .iter()
+        .zip(&source[offset..])
+        .all(|(&target_dim, &source_dim)| target_dim == source_dim || target_dim == 1)
+}
+
+fn valid_rank2_matmul(lhs: &TensorType, rhs: &TensorType, output: &TensorType) -> bool {
+    lhs.dtype == rhs.dtype
+        && lhs.dtype == output.dtype
+        && lhs.shape.rank() == 2
+        && rhs.shape.rank() == 2
+        && output.shape.rank() == 2
+        && lhs.shape.dims()[1] == rhs.shape.dims()[0]
+        && output.shape.dims()[0] == lhs.shape.dims()[0]
+        && output.shape.dims()[1] == rhs.shape.dims()[1]
+}
+
+fn valid_batch_matmul(lhs: &TensorType, rhs: &TensorType, output: &TensorType) -> bool {
+    if lhs.dtype != rhs.dtype
+        || lhs.dtype != output.dtype
+        || lhs.shape.rank() < 3
+        || lhs.shape.rank() != rhs.shape.rank()
+        || lhs.shape.rank() != output.shape.rank()
+    {
+        return false;
+    }
+
+    let rank = lhs.shape.rank();
+    let lhs_dims = lhs.shape.dims();
+    let rhs_dims = rhs.shape.dims();
+    let out_dims = output.shape.dims();
+    lhs_dims[..rank - 2] == rhs_dims[..rank - 2]
+        && lhs_dims[..rank - 2] == out_dims[..rank - 2]
+        && lhs_dims[rank - 1] == rhs_dims[rank - 2]
+        && out_dims[rank - 2] == lhs_dims[rank - 2]
+        && out_dims[rank - 1] == rhs_dims[rank - 1]
 }
 
 fn require_same(node: NodeId, expected: &TensorType, actual: &TensorType) -> Result<(), SemanticError> {
@@ -190,6 +263,53 @@ mod tests {
                 Operation::MatMul,
                 vec![a, b],
                 TensorType::new(DType::F32, Shape::new(vec![2, 4])),
+            )
+            .unwrap();
+        assert_eq!(validate_semantics(&graph), Ok(()));
+    }
+
+    #[test]
+    fn validates_broadcast_and_reduce_inverse_shapes() {
+        let mut graph = Graph::new();
+        let x = graph
+            .add_input("x", TensorType::new(DType::F32, Shape::new(vec![1, 3])))
+            .unwrap();
+        let broadcast_ty = TensorType::new(DType::F32, Shape::new(vec![4, 3]));
+        let broadcast = graph
+            .add_node(
+                Operation::BroadcastTo {
+                    shape: broadcast_ty.shape.clone(),
+                },
+                vec![x],
+                broadcast_ty,
+            )
+            .unwrap();
+        graph
+            .add_node(
+                Operation::ReduceSumTo {
+                    shape: Shape::new(vec![1, 3]),
+                },
+                vec![broadcast],
+                TensorType::new(DType::F32, Shape::new(vec![1, 3])),
+            )
+            .unwrap();
+        assert_eq!(validate_semantics(&graph), Ok(()));
+    }
+
+    #[test]
+    fn validates_batched_matmul_contract() {
+        let mut graph = Graph::new();
+        let a = graph
+            .add_input("a", TensorType::new(DType::F32, Shape::new(vec![5, 2, 3])))
+            .unwrap();
+        let b = graph
+            .add_input("b", TensorType::new(DType::F32, Shape::new(vec![5, 3, 4])))
+            .unwrap();
+        graph
+            .add_node(
+                Operation::BatchMatMul,
+                vec![a, b],
+                TensorType::new(DType::F32, Shape::new(vec![5, 2, 4])),
             )
             .unwrap();
         assert_eq!(validate_semantics(&graph), Ok(()));
