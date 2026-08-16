@@ -416,13 +416,9 @@ mod tests {
         assert!(GloroClassifier::try_new_linear(vec![], 0, 2, 20).is_err());
         assert!(GloroClassifier::try_new_linear(vec![1.0, 2.0], 1, 2, 20).is_err());
         assert!(GloroClassifier::try_new_linear(vec![], 2, 0, 20).is_err());
-        assert!(
-            GloroClassifier::try_new_linear(vec![1.0, f32::NAN, 0.0, 1.0], 2, 2, 20)
-                .is_err()
-        );
+        assert!(GloroClassifier::try_new_linear(vec![1.0, f32::NAN, 0.0, 1.0], 2, 2, 20).is_err());
 
-        let clf = GloroClassifier::try_new_linear(vec![1.0, 0.0, 0.0, 1.0], 2, 2, 20)
-            .unwrap();
+        let clf = GloroClassifier::try_new_linear(vec![1.0, 0.0, 0.0, 1.0], 2, 2, 20).unwrap();
         assert!(clf.try_logits(&[1.0]).is_err());
         assert!(clf.try_logits(&[1.0, 2.0, 3.0]).is_err());
         assert!(clf.try_certify(&[1.0, f32::INFINITY]).is_err());
@@ -430,8 +426,7 @@ mod tests {
 
     #[test]
     fn fallible_gloro_boundary_accepts_valid_input() {
-        let clf = GloroClassifier::try_new_linear(vec![1.0, 0.0, 0.0, 1.0], 2, 2, 20)
-            .unwrap();
+        let clf = GloroClassifier::try_new_linear(vec![1.0, 0.0, 0.0, 1.0], 2, 2, 20).unwrap();
         assert_eq!(clf.try_logits(&[2.0, 1.0]).unwrap(), vec![2.0, 1.0]);
         let (class, radius) = clf.try_certify(&[2.0, 1.0]).unwrap();
         assert_eq!(class, 0);
