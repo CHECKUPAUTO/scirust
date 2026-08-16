@@ -3,12 +3,14 @@
 //! The canonical compiled/reference pipeline remains available through
 //! [`ReferenceGraphSession`] and [`ReferencePlanRuntime`]. Core2 additionally
 //! exposes [`Core2ReferenceSession`], the deterministic semantic oracle for the
-//! dtype/device-aware tensor and graph-transformation stack.
+//! dtype/device-aware tensor and graph-transformation stack, and
+//! [`ReferenceJitSession`] for optimize/lower/compile-once execution.
 
 mod canonical;
 mod core2_reference;
 mod error;
 mod graph_session;
+mod jit;
 mod reference_plan;
 
 pub use canonical::{
@@ -26,6 +28,9 @@ pub use error::{
 pub use graph_session::{
     GraphConstantSpec, GraphConstants, GraphInputSpec, GraphInputs, GraphOutputSpec,
     ReferenceGraphSession,
+};
+pub use jit::{
+    JitExecutionError, JitInputSpec, JitPreparationError, ReferenceJitSession,
 };
 pub use reference_plan::{
     BufferSlotSpecification, ExternalValueSpec, PlanExternalValues, PlanOutputSpec,
