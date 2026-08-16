@@ -22,8 +22,46 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  m54-software-contract:
+    name: M54 exact-example compile + lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CARGO_INCREMENTAL: 0
+      RUSTFLAGS: "-D warnings"
+      FLAT_M54_PIN: 0ffdbde743f86feb6d67b1aeaa177bcbfe28794f
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt, clippy
+      - name: Verify FLAT pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F "rev = \"$FLAT_M54_PIN\"" scirust-gpu/Cargo.toml >/dev/null
+          grep -F "#$FLAT_M54_PIN" Cargo.lock >/dev/null
+      - name: Format exact M54 example
+        run: >-
+          rustup run nightly-2026-07-02 rustfmt --check --edition 2021
+          scirust-sciagent/examples/flat_m54_model_prefill_vec4.rs
+      - name: Compile exact M54 example
+        run: >-
+          rustup run nightly-2026-07-02 cargo check --locked
+          -p scirust-sciagent --features flat-attention
+          --example flat_m54_model_prefill_vec4
+      - name: Clippy exact M54 example
+        run: >-
+          rustup run nightly-2026-07-02 cargo clippy --locked
+          -p scirust-sciagent --features flat-attention
+          --example flat_m54_model_prefill_vec4 -- -D warnings
+
   full-model-prefill-thor:
     name: SCIAGENT 304M portable vs vec4 prefill
+    needs: m54-software-contract
     if: >
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
