@@ -26,6 +26,7 @@ use std::cell::{Ref, RefCell};
 use std::rc::Rc;
 
 pub mod plan;
+mod safe;
 pub use plan::{Compiler, Plan, PlanStats};
 
 #[derive(Clone, Debug)]
