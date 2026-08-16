@@ -18,6 +18,10 @@
 //!   stream can subtract the noise and the DP guarantee collapses. Use
 //!   [`SecureRng`] seeded from the OS ([`new_secure_rng`]); a fixed seed is for
 //!   tests only.
+//! * **Privacy-claiming APIs reject disabled/invalid noise.** A non-positive or
+//!   non-finite clip norm/noise multiplier is an error; callers that only want
+//!   clipping for diagnostics should call [`clip_gradients`] directly rather
+//!   than configure a DP-SGD step with zero noise.
 //! * **The accountant is intentionally conservative.** It charges every step
 //!   the *un-subsampled* Gaussian RDP `α/(2σ²)`. Subsampling only *amplifies*
 //!   privacy, so ignoring it **over-estimates** ε — a sound upper bound that
@@ -32,14 +36,17 @@
 //!
 //! # Example
 //!
-//! ```ignore
-//! use scirust_core::dp::{DpSgdConfig, new_secure_rng, dp_sgd_gradient};
+//! ```
+//! use scirust_core::dp::{DpSgdConfig, new_secure_rng, try_dp_sgd_gradient};
 //!
 //! let config = DpSgdConfig::default();
-//! let mut rng = new_secure_rng();               // OS-seeded CSPRNG
-//! let batch_grad = dp_sgd_gradient(&per_sample_grads, &config, &mut rng);
+//! let per_sample_grads = vec![vec![0.2, 0.4], vec![0.1, -0.3]];
+//! let mut rng = new_secure_rng(); // OS-seeded CSPRNG
+//! let batch_grad = try_dp_sgd_gradient(&per_sample_grads, &config, &mut rng).unwrap();
+//! assert_eq!(batch_grad.len(), 2);
 //! ```
 
+use crate::error::{Result, SciRustError};
 use rand::rngs::StdRng;
 use rand::{CryptoRng, Rng, SeedableRng};
 use rand_distr::{Distribution, Normal};
@@ -74,6 +81,45 @@ impl Default for DpSgdConfig {
             delta: 1e-5,
             epsilon: None,
         }
+    }
+}
+
+impl DpSgdConfig {
+    /// Validate parameters required by APIs that claim a DP mechanism.
+    pub fn validate(&self) -> Result<()> {
+        if !self.l2_norm_clip.is_finite() || self.l2_norm_clip <= 0.0
+        {
+            return Err(SciRustError::InvalidConfig(
+                "DP l2_norm_clip must be finite and > 0".to_string(),
+            ));
+        }
+        if !self.noise_multiplier.is_finite() || self.noise_multiplier <= 0.0
+        {
+            return Err(SciRustError::InvalidConfig(
+                "DP noise_multiplier must be finite and > 0".to_string(),
+            ));
+        }
+        if !self.delta.is_finite() || self.delta <= 0.0 || self.delta >= 1.0
+        {
+            return Err(SciRustError::InvalidConfig(
+                "DP delta must be finite and in (0, 1)".to_string(),
+            ));
+        }
+        if let Some(epsilon) = self.epsilon
+            && (!epsilon.is_finite() || epsilon <= 0.0)
+        {
+            return Err(SciRustError::InvalidConfig(
+                "DP epsilon must be finite and > 0 when provided".to_string(),
+            ));
+        }
+        let noise_std = self.noise_multiplier * self.l2_norm_clip;
+        if !noise_std.is_finite() || noise_std <= 0.0
+        {
+            return Err(SciRustError::InvalidConfig(
+                "DP noise standard deviation must be finite and > 0".to_string(),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -201,13 +247,35 @@ pub fn rdp_gaussian_epsilon(steps: usize, sigma: f64, delta: f64) -> (f64, f64) 
 /// Clip gradient vector to maximum L2 norm.
 ///
 /// If ||g||_2 > clip, scale g by clip / ||g||_2.
+///
+/// # Panics
+///
+/// Panics if `l2_norm_clip` is non-finite/non-positive or if a gradient
+/// component is non-finite. Privacy-claiming callers should use the fallible
+/// DP entry points, which return [`SciRustError`] instead.
 pub fn clip_gradients(grads: &mut [f32], l2_norm_clip: f32) {
-    let norm_sq: f32 = grads.iter().map(|&g| g * g).sum();
+    assert!(
+        l2_norm_clip.is_finite() && l2_norm_clip > 0.0,
+        "clip_gradients: l2_norm_clip must be finite and > 0"
+    );
+    assert!(
+        grads.iter().all(|g| g.is_finite()),
+        "clip_gradients: gradients must be finite"
+    );
+    // Accumulate in f64 so large but finite f32 gradients do not overflow while
+    // computing the norm and collapse to an artificial all-zero clipped vector.
+    let norm_sq: f64 = grads
+        .iter()
+        .map(|&g| {
+            let g = f64::from(g);
+            g * g
+        })
+        .sum();
     let norm = norm_sq.sqrt();
 
-    if norm > l2_norm_clip && norm > 1e-12
+    if norm > f64::from(l2_norm_clip) && norm > 1e-12
     {
-        let scale = l2_norm_clip / norm;
+        let scale = (f64::from(l2_norm_clip) / norm) as f32;
         for g in grads.iter_mut()
         {
             *g *= scale;
@@ -218,50 +286,99 @@ pub fn clip_gradients(grads: &mut [f32], l2_norm_clip: f32) {
 /// Add Gaussian noise to gradients for differential privacy.
 ///
 /// The RNG **must** be cryptographically secure (enforced by the `CryptoRng`
-/// bound). σ = noise_multiplier * l2_norm_clip (should match [`clip_gradients`]).
+/// bound). `noise_stddev` must be finite and strictly positive.
+///
+/// # Panics
+///
+/// Panics if `noise_stddev` is non-finite or non-positive.
 pub fn add_noise<R: Rng + CryptoRng>(grads: &mut [f32], noise_stddev: f32, rng: &mut R) {
-    if noise_stddev <= 0.0
-    {
-        return;
-    }
-    let normal = Normal::new(0.0f32, noise_stddev).expect("noise_stddev is finite and > 0");
+    assert!(
+        noise_stddev.is_finite() && noise_stddev > 0.0,
+        "add_noise: noise_stddev must be finite and > 0"
+    );
+    let normal = Normal::new(0.0f32, noise_stddev).expect("validated positive finite stddev");
     for g in grads.iter_mut()
     {
         *g += normal.sample(rng);
     }
 }
 
+fn validate_finite_gradients(grads: &[f32], what: &str) -> Result<()> {
+    if grads.iter().all(|g| g.is_finite())
+    {
+        Ok(())
+    }
+    else
+    {
+        Err(SciRustError::InvalidConfig(format!(
+            "{what} gradients must contain only finite values"
+        )))
+    }
+}
+
+/// Fallible form of [`dp_protect`].
+///
+/// Validates the privacy configuration and gradient values before clipping and
+/// adding noise so an invalid configuration cannot silently disable the DP
+/// mechanism.
+pub fn try_dp_protect<R: Rng + CryptoRng>(
+    per_sample_grads: &mut [f32],
+    config: &DpSgdConfig,
+    rng: &mut R,
+) -> Result<()> {
+    config.validate()?;
+    validate_finite_gradients(per_sample_grads, "dp_protect")?;
+    clip_gradients(per_sample_grads, config.l2_norm_clip);
+    let noise_std = config.noise_multiplier * config.l2_norm_clip;
+    add_noise(per_sample_grads, noise_std, rng);
+    Ok(())
+}
+
 /// Clip a **single sample's** gradient and add noise. For a real DP-SGD step
 /// over a minibatch use [`dp_sgd_gradient`], which clips each sample *before*
 /// summing so the sensitivity equals `l2_norm_clip`.
+///
+/// # Panics
+///
+/// Panics on invalid DP configuration or non-finite gradient input. Prefer
+/// [`try_dp_protect`] when handling caller-controlled data.
 pub fn dp_protect<R: Rng + CryptoRng>(
     per_sample_grads: &mut [f32],
     config: &DpSgdConfig,
     rng: &mut R,
 ) {
-    clip_gradients(per_sample_grads, config.l2_norm_clip);
-    let noise_std = config.noise_multiplier * config.l2_norm_clip;
-    add_noise(per_sample_grads, noise_std, rng);
+    try_dp_protect(per_sample_grads, config, rng)
+        .unwrap_or_else(|error| panic!("dp_protect: {error}"));
 }
 
-/// One correct DP-SGD gradient step over a minibatch of per-sample gradients:
-/// clip each sample to `l2_norm_clip` (bounding the sensitivity), sum, add a
-/// single draw of Gaussian noise with σ = `noise_multiplier · l2_norm_clip`,
-/// then average by the batch size. Returns the privatized mean gradient.
-pub fn dp_sgd_gradient<R: Rng + CryptoRng>(
+/// Fallible DP-SGD gradient step over a minibatch of per-sample gradients.
+///
+/// Each sample is clipped to `l2_norm_clip`, the clipped gradients are summed,
+/// one Gaussian draw with σ = `noise_multiplier · l2_norm_clip` is added to the
+/// sum, and the result is averaged by batch size.
+pub fn try_dp_sgd_gradient<R: Rng + CryptoRng>(
     per_sample_grads: &[Vec<f32>],
     config: &DpSgdConfig,
     rng: &mut R,
-) -> Vec<f32> {
-    assert!(
-        !per_sample_grads.is_empty(),
-        "dp_sgd_gradient: need at least one sample"
-    );
+) -> Result<Vec<f32>> {
+    config.validate()?;
+    if per_sample_grads.is_empty()
+    {
+        return Err(SciRustError::InvalidConfig(
+            "dp_sgd_gradient requires at least one sample".to_string(),
+        ));
+    }
     let dim = per_sample_grads[0].len();
     let mut summed = vec![0.0f32; dim];
     for g in per_sample_grads
     {
-        assert_eq!(g.len(), dim, "dp_sgd_gradient: ragged per-sample gradients");
+        if g.len() != dim
+        {
+            return Err(SciRustError::InvalidConfig(
+                "dp_sgd_gradient requires equal-size per-sample gradients".to_string(),
+            ));
+        }
+        validate_finite_gradients(g, "dp_sgd_gradient")?;
         let mut clipped = g.clone();
         clip_gradients(&mut clipped, config.l2_norm_clip);
         for (s, v) in summed.iter_mut().zip(clipped.iter())
@@ -269,7 +386,6 @@ pub fn dp_sgd_gradient<R: Rng + CryptoRng>(
             *s += *v;
         }
     }
-    // Sensitivity of the sum is l2_norm_clip (one sample can change it by ≤ clip).
     let noise_std = config.noise_multiplier * config.l2_norm_clip;
     add_noise(&mut summed, noise_std, rng);
     let inv = 1.0 / per_sample_grads.len() as f32;
@@ -277,7 +393,27 @@ pub fn dp_sgd_gradient<R: Rng + CryptoRng>(
     {
         *s *= inv;
     }
-    summed
+    Ok(summed)
+}
+
+/// One DP-SGD gradient step over a minibatch of per-sample gradients.
+///
+/// This compatibility wrapper preserves the historical return type while
+/// failing loudly instead of silently returning a non-private gradient when the
+/// privacy configuration is invalid. Prefer [`try_dp_sgd_gradient`] for
+/// caller-controlled input.
+///
+/// # Panics
+///
+/// Panics on invalid DP configuration, an empty/ragged batch, or non-finite
+/// gradient input.
+pub fn dp_sgd_gradient<R: Rng + CryptoRng>(
+    per_sample_grads: &[Vec<f32>],
+    config: &DpSgdConfig,
+    rng: &mut R,
+) -> Vec<f32> {
+    try_dp_sgd_gradient(per_sample_grads, config, rng)
+        .unwrap_or_else(|error| panic!("dp_sgd_gradient: {error}"))
 }
 
 #[cfg(test)]
@@ -308,6 +444,15 @@ mod tests {
     }
 
     #[test]
+    fn clip_large_finite_gradient_without_norm_overflow() {
+        let mut grads = vec![f32::MAX / 4.0, 0.0];
+        clip_gradients(&mut grads, 1.0);
+        assert!(grads.iter().all(|value| value.is_finite()));
+        assert!((grads[0].abs() - 1.0).abs() < 1e-6);
+        assert_eq!(grads[1], 0.0);
+    }
+
+    #[test]
     fn test_add_noise_deterministic_with_fixed_seed() {
         let mut rng1 = StdRng::from_seed([9u8; 32]);
         let mut rng2 = StdRng::from_seed([9u8; 32]);
@@ -322,6 +467,34 @@ mod tests {
         assert!((g1[1] - g2[1]).abs() < 1e-10);
         // …and noise actually perturbed the values.
         assert_ne!(g1[0], 1.0);
+    }
+
+    #[test]
+    fn config_rejects_disabled_or_invalid_privacy_parameters() {
+        for invalid_noise in [0.0, -1.0, f32::INFINITY, f32::NAN]
+        {
+            let config = DpSgdConfig {
+                noise_multiplier: invalid_noise,
+                ..DpSgdConfig::default()
+            };
+            assert!(config.validate().is_err());
+        }
+        for invalid_clip in [0.0, -1.0, f32::INFINITY, f32::NAN]
+        {
+            let config = DpSgdConfig {
+                l2_norm_clip: invalid_clip,
+                ..DpSgdConfig::default()
+            };
+            assert!(config.validate().is_err());
+        }
+        for invalid_delta in [0.0, 1.0, -1.0, f64::INFINITY, f64::NAN]
+        {
+            let config = DpSgdConfig {
+                delta: invalid_delta,
+                ..DpSgdConfig::default()
+            };
+            assert!(config.validate().is_err());
+        }
     }
 
     #[test]
@@ -384,20 +557,40 @@ mod tests {
     }
 
     #[test]
-    fn dp_sgd_gradient_clips_per_sample_then_noises() {
+    fn try_dp_sgd_gradient_accepts_valid_config() {
         let config = DpSgdConfig {
             l2_norm_clip: 1.0,
-            noise_multiplier: 0.0, // isolate the clip+average behavior
+            noise_multiplier: 0.1,
             delta: 1e-5,
             epsilon: None,
         };
         let mut rng = test_rng();
-        // Two samples, each with norm 5 → clipped to norm 1 = [0.6, 0.8].
         let samples = vec![vec![3.0, 4.0], vec![3.0, 4.0]];
-        let out = dp_sgd_gradient(&samples, &config, &mut rng);
-        // Mean of two identical clipped vectors is the clipped vector itself.
-        assert!((out[0] - 0.6).abs() < 1e-6);
-        assert!((out[1] - 0.8).abs() < 1e-6);
+        let out = try_dp_sgd_gradient(&samples, &config, &mut rng).unwrap();
+        assert_eq!(out.len(), 2);
+        assert!(out.iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn try_dp_sgd_gradient_rejects_zero_noise() {
+        let config = DpSgdConfig {
+            noise_multiplier: 0.0,
+            ..DpSgdConfig::default()
+        };
+        let mut rng = test_rng();
+        let samples = vec![vec![3.0, 4.0], vec![3.0, 4.0]];
+        assert!(try_dp_sgd_gradient(&samples, &config, &mut rng).is_err());
+    }
+
+    #[test]
+    fn try_dp_sgd_gradient_rejects_ragged_or_nonfinite_input() {
+        let config = DpSgdConfig::default();
+        let mut rng = test_rng();
+        let ragged = vec![vec![1.0, 2.0], vec![3.0]];
+        assert!(try_dp_sgd_gradient(&ragged, &config, &mut rng).is_err());
+
+        let nonfinite = vec![vec![1.0, f32::NAN]];
+        assert!(try_dp_sgd_gradient(&nonfinite, &config, &mut rng).is_err());
     }
 
     /// Gaussian RDP and the Mironov RDP→DP conversion match their closed forms.
