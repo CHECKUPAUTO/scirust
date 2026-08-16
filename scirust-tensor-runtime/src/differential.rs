@@ -1,9 +1,7 @@
 use std::fmt;
 
 use scirust_tensor_core::{Tensor, TensorDevice, TensorError};
-use scirust_tensor_ir::{
-    AutodiffError, DType, Graph, NodeId, Shape, TensorType, grad, jvp, vjp,
-};
+use scirust_tensor_ir::{AutodiffError, DType, Graph, NodeId, TensorType, grad, jvp, vjp};
 
 use crate::{Core2Constants, Core2Inputs, Core2ReferenceSession, Core2RuntimeError};
 
@@ -64,7 +62,6 @@ impl From<TensorError> for DifferentialError {
     }
 }
 
-/// One immutable primal binding used by dense differential materialization.
 #[derive(Debug, Clone)]
 pub struct DifferentialBinding {
     pub node: NodeId,
@@ -78,10 +75,7 @@ impl DifferentialBinding {
 }
 
 /// Materialize a dense Jacobian with forward-mode JVPs.
-///
-/// The returned tensor shape is `output.shape ++ wrt.shape`, so the logical
-/// element `J[o..., i...]` is laid out row-major with the differentiated input
-/// axes trailing the output axes.
+/// The result shape is `output.shape ++ wrt.shape`.
 pub fn jacfwd_reference(
     graph: &Graph,
     output: NodeId,
@@ -98,17 +92,21 @@ pub fn jacfwd_reference(
     let tangent_input = transformed.tangent_inputs[0];
     let tangent_output = transformed.tangent_output;
     let session = Core2ReferenceSession::prepare(transformed.graph, constants.clone())?;
-
     let input_elements = checked_elements(&input_type)?;
     let output_elements = checked_elements(&output_type)?;
-    let mut jacobian = vec![0.0f32; input_elements.saturating_mul(output_elements)];
+    let matrix_elements = input_elements
+        .checked_mul(output_elements)
+        .ok_or(DifferentialError::Tensor(TensorError::ShapeOverflow))?;
+    let mut jacobian = vec![0.0f32; matrix_elements];
 
     for input_index in 0..input_elements {
         let mut tangent = vec![0.0f32; input_elements];
         tangent[input_index] = 1.0;
-        let tangent = Tensor::from_f32(tangent, input_type.shape.dims().to_vec())?;
         let mut execution_inputs = copy_bindings(bindings)?;
-        execution_inputs.insert(tangent_input, tangent)?;
+        execution_inputs.insert(
+            tangent_input,
+            Tensor::from_f32(tangent, input_type.shape.dims().to_vec())?,
+        )?;
         let outputs = session.execute(&execution_inputs)?;
         let tangent_value = outputs
             .get(tangent_output)
@@ -119,7 +117,10 @@ pub fn jacfwd_reference(
         }
     }
 
-    Tensor::from_f32(jacobian, jacobian_shape(&output_type, &input_type)).map_err(Into::into)
+    Ok(Tensor::from_f32(
+        jacobian,
+        jacobian_shape(&output_type, &input_type),
+    )?)
 }
 
 /// Materialize a dense Jacobian with reverse-mode VJPs.
@@ -139,17 +140,21 @@ pub fn jacrev_reference(
     let cotangent_input = transformed.cotangent_input;
     let gradient_output = transformed.gradients[0];
     let session = Core2ReferenceSession::prepare(transformed.graph, constants.clone())?;
-
     let input_elements = checked_elements(&input_type)?;
     let output_elements = checked_elements(&output_type)?;
-    let mut jacobian = vec![0.0f32; input_elements.saturating_mul(output_elements)];
+    let matrix_elements = input_elements
+        .checked_mul(output_elements)
+        .ok_or(DifferentialError::Tensor(TensorError::ShapeOverflow))?;
+    let mut jacobian = vec![0.0f32; matrix_elements];
 
     for output_index in 0..output_elements {
         let mut cotangent = vec![0.0f32; output_elements];
         cotangent[output_index] = 1.0;
-        let cotangent = Tensor::from_f32(cotangent, output_type.shape.dims().to_vec())?;
         let mut execution_inputs = copy_bindings(bindings)?;
-        execution_inputs.insert(cotangent_input, cotangent)?;
+        execution_inputs.insert(
+            cotangent_input,
+            Tensor::from_f32(cotangent, output_type.shape.dims().to_vec())?,
+        )?;
         let outputs = session.execute(&execution_inputs)?;
         let gradient = outputs
             .get(gradient_output)
@@ -159,13 +164,13 @@ pub fn jacrev_reference(
         jacobian[row_start..row_start + input_elements].copy_from_slice(&gradient);
     }
 
-    Tensor::from_f32(jacobian, jacobian_shape(&output_type, &input_type)).map_err(Into::into)
+    Ok(Tensor::from_f32(
+        jacobian,
+        jacobian_shape(&output_type, &input_type),
+    )?)
 }
 
-/// Choose forward or reverse dense materialization from the smaller basis.
-///
-/// This does not alter semantics: both branches produce exactly the same
-/// `output.shape ++ wrt.shape` tensor and are independently testable.
+/// Choose the dense Jacobian mode requiring the smaller canonical basis.
 pub fn jacobian_reference(
     graph: &Graph,
     output: NodeId,
@@ -183,8 +188,6 @@ pub fn jacobian_reference(
 }
 
 /// Dense Hessian of a scalar F32 output with respect to one tensor node.
-///
-/// The result shape is `wrt.shape ++ wrt.shape`.
 pub fn hessian_reference(
     graph: &Graph,
     output: NodeId,
@@ -192,8 +195,7 @@ pub fn hessian_reference(
     bindings: &[DifferentialBinding],
     constants: &Core2Constants,
 ) -> Result<Tensor, DifferentialError> {
-    let output_type = tensor_type(graph, output)?.clone();
-    let output_elements = checked_elements(&output_type)?;
+    let output_elements = checked_elements(tensor_type(graph, output)?)?;
     if output_elements != 1 {
         return Err(DifferentialError::ScalarOutputRequired {
             node: output,
@@ -222,7 +224,7 @@ fn checked_elements(tensor_type: &TensorType) -> Result<usize, DifferentialError
     tensor_type
         .shape
         .checked_num_elements()
-        .map_err(|_| TensorError::ShapeOverflow.into())
+        .map_err(|_| DifferentialError::Tensor(TensorError::ShapeOverflow))
 }
 
 fn require_f32(node: NodeId, tensor_type: &TensorType) -> Result<(), DifferentialError> {
@@ -259,7 +261,7 @@ fn copy_bindings(bindings: &[DifferentialBinding]) -> Result<Core2Inputs, Differ
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scirust_tensor_ir::{Operation, Scalar};
+    use scirust_tensor_ir::{Operation, Shape};
 
     fn ty(shape: &[usize]) -> TensorType {
         TensorType::new(DType::F32, Shape::new(shape.to_vec()))
@@ -289,50 +291,27 @@ mod tests {
     }
 
     #[test]
-    fn hessian_of_sum_of_squares_is_two_identity() {
+    fn hessian_of_scalar_square_is_two() {
         let mut graph = Graph::new();
-        let x = graph.add_input("x", ty(&[2])).unwrap();
+        let x = graph.add_input("x", ty(&[1])).unwrap();
         let square = graph
-            .add_node(Operation::Mul, vec![x, x], ty(&[2]))
+            .add_node(Operation::Mul, vec![x, x], ty(&[1]))
             .unwrap();
-        let sum = graph
-            .add_node(
-                Operation::Scale {
-                    factor: Scalar::f32(1.0),
-                },
-                vec![square],
-                ty(&[2]),
-            )
-            .unwrap();
-        // The canonical graph currently has no general reduce-sum primitive.
-        // Use a one-element scalar graph for the Hessian contract itself.
-        let mut scalar_graph = Graph::new();
-        let scalar_x = scalar_graph.add_input("x", ty(&[1])).unwrap();
-        let scalar_square = scalar_graph
-            .add_node(
-                Operation::Mul,
-                vec![scalar_x, scalar_x],
-                ty(&[1]),
-            )
-            .unwrap();
-        scalar_graph.set_outputs(vec![scalar_square]).unwrap();
+        graph.set_outputs(vec![square]).unwrap();
         let bindings = [DifferentialBinding::new(
-            scalar_x,
+            x,
             Tensor::from_f32(vec![3.], vec![1]).unwrap(),
         )];
+
         let hessian = hessian_reference(
-            &scalar_graph,
-            scalar_square,
-            scalar_x,
+            &graph,
+            square,
+            x,
             &bindings,
             &Core2Constants::new(),
         )
         .unwrap();
         assert_eq!(hessian.shape().dims(), &[1, 1]);
         assert_eq!(hessian.to_f32_vec().unwrap(), vec![2.]);
-
-        // Keep the vector construction exercised so future ReduceSum support
-        // can extend this exact test without changing its setup.
-        assert_eq!(graph.nodes()[sum.get() as usize].output.shape.dims(), &[2]);
     }
 }
