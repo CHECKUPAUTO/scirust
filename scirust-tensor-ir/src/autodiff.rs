@@ -429,12 +429,6 @@ fn reverse_rule(
                 Operation::BatchMatMul,
             )?;
         }
-        operation => {
-            return Err(AutodiffError::UnsupportedOperation {
-                node: id,
-                operation: operation.clone(),
-            });
-        }
     }
     Ok(())
 }
@@ -660,12 +654,6 @@ fn forward_rule(
         Operation::BatchMatMul => {
             require_batch_rank(source, id, node.inputs[0], node.inputs[1])?;
             forward_matmul(graph, primal, tangents, node, Operation::BatchMatMul)?
-        }
-        operation => {
-            return Err(AutodiffError::UnsupportedOperation {
-                node: id,
-                operation: operation.clone(),
-            });
         }
     };
     Ok(result)
