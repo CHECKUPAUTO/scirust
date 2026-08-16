@@ -87,7 +87,6 @@ pub fn vmap(
     let mut mapped = Vec::with_capacity(source.nodes().len());
 
     for (index, node) in source.nodes().iter().enumerate() {
-        let old_id = NodeId::new(index as u32);
         let input_ids = node
             .inputs
             .iter()
@@ -257,12 +256,6 @@ pub fn vmap(
                         true,
                     )
                 }
-            }
-            operation => {
-                return Err(VmapError::UnsupportedOperation {
-                    node: old_id,
-                    operation: operation.clone(),
-                });
             }
         };
 
