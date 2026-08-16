@@ -4,12 +4,14 @@
 //! [`ReferenceGraphSession`] and [`ReferencePlanRuntime`]. Core2 additionally
 //! exposes [`Core2ReferenceSession`], the deterministic semantic oracle for the
 //! dtype/device-aware tensor and graph-transformation stack,
-//! [`ReferenceJitSession`] for optimize/lower/compile-once execution, and
+//! [`ReferenceJitSession`] for optimize/lower/compile-once execution,
 //! [`ReferenceSpmdSession`] for deterministic logical-rank execution of
-//! communication-free `shard_map` programs.
+//! communication-free `shard_map` programs, and dense differential oracles for
+//! Jacobians and Hessians.
 
 mod canonical;
 mod core2_reference;
+mod differential;
 mod error;
 mod graph_session;
 mod jit;
@@ -22,6 +24,10 @@ pub use canonical::{
 };
 pub use core2_reference::{
     Core2Constants, Core2Inputs, Core2Outputs, Core2ReferenceSession, Core2RuntimeError,
+};
+pub use differential::{
+    DifferentialBinding, DifferentialError, hessian_reference, jacfwd_reference,
+    jacobian_reference, jacrev_reference,
 };
 pub use error::{
     CanonicalBuildError, CanonicalExecutionError, CanonicalPreparationError,
