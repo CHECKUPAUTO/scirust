@@ -97,7 +97,8 @@ fn fresh_caches(
 ) -> Result<(Vec<WgpuDenseKvCache>, Vec<WgpuDenseKvCache>), Box<dyn Error>> {
     let mut kcache = Vec::with_capacity(layers);
     let mut vcache = Vec::with_capacity(layers);
-    for _ in 0..layers {
+    for _ in 0..layers
+    {
         kcache.push(chain.dense_kv_cache(capacity, kv_dim)?);
         vcache.push(chain.dense_kv_cache(capacity, kv_dim)?);
     }
@@ -116,10 +117,12 @@ fn prefill(
     kcache: &mut [WgpuDenseKvCache],
     vcache: &mut [WgpuDenseKvCache],
 ) -> Result<Vec<f32>, Box<dyn Error>> {
-    if prompt.is_empty() {
+    if prompt.is_empty()
+    {
         return Err("M54 requires a non-empty prompt".into());
     }
-    if kcache.len() != weights.blocks.len() || vcache.len() != weights.blocks.len() {
+    if kcache.len() != weights.blocks.len() || vcache.len() != weights.blocks.len()
+    {
         return Err("M54 cache/layer count mismatch".into());
     }
 
@@ -127,7 +130,8 @@ fn prefill(
     let d_head = config.d_model / config.n_heads;
     let mut x = chain.embed(prompt, &weights.embedding)?;
 
-    for (layer_index, block) in weights.blocks.iter().enumerate() {
+    for (layer_index, block) in weights.blocks.iter().enumerate()
+    {
         let xn = chain.rms_norm(&x, &block.norm1, config.eps)?;
         let q = chain.matmul(&xn, &block.wq)?;
         let k = chain.matmul(&xn, &block.wk)?;
@@ -146,7 +150,8 @@ fn prefill(
             query_rope_position_offset: 0,
             kv_rope_position_offset: 0,
         };
-        let ctx = match route {
+        let ctx = match route
+        {
             Route::Portable => portable.forward(&q, &k, &v, flat_config)?,
             Route::Vec4 => vec4.forward(&q, &k, &v, flat_config)?,
         };
@@ -184,8 +189,7 @@ fn timed(
     let kv_dim = config.n_kv_heads * d_head;
     // Product allocation happens before ResidentModel::prefill, so keep fixed
     // cache allocation outside the M54 timing window as well.
-    let (mut kcache, mut vcache) =
-        fresh_caches(chain, weights.blocks.len(), prompt.len(), kv_dim)?;
+    let (mut kcache, mut vcache) = fresh_caches(chain, weights.blocks.len(), prompt.len(), kv_dim)?;
     let started = Instant::now();
     let logits = prefill(
         route,
@@ -214,8 +218,10 @@ fn diff_stats(left: &[f32], right: &[f32]) -> (usize, f32) {
     assert_eq!(left.len(), right.len());
     let mut different = 0usize;
     let mut max_abs = 0.0f32;
-    for (&left, &right) in left.iter().zip(right) {
-        if left.to_bits() != right.to_bits() {
+    for (&left, &right) in left.iter().zip(right)
+    {
+        if left.to_bits() != right.to_bits()
+        {
             different += 1;
         }
         max_abs = max_abs.max((left - right).abs());
@@ -225,8 +231,10 @@ fn diff_stats(left: &[f32], right: &[f32]) -> (usize, f32) {
 
 fn argmax(values: &[f32]) -> usize {
     let mut best = 0usize;
-    for index in 1..values.len() {
-        if values[index] > values[best] {
+    for index in 1..values.len()
+    {
+        if values[index] > values[best]
+        {
             best = index;
         }
     }
@@ -237,7 +245,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let prompt_len = env_usize("SCIAGENT_M54_PROMPT", 128);
     let warmups = env_usize("SCIAGENT_M54_WARMUPS", 1);
     let repeats = env_usize("SCIAGENT_M54_REPEATS", 5);
-    if prompt_len == 0 || warmups == 0 || repeats < 3 {
+    if prompt_len == 0 || warmups == 0 || repeats < 3
+    {
         return Err("M54 requires prompt>0, warmups>0 and repeats>=3".into());
     }
 
@@ -251,7 +260,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Err("M54 SCIAGENT geometry is invalid for this prompt".into());
     }
     let d_head = config.d_model / config.n_heads;
-    if d_head != 64 || config.n_heads != 16 || config.n_kv_heads != 4 {
+    if d_head != 64 || config.n_heads != 16 || config.n_kv_heads != 4
+    {
         return Err(format!(
             "M54 expected SCIAGENT 16Q/4KV D64, got {}/{} D{}",
             config.n_heads, config.n_kv_heads, d_head
@@ -260,12 +270,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let model = SciAgentModel::new(&config);
-    let Some(chain) = GpuChain::new() else {
+    let Some(chain) = GpuChain::new()
+    else
+    {
         return Err("WGPU adapter unavailable".into());
     };
     let portable = chain.flat_m11_bridge()?;
     let vec4 = chain.flat_m11_bridge_with_vectorization(true)?;
-    if portable.vectorization_enabled() || !vec4.vectorization_enabled() {
+    if portable.vectorization_enabled() || !vec4.vectorization_enabled()
+    {
         return Err("M54 bridge selection contract failed".into());
     }
     if chain.adapter_name() != portable.adapter_name()
@@ -302,7 +315,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let (different_logits, max_abs) = diff_stats(&portable_logits, &vec4_logits);
     let portable_token = argmax(&portable_logits);
     let vec4_token = argmax(&vec4_logits);
-    if different_logits != 0 || portable_token != vec4_token {
+    if different_logits != 0 || portable_token != vec4_token
+    {
         return Err(format!(
             "M54 parity failed: different_logits={different_logits} max_abs={max_abs:.9e} portable_token={portable_token} vec4_token={vec4_token}"
         )
@@ -310,24 +324,22 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let routes = [Route::Portable, Route::Vec4];
-    for iteration in 0..warmups {
-        for offset in 0..routes.len() {
+    for iteration in 0..warmups
+    {
+        for offset in 0..routes.len()
+        {
             let route = routes[(iteration + offset) % routes.len()];
             black_box(timed(
-                route,
-                &chain,
-                &portable,
-                &vec4,
-                &weights,
-                &config,
-                &prompt,
+                route, &chain, &portable, &vec4, &weights, &config, &prompt,
             )?);
         }
     }
 
     let mut samples: [Vec<Duration>; 2] = std::array::from_fn(|_| Vec::with_capacity(repeats));
-    for iteration in 0..repeats {
-        for offset in 0..routes.len() {
+    for iteration in 0..repeats
+    {
+        for offset in 0..routes.len()
+        {
             let index = (iteration + offset) % routes.len();
             let (elapsed, logits) = timed(
                 routes[index],
