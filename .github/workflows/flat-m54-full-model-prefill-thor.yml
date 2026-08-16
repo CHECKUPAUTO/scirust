@@ -1,0 +1,218 @@
+name: FLAT M54 full-model prefill Thor
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [master]
+    paths:
+      - "scirust-sciagent/examples/flat_m54_model_prefill_vec4.rs"
+      - "scirust-sciagent/Cargo.toml"
+      - "scirust-gpu/src/flat_m11.rs"
+      - "scirust-gpu/src/chain.rs"
+      - "scirust-gpu/Cargo.toml"
+      - "Cargo.lock"
+      - "docs/FLAT_M54_FULL_MODEL_PREFILL.md"
+      - ".github/workflows/flat-m54-full-model-prefill-thor.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flat-m54-full-model-prefill-thor-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  full-model-prefill-thor:
+    name: SCIAGENT 304M portable vs vec4 prefill
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, ARM64, scirust-arm64, jetson-thor, internal]
+    timeout-minutes: 360
+    env:
+      CARGO_INCREMENTAL: 0
+      RUSTFLAGS: "-D warnings"
+      SCIRUST_THOR_GPU_LOCK: /dev/nvidia0
+      SCIRUST_SOURCE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+      FLAT_M54_PIN: 0ffdbde743f86feb6d67b1aeaa177bcbfe28794f
+      SCIAGENT_M54_WARMUPS: "1"
+      SCIAGENT_M54_REPEATS: "5"
+      SCIRUST_THOR_IDLE_SETTLE_SECONDS: "300"
+      WGPU_BACKEND: vulkan
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Require persistent physical Thor runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$RUNNER_NAME" in
+            tarek-scirust-arm64-01|tarek-scirust-arm64-02|tarek-scirust-arm64-03|tarek-scirust-arm64-04) ;;
+            *)
+              echo "::error::M54 requires tarek-scirust-arm64-01..04; refusing $RUNNER_NAME"
+              exit 1
+              ;;
+          esac
+
+      - name: Verify exact source and FLAT pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          echo "source_revision=$actual"
+          test "$actual" = "$SCIRUST_SOURCE_REVISION"
+          grep -F "rev = \"$FLAT_M54_PIN\"" scirust-gpu/Cargo.toml >/dev/null
+          grep -F "#$FLAT_M54_PIN" Cargo.lock >/dev/null
+
+      - name: Prepare isolated build directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmpdir="$(mktemp -d "$RUNNER_TEMP/flat-m54.XXXXXX")"
+          chmod 700 "$tmpdir"
+          mkdir -p "$tmpdir/cargo-home" "$tmpdir/rustup-home" "$tmpdir/target"
+          echo "TMPDIR=$tmpdir" >> "$GITHUB_ENV"
+          echo "CARGO_HOME=$tmpdir/cargo-home" >> "$GITHUB_ENV"
+          echo "RUSTUP_HOME=$tmpdir/rustup-home" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_DIR=$tmpdir/target" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt
+
+      - name: Format and build exact M54 benchmark
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup run nightly-2026-07-02 rustfmt --check --edition 2021 \
+            scirust-sciagent/examples/flat_m54_model_prefill_vec4.rs
+          rustup run nightly-2026-07-02 cargo build --release --locked \
+            -p scirust-sciagent --features flat-attention \
+            --example flat_m54_model_prefill_vec4
+          benchmark="$CARGO_TARGET_DIR/release/examples/flat_m54_model_prefill_vec4"
+          test -x "$benchmark"
+          echo "FLAT_M54_BENCHMARK=$benchmark" >> "$GITHUB_ENV"
+
+      - name: Exclusive physical Thor qualification
+        shell: bash
+        timeout-minutes: 330
+        run: |
+          set -euo pipefail
+
+          for prerequisite in flock pgrep stat nvidia-smi vulkaninfo; do
+            command -v "$prerequisite" >/dev/null || {
+              echo "::error::missing physical-Thor prerequisite: $prerequisite"
+              exit 1
+            }
+          done
+
+          if [[ ! -c "$SCIRUST_THOR_GPU_LOCK" || ! -r "$SCIRUST_THOR_GPU_LOCK" || ! -w "$SCIRUST_THOR_GPU_LOCK" ]]; then
+            echo "::error::physical Thor lock target is not an accessible NVIDIA character device"
+            exit 1
+          fi
+
+          stat -Lc 'gpu_lock_target=%n st_dev=%d inode=%i rdev_hex=%t:%T mode=%a owner=%U:%G type=%F' \
+            "$SCIRUST_THOR_GPU_LOCK"
+          exec 9<>"$SCIRUST_THOR_GPU_LOCK"
+          flock -x 9
+          if flock -n "$SCIRUST_THOR_GPU_LOCK" -c 'true'; then
+            echo "::error::physical GPU lock does not contend independently"
+            exit 1
+          fi
+
+          inventory="$(nvidia-smi --query-gpu=name,driver_version --format=csv,noheader)"
+          printf '%s\n' "$inventory"
+          grep -F "NVIDIA Thor" <<< "$inventory" >/dev/null
+          summary="$(vulkaninfo --summary 2>&1)"
+          grep -F "NVIDIA Tegra NVIDIA Thor" <<< "$summary" >/dev/null
+
+          compute_processes() {
+            nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null
+          }
+
+          deadline=$((SECONDS + 18000))
+          settled=0
+          while (( settled < 10#$SCIRUST_THOR_IDLE_SETTLE_SECONDS )); do
+            training="$(pgrep -af '[c]uda_pretrain' || true)"
+            active="$(compute_processes)"
+            if [[ -n "${training//[[:space:]]/}" || -n "${active//[[:space:]]/}" ]]; then
+              echo "Thor busy; restarting M54 idle window."
+              [[ -z "${training//[[:space:]]/}" ]] || printf '%s\n' "$training"
+              [[ -z "${active//[[:space:]]/}" ]] || printf '%s\n' "$active"
+              settled=0
+            else
+              settled=$((settled + 5))
+              if (( settled == 5 || settled % 60 == 0 )); then
+                echo "Thor continuously idle: ${settled}/${SCIRUST_THOR_IDLE_SETTLE_SECONDS}s"
+              fi
+            fi
+            if (( SECONDS >= deadline )); then
+              echo "::error::Thor never reached the required M54 idle window"
+              exit 1
+            fi
+            sleep 5
+          done
+
+          echo "source_revision=$(git rev-parse HEAD)"
+          echo "flat_revision=$FLAT_M54_PIN"
+          echo "benchmark_scope=SCIAGENT_304M_full_prefill_cache_seed_lm_head_readback"
+
+          for prompt in 128 512; do
+            output="$RUNNER_TEMP/flat-m54-prompt-${prompt}.csv"
+            echo "Running M54 prompt=$prompt"
+            SCIAGENT_M54_PROMPT="$prompt" \
+            SCIAGENT_M54_WARMUPS="$SCIAGENT_M54_WARMUPS" \
+            SCIAGENT_M54_REPEATS="$SCIAGENT_M54_REPEATS" \
+              "$FLAT_M54_BENCHMARK" >"$output" 2>&1 &
+            bench_pid=$!
+
+            contaminated=0
+            while kill -0 "$bench_pid" 2>/dev/null; do
+              if pgrep -af '[c]uda_pretrain' >/tmp/m54-training.txt; then
+                echo "::error::SciAgent training appeared during M54 timing"
+                cat /tmp/m54-training.txt
+                contaminated=1
+                break
+              fi
+
+              active="$(compute_processes || true)"
+              if [[ -n "${active//[[:space:]]/}" ]]; then
+                while IFS=',' read -r raw_pid process_name; do
+                  pid="$(printf '%s' "$raw_pid" | tr -d '[:space:]')"
+                  process_name="$(printf '%s' "$process_name" | xargs)"
+                  [[ -z "$pid" ]] && continue
+                  if [[ "$pid" != "$bench_pid" ]]; then
+                    echo "::error::foreign GPU compute during M54: pid=$pid process=$process_name"
+                    contaminated=1
+                  fi
+                done <<< "$active"
+              fi
+              (( contaminated == 0 )) || break
+              sleep 1
+            done
+
+            if (( contaminated != 0 )); then
+              kill "$bench_pid" 2>/dev/null || true
+              wait "$bench_pid" 2>/dev/null || true
+              exit 1
+            fi
+
+            wait "$bench_pid"
+            cat "$output"
+            test "$(wc -l < "$output")" -ge 2
+            grep -F ',none' "$output" >/dev/null
+            grep -F '304088064' "$output" >/dev/null
+            grep -F '16,4,64,2816,32768' "$output" >/dev/null
+            grep -F 'NVIDIA Tegra NVIDIA Thor' "$output" >/dev/null
+          done
+
+          post="$(compute_processes)"
+          if [[ -n "${post//[[:space:]]/}" ]]; then
+            echo "::error::post-M54 compute occupancy is not empty"
+            printf '%s\n' "$post"
+            exit 1
+          fi
