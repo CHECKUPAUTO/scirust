@@ -1,32 +1,42 @@
-//! Automatic Mixed Precision (AMP) training wrapper.
+//! Automatic Mixed Precision (AMP) utilities.
 //!
 //! > ⚠️ **Experimental / no consumers**: this module is not used by any
 //! > crate in the workspace. The API may change or be removed; open an
 //! > issue if you depend on it.
 //!
 //! > **Note:** a second, AMP-adjacent implementation lives at
-//! > [`crate::autodiff::mixed_precision`] (loss scaling + f16/BF16 master
-//! > weights on the autodiff tape). The two should converge — prefer that
-//! > one if it covers your use case.
+//! > [`crate::autodiff::mixed_precision`] (FP16 shadow weights + dynamic loss
+//! > scaling around the 2-D autodiff tensor stack). The two should converge —
+//! > prefer that one if it covers your use case.
 //!
-//! Provides a `MixedPrecisionEnv` that automatically casts model weights
-//! and activations between f32 and f16/BF16 for memory-efficient training.
+//! [`MixedPrecisionEnv`] provides explicit helpers for precision conversion,
+//! loss scaling, gradient unscaling, overflow detection, and dynamic scale
+//! updates. It does **not** own a model, run forward/backward, or perform an
+//! optimizer step; callers compose these helpers into their training loop.
 //!
-//! The pattern:
-//! - Weights stored in f32 (master copy).
-//! - Forward pass uses f16/BF16 for compute.
-//! - Loss is scaled up to avoid underflow.
-//! - Gradients are unscaled before the optimizer step.
+//! The intended pattern is:
+//! - keep master weights in f32;
+//! - cast the buffers used by the forward pass with [`MixedPrecisionEnv::cast_to`];
+//! - scale the loss with [`MixedPrecisionEnv::scale_loss`];
+//! - unscale gradients with [`MixedPrecisionEnv::unscale_gradients`];
+//! - detect overflow with [`MixedPrecisionEnv::has_overflow`] and update the
+//!   dynamic scale with [`MixedPrecisionEnv::update_scale`].
 //!
 //! # Example
 //!
-//! ```ignore
-//! use scirust_core::amp::MixedPrecisionEnv;
+//! ```
+//! use scirust_core::amp::{LossScale, MixedPrecisionEnv, MixedPrecisionKind};
 //!
 //! let mut amp = MixedPrecisionEnv::new(MixedPrecisionKind::BF16, LossScale::Dynamic);
-//! // ... in training loop:
-//! let (loss, grads) = amp.forward_backward(&model, &data, &labels)?;
-//! amp.optimizer_step(&mut opt, &grads)?;
+//! let activations = amp.cast_to(&[1.0, 2.0, 3.0]);
+//! let scaled_loss = amp.scale_loss(0.125);
+//! let grads = amp.unscale_gradients(&[0.5, 1.0, 2.0]);
+//! let overflow = MixedPrecisionEnv::has_overflow(&grads);
+//! amp.update_scale(overflow);
+//!
+//! assert_eq!(activations.len(), 3);
+//! assert!(scaled_loss.is_finite());
+//! assert!(!overflow);
 //! ```
 
 /// Precision kind for mixed-precision training.
