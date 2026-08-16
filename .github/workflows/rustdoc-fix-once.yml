@@ -1,8 +1,9 @@
 name: Rustdoc debt fix once
 
 on:
-  push:
-    branches: [codex/gate-workspace-rustdoc]
+  pull_request:
+    branches: [master, main, develop]
+    types: [synchronize, opened, reopened]
 
 permissions:
   contents: write
@@ -13,7 +14,7 @@ env:
 
 jobs:
   fix:
-    if: github.actor != 'github-actions[bot]'
+    if: github.head_ref == 'codex/gate-workspace-rustdoc' && github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
