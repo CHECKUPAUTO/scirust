@@ -66,6 +66,10 @@ pub enum Operation {
     /// forward-mode differentiation of ReLU executable without embedding a
     /// comparison sub-language in the graph IR.
     ReluGrad,
+    /// Produce an all-zero tensor with the input's type.
+    ZerosLike,
+    /// Produce an all-one tensor with the input's type.
+    OnesLike,
 
     MatMul,
 
@@ -89,6 +93,8 @@ impl Operation {
             | Self::Exp
             | Self::Log
             | Self::Scale { .. }
+            | Self::ZerosLike
+            | Self::OnesLike
             | Self::Reshape { .. }
             | Self::Transpose { .. }
             | Self::StopGradient
