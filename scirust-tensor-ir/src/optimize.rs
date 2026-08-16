@@ -67,7 +67,7 @@ impl From<GraphError> for OptimizationError {
 /// Constant tensor payloads intentionally live outside `Graph`, so payload
 /// constant folding belongs to the runtime/compiler layer. This pass performs
 /// every optimization that can be proven from IR structure alone: DCE, exact
-/// CSE, identity/view simplification and scalar-attribute folding.
+/// CSE, identity/view simplification and scalar-attribute simplification.
 pub fn optimize_graph(
     source: &Graph,
     config: OptimizationConfig,
@@ -93,7 +93,7 @@ pub fn optimize_graph(
             stats.eliminated_dead_nodes += 1;
             continue;
         }
-        let old_id = NodeId::new(index as u32);
+
         let mapped_inputs = node
             .inputs
             .iter()
@@ -113,25 +113,22 @@ pub fn optimize_graph(
 
         let mut operation = node.operation.clone();
         if config.algebraic_simplification {
-            if let Some(folded) = fold_operation(&graph, &operation, &mapped_inputs, &node.output) {
+            if let Some(folded) = simplify_operation(&operation) {
                 operation = folded;
                 stats.simplified_nodes += 1;
             }
         }
 
-        if config.common_subexpression_elimination
-            && cse_eligible(&operation)
-            && let Some(existing) = find_equivalent(&graph, &operation, &mapped_inputs, &node.output)
-        {
-            mapping[index] = Some(existing);
-            stats.common_subexpressions += 1;
-            continue;
+        if config.common_subexpression_elimination && cse_eligible(&operation) {
+            if let Some(existing) = find_equivalent(&graph, &operation, &mapped_inputs, &node.output) {
+                mapping[index] = Some(existing);
+                stats.common_subexpressions += 1;
+                continue;
+            }
         }
 
         let new_id = graph.add_node(operation, mapped_inputs, node.output.clone())?;
-        debug_assert!(mapping[index].is_none());
         mapping[index] = Some(new_id);
-        let _ = old_id;
     }
 
     let outputs = source
@@ -180,31 +177,21 @@ fn simplify_alias(
             if input_type.dtype == output.dtype && input_type.shape == *shape => Some(input),
         Operation::Transpose { permutation }
             if permutation.iter().copied().eq(0..permutation.len()) => Some(input),
+        Operation::BroadcastTo { shape }
+            if input_type.dtype == output.dtype && input_type.shape == *shape => Some(input),
+        Operation::ReduceSumTo { shape }
+            if input_type.dtype == output.dtype && input_type.shape == *shape => Some(input),
         _ => None,
     }
 }
 
-fn fold_operation(
-    graph: &Graph,
-    operation: &Operation,
-    inputs: &[NodeId],
-    output: &TensorType,
-) -> Option<Operation> {
+/// Only folds transformations that do not require changing the input edge.
+/// Nested-scale folding deliberately stays out of this helper: replacing
+/// `scale(scale(x, a), b)` by `scale(scale(x, a), a*b)` would apply `a` twice
+/// unless the parent edge is rewritten at the same time.
+fn simplify_operation(operation: &Operation) -> Option<Operation> {
     match operation {
         Operation::Scale { factor } if factor.as_f32() == Some(0.0) => Some(Operation::ZerosLike),
-        Operation::Scale { factor } => {
-            let input = *inputs.first()?;
-            let parent = &graph.nodes()[input.get() as usize];
-            let Operation::Scale { factor: parent_factor } = parent.operation else {
-                return None;
-            };
-            if parent.output != *output {
-                return None;
-            }
-            Some(Operation::Scale {
-                factor: crate::Scalar::f32(parent_factor.as_f32()? * factor.as_f32()?),
-            })
-        }
         _ => None,
     }
 }
@@ -281,5 +268,24 @@ mod tests {
         assert_eq!(optimized.stats.simplified_nodes, 2);
         assert_eq!(optimized.graph.nodes().len(), 1);
         assert_eq!(optimized.graph.outputs(), &[NodeId::new(0)]);
+    }
+
+    #[test]
+    fn scale_zero_becomes_zeros_like_without_changing_edge() {
+        let mut graph = Graph::new();
+        let x = graph.add_input("x", ty()).unwrap();
+        let zero = graph
+            .add_node(
+                Operation::Scale { factor: crate::Scalar::f32(0.0) },
+                vec![x],
+                ty(),
+            )
+            .unwrap();
+        graph.set_outputs(vec![zero]).unwrap();
+        let optimized = optimize_graph(&graph, OptimizationConfig::default()).unwrap();
+        assert!(matches!(
+            optimized.graph.nodes()[1].operation,
+            Operation::ZerosLike
+        ));
     }
 }
