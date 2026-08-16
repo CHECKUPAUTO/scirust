@@ -16,6 +16,7 @@ mod ids;
 mod operation;
 mod optimize;
 mod verify;
+mod vmap;
 
 pub use autodiff::{
     AutodiffError, GradGraph, JvpGraph, VjpGraph, grad, jvp, value_and_grad, vjp,
@@ -28,5 +29,6 @@ pub use optimize::{
     OptimizationConfig, OptimizationError, OptimizationStats, OptimizedGraph, optimize_graph,
 };
 pub use verify::{SemanticError, validate_semantics};
+pub use vmap::{VmapError, VmapGraph, vmap};
 
 pub use scirust_compute::{DType, Shape};
