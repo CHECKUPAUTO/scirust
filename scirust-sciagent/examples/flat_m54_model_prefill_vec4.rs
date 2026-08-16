@@ -289,7 +289,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let weights = upload_model(&chain, &model);
     let prompt = synthetic_tokens(prompt_len, config.vocab_size);
-    let _ = portable.context().device().poll(wgpu::Maintain::Wait);
 
     // Correctness gate before any timing claim. M53 was exactly equal to the
     // portable attention output on its qualified Thor matrix; M54 requires that
