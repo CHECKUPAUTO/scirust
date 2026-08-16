@@ -259,8 +259,7 @@ impl SmoothedClassifier {
     /// Panics if `sigma` is non-finite or non-positive. Prefer [`Self::try_new`]
     /// for caller-controlled configuration.
     pub fn new(sigma: f32) -> Self {
-        Self::try_new(sigma)
-            .unwrap_or_else(|error| panic!("SmoothedClassifier::new: {error}"))
+        Self::try_new(sigma).unwrap_or_else(|error| panic!("SmoothedClassifier::new: {error}"))
     }
 
     fn validate_alpha(alpha: f64) -> Result<()> {
@@ -569,7 +568,7 @@ mod tests {
         assert_eq!(betai(2.0, 3.0, 0.0), 0.0);
         assert_eq!(betai(2.0, 3.0, 1.0), 1.0);
         assert!((betai(2.0, 2.0, 0.5) - 0.5).abs() < 1e-9);
-        assert!(betai(2.0, 5.0, 0.3) < betai(2.0, 5.0, 0.6)); // monotone
+        assert!(betai(2.0, 5.0, 0.3) < betai(2.0, 5.0, 0.6));
     }
 
     /// Clopper–Pearson lower bound is below the point estimate, inverts `betai`
@@ -580,9 +579,7 @@ mod tests {
         let p_l = clopper_pearson_lower(50, 100, 0.05);
         assert!(p_l < 0.5 && p_l > 0.0, "p_l = {p_l}");
         assert!((p_l - 0.416).abs() < 0.01, "CP(50,100,0.05) = {p_l}");
-        // Inversion identity: I_{p_l}(k, n-k+1) ≈ alpha.
         assert!((betai(50.0, 51.0, p_l) - 0.05).abs() < 1e-6);
-        // k = 0 ⇒ 0; more successes ⇒ larger lower bound.
         assert_eq!(clopper_pearson_lower(0, 100, 0.05), 0.0);
         assert!(clopper_pearson_lower(90, 100, 0.05) > clopper_pearson_lower(60, 100, 0.05));
     }
@@ -662,7 +659,6 @@ mod tests {
             smc.certify(&halfspace, &[d, 0.0, 0.0], n, 2, alpha, &mut rng)
         };
 
-        // Radius ≈ d (conservative ⇒ within [0.8 d, 1.02 d]); class is 1.
         for &d in &[0.5f32, 1.0, 1.5]
         {
             let c = certify_at(d, 1.0);
@@ -674,13 +670,10 @@ mod tests {
                 c.radius
             );
         }
-        // σ-invariance: the certified radius tracks d, not σ.
         let r_lo = certify_at(1.0, 0.5).radius;
         let r_hi = certify_at(1.0, 2.0).radius;
         assert!(r_lo > 0.8 && r_lo < 1.02, "σ=0.5: radius {r_lo}");
         assert!(r_hi > 0.8 && r_hi < 1.02, "σ=2.0: radius {r_hi}");
-
-        // Determinism: same seed ⇒ identical certificate.
         assert_eq!(certify_at(1.0, 1.0).radius, certify_at(1.0, 1.0).radius);
     }
 
@@ -692,13 +685,11 @@ mod tests {
         let halfspace = |z: &[f32]| -> usize { usize::from(z[0] > 0.0) };
         let smc = SmoothedClassifier::new(1.0);
 
-        // Far from the boundary: certified, class 1, positive radius.
         let mut rng = PcgEngine::new(3);
         let far = smc.certify(&halfspace, &[2.5, 0.0], 5000, 2, 0.01, &mut rng);
         assert_eq!(far.class, 1);
         assert!(!far.abstained && far.radius > 0.0);
 
-        // On the boundary (d = 0): pₐ ≈ 0.5, cannot clear ½ ⇒ abstain.
         let mut rng = PcgEngine::new(3);
         let edge = smc.certify(&halfspace, &[0.0, 0.0], 5000, 2, 0.01, &mut rng);
         assert!(edge.abstained && edge.radius == 0.0);
