@@ -62,6 +62,37 @@ pub fn prune_magnitude(weights: &mut [f32], sparsity: f32) {
     }
 }
 
+/// Prune a fraction of weights that are still active (non-zero).
+///
+/// Iterative Lottery Ticket pruning must not count weights pruned by earlier
+/// rounds toward the next round's quota. Otherwise existing zeros sort first
+/// and a second pruning round can become a no-op.
+fn prune_active_magnitude(weights: &mut [f32], fraction: f32) {
+    if fraction <= 0.0 || weights.is_empty()
+    {
+        return;
+    }
+
+    let mut active: Vec<(usize, f32)> = weights
+        .iter()
+        .enumerate()
+        .filter(|(_, w)| **w != 0.0)
+        .map(|(i, &w)| (i, w.abs()))
+        .collect();
+
+    let n_prune = ((active.len() as f32) * fraction) as usize;
+    if n_prune == 0
+    {
+        return;
+    }
+
+    active.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+    for (idx, _) in active.iter().take(n_prune)
+    {
+        weights[*idx] = 0.0;
+    }
+}
+
 /// Prune a weight matrix using structured column pruning.
 ///
 /// Removes columns with smallest L2 norm. `sparsity` fraction of columns
@@ -194,7 +225,7 @@ impl LotteryTicketPruner {
         self.initial_weights = Some(weights.to_vec());
     }
 
-    /// Prune and rewind: zero smallest weights, restore others to initial values.
+    /// Prune and rewind: zero smallest active weights, restore others to initial values.
     pub fn prune_and_rewind(&self, weights: &mut [f32]) {
         let initial = match &self.initial_weights
         {
@@ -208,8 +239,9 @@ impl LotteryTicketPruner {
             return; // Already reached target sparsity
         }
 
-        // Prune smallest
-        prune_magnitude(weights, self.prune_fraction);
+        // Prune a fraction of the weights that survived previous rounds. Counting
+        // existing zeros again makes iterative pruning stall after the first round.
+        prune_active_magnitude(weights, self.prune_fraction);
 
         // Rewind non-zero weights to initial values
         for (w, &init) in weights.iter_mut().zip(initial.iter())
@@ -291,6 +323,26 @@ mod tests {
         // Weight 0 and 2 kept, rewound to initial
         assert_eq!(weights[0], 0.5);
         assert_eq!(weights[2], 0.8);
+    }
+
+    #[test]
+    fn lottery_ticket_prunes_survivors_on_later_rounds() {
+        let initial = vec![8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0];
+        let mut pruner = LotteryTicketPruner::new(0.5, 2);
+        pruner.save_initial(&initial);
+        let mut weights = initial.clone();
+
+        pruner.prune_and_rewind(&mut weights);
+        assert_eq!(weights.iter().filter(|&&w| w == 0.0).count(), 4);
+
+        // A second 50% round applies to the four surviving weights, pruning two
+        // more. The old implementation selected the four existing zeros again
+        // and stalled permanently at 50% instead of the intended 75%.
+        pruner.prune_and_rewind(&mut weights);
+        assert_eq!(weights.iter().filter(|&&w| w == 0.0).count(), 6);
+        assert!((sparsity_ratio(&weights) - 0.75).abs() < 1e-6);
+        assert_eq!(weights[0], initial[0]);
+        assert_eq!(weights[1], initial[1]);
     }
 
     /// Wanda prunes by `|w|·‖x‖`, so a *large* weight on a *quiet* input is
