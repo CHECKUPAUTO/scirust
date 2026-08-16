@@ -9,6 +9,16 @@ use crate::{ComputeError, ComputeResult, Shape};
 pub struct Strides(Vec<usize>);
 
 impl Strides {
+    /// Construct an explicit element-stride vector.
+    ///
+    /// This is intentionally a metadata constructor: layout validity depends on
+    /// the tensor shape/storage pairing and is checked by the tensor layer. Zero
+    /// strides are permitted so broadcast views can be represented without a
+    /// copy.
+    pub fn new(values: impl Into<Vec<usize>>) -> Self {
+        Self(values.into())
+    }
+
     pub fn contiguous(shape: &Shape) -> ComputeResult<Self> {
         let rank = shape.rank();
         let mut values = vec![1usize; rank];
@@ -58,5 +68,11 @@ mod tests {
             Strides::contiguous(&shape),
             Err(ComputeError::ShapeOverflow)
         );
+    }
+
+    #[test]
+    fn explicit_strides_preserve_zero_for_broadcast_views() {
+        let strides = Strides::new(vec![0, 4, 1]);
+        assert_eq!(strides.values(), &[0, 4, 1]);
     }
 }
