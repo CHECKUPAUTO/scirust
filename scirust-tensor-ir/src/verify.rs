@@ -158,7 +158,6 @@ pub fn validate_semantics(graph: &Graph) -> Result<(), SemanticError> {
                     return Err(SemanticError::InvalidBatchMatMul { node: id });
                 }
             }
-            _ => {}
         }
     }
     Ok(())
