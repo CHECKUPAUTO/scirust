@@ -1,0 +1,33 @@
+name: Workspace Rustdoc
+
+on:
+  push:
+    branches: [master, main, develop]
+  pull_request:
+    branches: [master, main, develop]
+
+concurrency:
+  group: rustdoc-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUSTDOCFLAGS: "-D warnings"
+
+jobs:
+  rustdoc:
+    name: Rustdoc (stable, workspace)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Build authoritative workspace rustdoc
+        run: cargo +stable doc --workspace --no-deps --locked
