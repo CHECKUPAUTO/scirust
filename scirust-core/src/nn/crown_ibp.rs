@@ -34,6 +34,7 @@
 //! [`IbpMlp`] verifier.
 
 use crate::autodiff::nd::{NdTape, NdVar};
+use crate::error::{Result, SciRustError};
 use crate::nn::ibp::{IbpLinear, IbpMlp};
 use crate::nn::nd_optim::NdParam;
 use crate::nn::rng::PcgEngine;
@@ -49,28 +50,80 @@ pub struct CrownIbpMlp {
 }
 
 impl CrownIbpMlp {
-    /// New MLP for the given layer sizes `dims = [in, h₁, …, out]` (ReLU between
-    /// hidden layers), seeded with `1/√fan_in` weights and zero biases.
-    pub fn new(dims: &[usize], rng: &mut PcgEngine) -> Self {
-        assert!(dims.len() >= 2, "CrownIbpMlp: need at least in/out dims");
+    /// Fallible constructor for the given layer sizes `dims = [in, h₁, …, out]`.
+    ///
+    /// Every layer dimension must be non-zero and every adjacent matrix size
+    /// must fit in `usize`, so initialization cannot accidentally derive an
+    /// infinite `1/√fan_in` scale or overflow a weight allocation size.
+    pub fn try_new(dims: &[usize], rng: &mut PcgEngine) -> Result<Self> {
+        if dims.len() < 2
+        {
+            return Err(SciRustError::InvalidConfig(
+                "CrownIbpMlp requires at least input and output dimensions".to_string(),
+            ));
+        }
+        if dims.iter().any(|&dim| dim == 0)
+        {
+            return Err(SciRustError::InvalidConfig(
+                "CrownIbpMlp layer dimensions must all be > 0".to_string(),
+            ));
+        }
+
         let mut weights = Vec::new();
         let mut biases = Vec::new();
         for l in 0..dims.len() - 1
         {
             let (din, dout) = (dims[l], dims[l + 1]);
+            let n_weights = din.checked_mul(dout).ok_or_else(|| {
+                SciRustError::InvalidConfig(format!(
+                    "CrownIbpMlp layer {l} weight dimensions overflow usize"
+                ))
+            })?;
             let scale = (1.0 / din as f32).sqrt();
-            let w: Vec<f32> = (0..din * dout)
+            let w: Vec<f32> = (0..n_weights)
                 .map(|_| rng.float_signed() * scale)
                 .collect();
             weights.push(TensorND::new(w, vec![din, dout]));
             biases.push(TensorND::zeros(&[1, dout]));
         }
         let n = weights.len();
-        Self {
+        Ok(Self {
             weights,
             biases,
             w_idx: vec![None; n],
             b_idx: vec![None; n],
+        })
+    }
+
+    /// New MLP for the given layer sizes `dims = [in, h₁, …, out]` (ReLU between
+    /// hidden layers), seeded with `1/√fan_in` weights and zero biases.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the dimensions cannot define a valid network. Prefer
+    /// [`Self::try_new`] for caller-controlled configuration.
+    pub fn new(dims: &[usize], rng: &mut PcgEngine) -> Self {
+        Self::try_new(dims, rng).unwrap_or_else(|error| panic!("CrownIbpMlp::new: {error}"))
+    }
+
+    fn input_dim(&self) -> usize {
+        self.weights[0].shape[0]
+    }
+
+    fn output_dim(&self) -> usize {
+        self.weights[self.weights.len() - 1].shape[1]
+    }
+
+    fn validate_eps(eps: f32) -> Result<()> {
+        if !eps.is_finite() || eps < 0.0
+        {
+            Err(SciRustError::InvalidConfig(
+                "certified IBP epsilon must be finite and >= 0".to_string(),
+            ))
+        }
+        else
+        {
+            Ok(())
         }
     }
 
@@ -130,21 +183,59 @@ impl CrownIbpMlp {
         (center, radius)
     }
 
-    /// **Certified (robust) loss** over an ℓ∞ ball of radius `eps` around each row of
-    /// `x` (`batch × in`). Propagates the IBP box through the network on the tape,
-    /// builds the worst-case ("robust") logits, and returns their cross-entropy with
-    /// `targets`. Minimising it makes the points **certifiably** classified.
-    /// (`eps = 0` recovers ordinary cross-entropy training.)
-    pub fn robust_loss<'t>(
+    /// Fallible certified robust loss over an ℓ∞ ball of radius `eps`.
+    ///
+    /// Validates the public certificate request before any IBP propagation:
+    /// `x` must be a non-empty `(batch × in)` matrix with the network's input
+    /// width, `eps` must be finite and non-negative, there must be one target per
+    /// row, and every target must name a real output class.
+    pub fn try_robust_loss<'t>(
         &mut self,
         tape: &'t NdTape,
         x: NdVar<'t>,
         eps: f32,
         targets: &[usize],
-    ) -> NdVar<'t> {
+    ) -> Result<NdVar<'t>> {
+        Self::validate_eps(eps)?;
+        let shape = x.shape();
+        if shape.len() != 2
+        {
+            return Err(SciRustError::InvalidConfig(format!(
+                "CrownIbpMlp robust_loss expects rank-2 input, got rank {}",
+                shape.len()
+            )));
+        }
+        let (batch, input_width) = (shape[0], shape[1]);
+        if batch == 0
+        {
+            return Err(SciRustError::InvalidConfig(
+                "CrownIbpMlp robust_loss requires a non-empty batch".to_string(),
+            ));
+        }
+        if input_width != self.input_dim()
+        {
+            return Err(SciRustError::InvalidConfig(format!(
+                "CrownIbpMlp input width mismatch: expected {}, got {input_width}",
+                self.input_dim()
+            )));
+        }
+        if targets.len() != batch
+        {
+            return Err(SciRustError::InvalidConfig(format!(
+                "CrownIbpMlp target count mismatch: expected {batch}, got {}",
+                targets.len()
+            )));
+        }
+        let k = self.output_dim();
+        if let Some(&target) = targets.iter().find(|&&target| target >= k)
+        {
+            return Err(SciRustError::InvalidConfig(format!(
+                "CrownIbpMlp target class {target} is out of range for {k} classes"
+            )));
+        }
+
         let (center, radius) = self.ibp_propagate(tape, x, eps);
         // Robust logits: zₜ = cₜ − rₜ (true class at its lower bound), z_j = c_j + r_j.
-        let (batch, k) = (center.shape()[0], center.shape()[1]);
         let mut s = vec![1.0f32; batch * k];
         for (i, &t) in targets.iter().enumerate()
         {
@@ -152,13 +243,48 @@ impl CrownIbpMlp {
         }
         let smask = tape.input(TensorND::new(s, vec![batch, k]));
         let z = center.add(radius.mul(smask));
-        z.cross_entropy(targets)
+        Ok(z.cross_entropy(targets))
     }
 
-    /// The certified output box `(lower, upper)` for a **single** input `x` from the
-    /// **tape** IBP forward — used to validate the differentiable propagation against
-    /// the plain [`IbpMlp`] verifier.
-    pub fn certified_box(&mut self, x: &[f32], eps: f32) -> (Vec<f32>, Vec<f32>) {
+    /// **Certified (robust) loss** over an ℓ∞ ball of radius `eps` around each row of
+    /// `x` (`batch × in`). Propagates the IBP box through the network on the tape,
+    /// builds the worst-case ("robust") logits, and returns their cross-entropy with
+    /// `targets`. Minimising it makes the points **certifiably** classified.
+    /// (`eps = 0` recovers ordinary cross-entropy training.)
+    ///
+    /// # Panics
+    ///
+    /// Panics when the certificate request is malformed. Prefer
+    /// [`Self::try_robust_loss`] for caller-controlled inputs.
+    pub fn robust_loss<'t>(
+        &mut self,
+        tape: &'t NdTape,
+        x: NdVar<'t>,
+        eps: f32,
+        targets: &[usize],
+    ) -> NdVar<'t> {
+        self.try_robust_loss(tape, x, eps, targets)
+            .unwrap_or_else(|error| panic!("CrownIbpMlp::robust_loss: {error}"))
+    }
+
+    /// Fallible certified output box `(lower, upper)` for a single input.
+    pub fn try_certified_box(&mut self, x: &[f32], eps: f32) -> Result<(Vec<f32>, Vec<f32>)> {
+        Self::validate_eps(eps)?;
+        if x.len() != self.input_dim()
+        {
+            return Err(SciRustError::InvalidConfig(format!(
+                "CrownIbpMlp certified_box input size mismatch: expected {}, got {}",
+                self.input_dim(),
+                x.len()
+            )));
+        }
+        if !x.iter().all(|value| value.is_finite())
+        {
+            return Err(SciRustError::InvalidConfig(
+                "CrownIbpMlp certified_box input must be finite".to_string(),
+            ));
+        }
+
         let tape = NdTape::new();
         let xv = tape.input(TensorND::new(x.to_vec(), vec![1, x.len()]));
         let (c, r) = self.ibp_propagate(&tape, xv, eps);
@@ -175,7 +301,20 @@ impl CrownIbpMlp {
             .zip(rv.data.iter())
             .map(|(&c, &r)| c + r)
             .collect();
-        (lo, hi)
+        Ok((lo, hi))
+    }
+
+    /// The certified output box `(lower, upper)` for a **single** input `x` from the
+    /// **tape** IBP forward — used to validate the differentiable propagation against
+    /// the plain [`IbpMlp`] verifier.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `x` has the wrong width/non-finite values or `eps` is invalid.
+    /// Prefer [`Self::try_certified_box`] for caller-controlled requests.
+    pub fn certified_box(&mut self, x: &[f32], eps: f32) -> (Vec<f32>, Vec<f32>) {
+        self.try_certified_box(x, eps)
+            .unwrap_or_else(|error| panic!("CrownIbpMlp::certified_box: {error}"))
     }
 
     /// Trainable parameters (weights and biases, in layer order).
@@ -227,6 +366,58 @@ mod tests {
     use super::*;
     use crate::nn::ibp::{Interval, certified_robust};
     use crate::nn::nd_optim::NdAdam;
+
+    #[test]
+    fn fallible_ibp_boundary_rejects_invalid_configuration() {
+        let mut rng = PcgEngine::new(91);
+        assert!(CrownIbpMlp::try_new(&[], &mut rng).is_err());
+        assert!(CrownIbpMlp::try_new(&[2], &mut rng).is_err());
+        assert!(CrownIbpMlp::try_new(&[2, 0, 2], &mut rng).is_err());
+
+        let mut net = CrownIbpMlp::try_new(&[2, 3, 2], &mut rng).unwrap();
+        assert!(net.try_certified_box(&[0.0], 0.1).is_err());
+        assert!(net.try_certified_box(&[0.0, 1.0], -0.1).is_err());
+        assert!(net.try_certified_box(&[0.0, 1.0], f32::NAN).is_err());
+        assert!(
+            net.try_certified_box(&[0.0, f32::INFINITY], 0.1)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn fallible_robust_loss_rejects_bad_shape_targets_or_epsilon() {
+        let mut rng = PcgEngine::new(92);
+        let mut net = CrownIbpMlp::try_new(&[2, 3, 2], &mut rng).unwrap();
+
+        let tape = NdTape::new();
+        let wrong_width = tape.input(TensorND::new(vec![0.0; 3], vec![1, 3]));
+        assert!(
+            net.try_robust_loss(&tape, wrong_width, 0.1, &[0])
+                .is_err()
+        );
+
+        let tape = NdTape::new();
+        let x = tape.input(TensorND::new(vec![0.0; 4], vec![2, 2]));
+        assert!(net.try_robust_loss(&tape, x, -0.1, &[0, 1]).is_err());
+
+        let tape = NdTape::new();
+        let x = tape.input(TensorND::new(vec![0.0; 4], vec![2, 2]));
+        assert!(net.try_robust_loss(&tape, x, 0.1, &[0]).is_err());
+
+        let tape = NdTape::new();
+        let x = tape.input(TensorND::new(vec![0.0; 4], vec![2, 2]));
+        assert!(net.try_robust_loss(&tape, x, 0.1, &[0, 2]).is_err());
+    }
+
+    #[test]
+    fn fallible_ibp_boundary_accepts_valid_request() {
+        let mut rng = PcgEngine::new(93);
+        let mut net = CrownIbpMlp::try_new(&[2, 3, 2], &mut rng).unwrap();
+        let (lo, hi) = net.try_certified_box(&[0.2, -0.1], 0.1).unwrap();
+        assert_eq!(lo.len(), 2);
+        assert_eq!(hi.len(), 2);
+        assert!(lo.iter().zip(&hi).all(|(&l, &h)| l <= h));
+    }
 
     /// The differentiable (tape) IBP forward **matches** the reference [`IbpMlp`]
     /// verifier and is **sound**: every concrete forward of a point in the input box
