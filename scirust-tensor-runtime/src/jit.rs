@@ -1,7 +1,6 @@
 use std::fmt;
 
 use scirust_compute::ComputeBackend;
-use scirust_tensor_compile::LoweredPlan;
 use scirust_tensor_ir::{
     Graph, NodeId, Operation, OptimizationConfig, OptimizationError, OptimizedGraph, TensorType,
     optimize_graph,
@@ -121,8 +120,12 @@ impl<B: ComputeBackend> ReferenceJitSession<B> {
         &self.optimization
     }
 
-    pub fn compiled_plan(&self) -> &LoweredPlan {
-        self.session.prepared_plan().plan()
+    pub fn compiled_kernel_count(&self) -> usize {
+        self.session.prepared_plan().kernel_count()
+    }
+
+    pub fn dispatch_count(&self) -> usize {
+        self.session.prepared_plan().dispatch_count()
     }
 
     pub fn execute(&self, inputs: &GraphInputs<'_>) -> Result<PlanOutputs, JitExecutionError> {
