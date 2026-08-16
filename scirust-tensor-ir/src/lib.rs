@@ -14,6 +14,8 @@ mod error;
 mod graph;
 mod ids;
 mod operation;
+mod optimize;
+mod verify;
 
 pub use autodiff::{
     AutodiffError, GradGraph, JvpGraph, VjpGraph, grad, jvp, value_and_grad, vjp,
@@ -22,5 +24,9 @@ pub use error::GraphError;
 pub use graph::{Graph, Node, TensorType};
 pub use ids::{ConstantId, NodeId};
 pub use operation::{Operation, Scalar};
+pub use optimize::{
+    OptimizationConfig, OptimizationError, OptimizationStats, OptimizedGraph, optimize_graph,
+};
+pub use verify::{SemanticError, validate_semantics};
 
 pub use scirust_compute::{DType, Shape};
