@@ -19,8 +19,9 @@ real invocations; most are exercised by the test suite of `scirust-cli`
 
 ## 1. Quality gates (identical locally and in CI)
 
-These are the exact commands run by `.github/workflows/ci.yml`. A change is
-releasable only when all six pass:
+These are the release-quality commands enforced by `.github/workflows/ci.yml`
+and `.github/workflows/rustdoc.yml`. A change is releasable only when all seven
+pass:
 
 | Gate | Command | Checks |
 |---|---|---|
@@ -28,6 +29,7 @@ releasable only when all six pass:
 | Lints | `cargo clippy --workspace --all-targets -- -D warnings` | zero lints, code + tests + benches |
 | Build | `cargo build --workspace --all-targets` | full compilation |
 | Tests | `cargo test --workspace` | the entire suite |
+| Rustdoc | `RUSTDOCFLAGS="-D warnings" cargo +stable doc --workspace --no-deps --locked` | authoritative public docs build; broken intra-doc links and rustdoc warnings fail CI |
 | Multi-arch | `cargo +nightly-2026-07-02 check --workspace --all-targets --features scirust-simd/nightly-simd --locked --target aarch64-unknown-linux-gnu` | type-checks stable NEON and nightly SVE/SME/dotprod/i8mm paths (without executing them; run `rustup +nightly-2026-07-02 target add aarch64-unknown-linux-gnu` once) |
 | Licenses/Security | `cargo deny check` | advisories, licenses, sources (`cargo install cargo-deny`) |
 
