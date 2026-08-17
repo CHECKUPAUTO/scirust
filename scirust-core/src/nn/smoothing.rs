@@ -15,6 +15,7 @@
 //! Acklam's rational approximation; the Clopper–Pearson bound by the regularized
 //! incomplete beta) are all pure `f64`/`f32` in a fixed order.
 
+use crate::error::{Result, SciRustError};
 use crate::nn::PcgEngine;
 
 // ----- Special functions (f64 internally for accuracy) -------------------------
@@ -240,21 +241,68 @@ pub struct SmoothedClassifier {
 }
 
 impl SmoothedClassifier {
+    /// Fallible constructor at noise level `sigma > 0`.
+    pub fn try_new(sigma: f32) -> Result<Self> {
+        if !sigma.is_finite() || sigma <= 0.0
+        {
+            return Err(SciRustError::InvalidConfig(
+                "randomized smoothing sigma must be finite and > 0".to_string(),
+            ));
+        }
+        Ok(Self { sigma })
+    }
+
     /// New smoothed classifier at noise level `sigma > 0`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `sigma` is non-finite or non-positive. Prefer [`Self::try_new`]
+    /// for caller-controlled configuration.
     pub fn new(sigma: f32) -> Self {
-        assert!(sigma > 0.0 && sigma.is_finite(), "sigma must be positive");
-        Self { sigma }
+        Self::try_new(sigma).unwrap_or_else(|error| panic!("SmoothedClassifier::new: {error}"))
+    }
+
+    fn validate_alpha(alpha: f64) -> Result<()> {
+        if !alpha.is_finite() || alpha <= 0.0 || alpha >= 1.0
+        {
+            Err(SciRustError::InvalidConfig(
+                "randomized smoothing alpha must be finite and in (0, 1)".to_string(),
+            ))
+        }
+        else
+        {
+            Ok(())
+        }
     }
 
     /// Monte-Carlo class vote counts from `n` Gaussian samples around `x`.
-    fn vote_counts<F: Fn(&[f32]) -> usize>(
+    fn try_vote_counts<F: Fn(&[f32]) -> usize>(
         &self,
         f: &F,
         x: &[f32],
         n: usize,
         num_classes: usize,
         rng: &mut PcgEngine,
-    ) -> Vec<usize> {
+    ) -> Result<Vec<usize>> {
+        if n == 0
+        {
+            return Err(SciRustError::InvalidConfig(
+                "randomized smoothing requires at least one Monte-Carlo sample".to_string(),
+            ));
+        }
+        if num_classes == 0
+        {
+            return Err(SciRustError::InvalidConfig(
+                "randomized smoothing requires at least one class".to_string(),
+            ));
+        }
+        if !x.iter().all(|value| value.is_finite())
+        {
+            return Err(SciRustError::InvalidConfig(
+                "randomized smoothing input must contain only finite values".to_string(),
+            ));
+        }
+
         let mut counts = vec![0usize; num_classes];
         let mut buf = vec![0.0f32; x.len()];
         for _ in 0..n
@@ -263,13 +311,21 @@ impl SmoothedClassifier {
             {
                 *b = xi + rng.normal(0.0, self.sigma);
             }
-            counts[f(&buf)] += 1;
+            let class = f(&buf);
+            if class >= num_classes
+            {
+                return Err(SciRustError::InvalidConfig(format!(
+                    "base classifier returned class {class}, but num_classes is {num_classes}"
+                )));
+            }
+            counts[class] += 1;
         }
-        counts
+        Ok(counts)
     }
 
     /// Index of the largest count (ties → lower index, deterministic).
     fn argmax(counts: &[usize]) -> usize {
+        debug_assert!(!counts.is_empty());
         let mut best = 0usize;
         for (i, &c) in counts.iter().enumerate().skip(1)
         {
@@ -281,7 +337,26 @@ impl SmoothedClassifier {
         best
     }
 
+    /// Fallible smoothed prediction `g(x)` from `n` samples.
+    pub fn try_predict<F: Fn(&[f32]) -> usize>(
+        &self,
+        f: &F,
+        x: &[f32],
+        n: usize,
+        num_classes: usize,
+        rng: &mut PcgEngine,
+    ) -> Result<usize> {
+        let counts = self.try_vote_counts(f, x, n, num_classes, rng)?;
+        Ok(Self::argmax(&counts))
+    }
+
     /// The smoothed prediction `g(x)` from `n` samples.
+    ///
+    /// # Panics
+    ///
+    /// Panics on zero samples/classes, non-finite input, or a base-classifier
+    /// output outside `0..num_classes`. Prefer [`Self::try_predict`] for
+    /// caller-controlled inputs.
     pub fn predict<F: Fn(&[f32]) -> usize>(
         &self,
         f: &F,
@@ -290,7 +365,62 @@ impl SmoothedClassifier {
         num_classes: usize,
         rng: &mut PcgEngine,
     ) -> usize {
-        Self::argmax(&self.vote_counts(f, x, n, num_classes, rng))
+        self.try_predict(f, x, n, num_classes, rng)
+            .unwrap_or_else(|error| panic!("SmoothedClassifier::predict: {error}"))
+    }
+
+    /// Fallible single-sample certificate.
+    ///
+    /// Requires at least two classes because a robustness margin needs a competing
+    /// class. As with [`Self::certify`], this one-batch procedure is rigorous only
+    /// in the binary case; use [`Self::try_certify_cohen`] for a sound multiclass
+    /// certificate.
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_certify<F: Fn(&[f32]) -> usize>(
+        &self,
+        f: &F,
+        x: &[f32],
+        n: usize,
+        num_classes: usize,
+        alpha: f64,
+        rng: &mut PcgEngine,
+    ) -> Result<Certificate> {
+        Self::validate_alpha(alpha)?;
+        if num_classes < 2
+        {
+            return Err(SciRustError::InvalidConfig(
+                "randomized-smoothing certification requires at least two classes".to_string(),
+            ));
+        }
+        let counts = self.try_vote_counts(f, x, n, num_classes, rng)?;
+        let class = Self::argmax(&counts);
+        let p_a_lower = clopper_pearson_lower(counts[class], n, alpha);
+        let certificate = if p_a_lower <= 0.5
+        {
+            Certificate {
+                class,
+                radius: 0.0,
+                p_a_lower: p_a_lower as f32,
+                abstained: true,
+            }
+        }
+        else
+        {
+            let radius = self.sigma * inv_normal_cdf(p_a_lower) as f32;
+            Certificate {
+                class,
+                radius,
+                p_a_lower: p_a_lower as f32,
+                abstained: false,
+            }
+        };
+        if !certificate.radius.is_finite() || !certificate.p_a_lower.is_finite()
+        {
+            return Err(SciRustError::InvalidConfig(
+                "randomized-smoothing certificate became non-finite".to_string(),
+            ));
+        }
+        Ok(certificate)
     }
 
     /// **Single-sample certify** at `x`: estimate the top class from `n` samples
@@ -304,6 +434,12 @@ impl SmoothedClassifier {
     /// `1 − alpha` guarantee does **not** strictly hold. Use
     /// [`Self::certify_cohen`] (Cohen et al.'s two-sample procedure) for a sound
     /// multiclass certificate.
+    ///
+    /// # Panics
+    ///
+    /// Panics when sampling/certification inputs are invalid. Prefer
+    /// [`Self::try_certify`] for caller-controlled requests.
+    #[allow(clippy::too_many_arguments)]
     pub fn certify<F: Fn(&[f32]) -> usize>(
         &self,
         f: &F,
@@ -313,10 +449,44 @@ impl SmoothedClassifier {
         alpha: f64,
         rng: &mut PcgEngine,
     ) -> Certificate {
-        let counts = self.vote_counts(f, x, n, num_classes, rng);
-        let class = Self::argmax(&counts);
-        let p_a_lower = clopper_pearson_lower(counts[class], n, alpha);
-        if p_a_lower <= 0.5
+        self.try_certify(f, x, n, num_classes, alpha, rng)
+            .unwrap_or_else(|error| panic!("SmoothedClassifier::certify: {error}"))
+    }
+
+    /// Fallible Cohen et al. two-sample multiclass certificate.
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_certify_cohen<F: Fn(&[f32]) -> usize>(
+        &self,
+        f: &F,
+        x: &[f32],
+        n0: usize,
+        n: usize,
+        num_classes: usize,
+        alpha: f64,
+        rng: &mut PcgEngine,
+    ) -> Result<Certificate> {
+        Self::validate_alpha(alpha)?;
+        if n0 == 0
+        {
+            return Err(SciRustError::InvalidConfig(
+                "Cohen randomized smoothing requires at least one selection sample".to_string(),
+            ));
+        }
+        if num_classes < 2
+        {
+            return Err(SciRustError::InvalidConfig(
+                "Cohen randomized-smoothing certification requires at least two classes"
+                    .to_string(),
+            ));
+        }
+
+        // Selection pass: pick the candidate class from n0 samples.
+        let sel_counts = self.try_vote_counts(f, x, n0, num_classes, rng)?;
+        let class = Self::argmax(&sel_counts);
+        // Estimation pass: n *fresh* (independent) samples bound that class.
+        let est_counts = self.try_vote_counts(f, x, n, num_classes, rng)?;
+        let p_a_lower = clopper_pearson_lower(est_counts[class], n, alpha);
+        let certificate = if p_a_lower <= 0.5
         {
             Certificate {
                 class,
@@ -334,7 +504,14 @@ impl SmoothedClassifier {
                 p_a_lower: p_a_lower as f32,
                 abstained: false,
             }
+        };
+        if !certificate.radius.is_finite() || !certificate.p_a_lower.is_finite()
+        {
+            return Err(SciRustError::InvalidConfig(
+                "Cohen randomized-smoothing certificate became non-finite".to_string(),
+            ));
         }
+        Ok(certificate)
     }
 
     /// **Cohen et al. (2019) `Certify`** — the *sound* multiclass procedure. Draw
@@ -344,6 +521,12 @@ impl SmoothedClassifier {
     /// selection bias that makes [`Self::certify`] unsound for `num_classes > 2`.
     /// Returns radius `σ·Φ⁻¹(pₐ)` (or abstain if `pₐ ≤ ½`); holds w.p.
     /// `≥ 1 − alpha` over the sampling.
+    ///
+    /// # Panics
+    ///
+    /// Panics when selection/estimation counts, class configuration, confidence,
+    /// input values, or base-classifier outputs are invalid. Prefer
+    /// [`Self::try_certify_cohen`] for caller-controlled requests.
     #[allow(clippy::too_many_arguments)]
     pub fn certify_cohen<F: Fn(&[f32]) -> usize>(
         &self,
@@ -355,31 +538,8 @@ impl SmoothedClassifier {
         alpha: f64,
         rng: &mut PcgEngine,
     ) -> Certificate {
-        // Selection pass: pick the candidate class from n0 samples.
-        let sel_counts = self.vote_counts(f, x, n0, num_classes, rng);
-        let class = Self::argmax(&sel_counts);
-        // Estimation pass: n *fresh* (independent) samples bound that class.
-        let est_counts = self.vote_counts(f, x, n, num_classes, rng);
-        let p_a_lower = clopper_pearson_lower(est_counts[class], n, alpha);
-        if p_a_lower <= 0.5
-        {
-            Certificate {
-                class,
-                radius: 0.0,
-                p_a_lower: p_a_lower as f32,
-                abstained: true,
-            }
-        }
-        else
-        {
-            let radius = self.sigma * inv_normal_cdf(p_a_lower) as f32;
-            Certificate {
-                class,
-                radius,
-                p_a_lower: p_a_lower as f32,
-                abstained: false,
-            }
-        }
+        self.try_certify_cohen(f, x, n0, n, num_classes, alpha, rng)
+            .unwrap_or_else(|error| panic!("SmoothedClassifier::certify_cohen: {error}"))
     }
 }
 
@@ -408,7 +568,7 @@ mod tests {
         assert_eq!(betai(2.0, 3.0, 0.0), 0.0);
         assert_eq!(betai(2.0, 3.0, 1.0), 1.0);
         assert!((betai(2.0, 2.0, 0.5) - 0.5).abs() < 1e-9);
-        assert!(betai(2.0, 5.0, 0.3) < betai(2.0, 5.0, 0.6)); // monotone
+        assert!(betai(2.0, 5.0, 0.3) < betai(2.0, 5.0, 0.6));
     }
 
     /// Clopper–Pearson lower bound is below the point estimate, inverts `betai`
@@ -419,11 +579,66 @@ mod tests {
         let p_l = clopper_pearson_lower(50, 100, 0.05);
         assert!(p_l < 0.5 && p_l > 0.0, "p_l = {p_l}");
         assert!((p_l - 0.416).abs() < 0.01, "CP(50,100,0.05) = {p_l}");
-        // Inversion identity: I_{p_l}(k, n-k+1) ≈ alpha.
         assert!((betai(50.0, 51.0, p_l) - 0.05).abs() < 1e-6);
-        // k = 0 ⇒ 0; more successes ⇒ larger lower bound.
         assert_eq!(clopper_pearson_lower(0, 100, 0.05), 0.0);
         assert!(clopper_pearson_lower(90, 100, 0.05) > clopper_pearson_lower(60, 100, 0.05));
+    }
+
+    #[test]
+    fn fallible_smoothing_boundary_rejects_invalid_sampling() {
+        assert!(SmoothedClassifier::try_new(0.0).is_err());
+        assert!(SmoothedClassifier::try_new(f32::NAN).is_err());
+        let smc = SmoothedClassifier::try_new(1.0).unwrap();
+        let class0 = |_z: &[f32]| 0usize;
+
+        let mut rng = PcgEngine::new(41);
+        assert!(smc.try_predict(&class0, &[0.0], 0, 2, &mut rng).is_err());
+        let mut rng = PcgEngine::new(41);
+        assert!(smc.try_predict(&class0, &[0.0], 10, 0, &mut rng).is_err());
+        let mut rng = PcgEngine::new(41);
+        assert!(
+            smc.try_predict(&class0, &[f32::NAN], 10, 2, &mut rng)
+                .is_err()
+        );
+
+        let invalid_class = |_z: &[f32]| 2usize;
+        let mut rng = PcgEngine::new(41);
+        assert!(
+            smc.try_predict(&invalid_class, &[0.0], 10, 2, &mut rng)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn fallible_smoothing_certificate_rejects_empty_or_invalid_requests() {
+        let smc = SmoothedClassifier::try_new(1.0).unwrap();
+        let class0 = |_z: &[f32]| 0usize;
+
+        let mut rng = PcgEngine::new(42);
+        assert!(
+            smc.try_certify(&class0, &[0.0], 0, 2, 0.05, &mut rng)
+                .is_err()
+        );
+        let mut rng = PcgEngine::new(42);
+        assert!(
+            smc.try_certify(&class0, &[0.0], 10, 1, 0.05, &mut rng)
+                .is_err()
+        );
+        let mut rng = PcgEngine::new(42);
+        assert!(
+            smc.try_certify(&class0, &[0.0], 10, 2, f64::NAN, &mut rng)
+                .is_err()
+        );
+        let mut rng = PcgEngine::new(42);
+        assert!(
+            smc.try_certify_cohen(&class0, &[0.0], 0, 10, 2, 0.05, &mut rng)
+                .is_err()
+        );
+        let mut rng = PcgEngine::new(42);
+        assert!(
+            smc.try_certify_cohen(&class0, &[0.0], 10, 0, 2, 0.05, &mut rng)
+                .is_err()
+        );
     }
 
     /// **The randomized-smoothing certificate, tested against an exact closed
@@ -444,7 +659,6 @@ mod tests {
             smc.certify(&halfspace, &[d, 0.0, 0.0], n, 2, alpha, &mut rng)
         };
 
-        // Radius ≈ d (conservative ⇒ within [0.8 d, 1.02 d]); class is 1.
         for &d in &[0.5f32, 1.0, 1.5]
         {
             let c = certify_at(d, 1.0);
@@ -456,13 +670,10 @@ mod tests {
                 c.radius
             );
         }
-        // σ-invariance: the certified radius tracks d, not σ.
         let r_lo = certify_at(1.0, 0.5).radius;
         let r_hi = certify_at(1.0, 2.0).radius;
         assert!(r_lo > 0.8 && r_lo < 1.02, "σ=0.5: radius {r_lo}");
         assert!(r_hi > 0.8 && r_hi < 1.02, "σ=2.0: radius {r_hi}");
-
-        // Determinism: same seed ⇒ identical certificate.
         assert_eq!(certify_at(1.0, 1.0).radius, certify_at(1.0, 1.0).radius);
     }
 
@@ -474,13 +685,11 @@ mod tests {
         let halfspace = |z: &[f32]| -> usize { usize::from(z[0] > 0.0) };
         let smc = SmoothedClassifier::new(1.0);
 
-        // Far from the boundary: certified, class 1, positive radius.
         let mut rng = PcgEngine::new(3);
         let far = smc.certify(&halfspace, &[2.5, 0.0], 5000, 2, 0.01, &mut rng);
         assert_eq!(far.class, 1);
         assert!(!far.abstained && far.radius > 0.0);
 
-        // On the boundary (d = 0): pₐ ≈ 0.5, cannot clear ½ ⇒ abstain.
         let mut rng = PcgEngine::new(3);
         let edge = smc.certify(&halfspace, &[0.0, 0.0], 5000, 2, 0.01, &mut rng);
         assert!(edge.abstained && edge.radius == 0.0);
