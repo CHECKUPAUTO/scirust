@@ -15,7 +15,7 @@
 //!   extension à `stride > 1` suivrait le même schéma de dispersion pour
 //!   `dX`, limite documentée plutôt qu'une lacune silencieuse). `dX` est
 //!   dispersée exactement comme l'adjointe de la convolution
-//!   ([`crate::fixed::conv2d::conv2d_transpose`], son pendant virgule fixe
+//!   (`crate::fixed::conv2d::conv2d_transpose`, son pendant virgule fixe
 //!   déterministe) ; `dW` est une corrélation croisée entre `X` et `dY` ;
 //!   `db` somme `dY` sur les positions spatiales.
 //! * **`max_pool2d_backward`**, **`avg_pool2d_backward`** — `dY` est routée
@@ -29,11 +29,11 @@
 //!   qu'image. `conv1d_backward` partage la même limite **stride 1** que
 //!   `conv2d_backward` (même remarque de portée) ; les deux backward de
 //!   pooling 1D héritent en revanche du `stride` général de leurs `forward`
-//!   ([`crate::fixed::pool::max_pool1d`]/[`crate::fixed::pool::avg_pool1d`]),
+//!   (`crate::fixed::pool::max_pool1d`/`crate::fixed::pool::avg_pool1d`),
 //!   comme leurs pendants 2D.
 //! * **`batch_norm_backward`** — BatchNorm **entraînement** : la
 //!   moyenne/variance de chaque canal sont recalculées sur le lot courant,
-//!   à la différence de [`crate::fixed::norm::batch_norm`] (inférence,
+//!   à la différence de `crate::fixed::norm::batch_norm` (inférence,
 //!   statistiques figées `running_mean`/`running_var`). Même forme
 //!   fermée que `layernorm_backward` (réduction à travers une statistique
 //!   partagée), mais réduite sur les `batch·spatial` éléments **dispersés**
@@ -51,7 +51,7 @@
 //! d'entropie croisée fusionne softmax + log-vraisemblance négative en une
 //! seule passe stable (`log-sum-exp`, soustraction du maximum de ligne avant
 //! `exp`) plutôt que de chaîner [`softmax_backward`] (conservée telle quelle
-//! pour [`attention_backward`]) : le gradient combiné `softmax(x) − one_hot`
+//! pour `attention_backward`) : le gradient combiné `softmax(x) − one_hot`
 //! évite l'instabilité numérique d'une jacobienne softmax explicite.
 //!
 //! Tous les gradients sont **vérifiés par différences finies centrées**
@@ -71,6 +71,29 @@ fn transpose(a: &[f32], rows: usize, cols: usize) -> Vec<f32> {
         }
     }
     t
+}
+
+/// Produit scalaire euclidien.
+fn dot<T: crate::matrix::Scalar>(a: &[T], b: &[T]) -> T {
+    let mut acc = T::zero();
+    for i in 0..a.len()
+    {
+        acc = acc + a[i] * b[i];
+    }
+    acc
+}
+
+/// Norme euclidienne.
+fn norm<T: crate::matrix::Scalar>(a: &[T]) -> T {
+    dot(a, a).sqrt()
+}
+
+/// `y += alpha · x` (en place).
+fn axpy<T: crate::matrix::Scalar>(y: &mut [T], alpha: T, x: &[T]) {
+    for i in 0..y.len()
+    {
+        y[i] = y[i] + alpha * x[i];
+    }
 }
 
 /// Backward d'une couche linéaire `Y = X·W + b` (broadcast de `b` par ligne).
@@ -393,7 +416,7 @@ pub fn attention_backward(
 /// 1** : `Y = conv2d(X, W) + b` (cf. en-tête de module pour la limite au
 /// stride 1). `X` : `in_channels×height×width` ; `W` :
 /// `out_channels×in_channels×kernel_h×kernel_w` (convention PyTorch
-/// `Conv2d`, comme [`crate::fixed::conv2d::conv2d`]) ; `b`/`db` :
+/// `Conv2d`, comme `crate::fixed::conv2d::conv2d`) ; `b`/`db` :
 /// `out_channels` ; `dY` : `out_channels×height_out×width_out`
 /// (`height_out = height − kernel_h + 1`, idem largeur).
 ///
@@ -577,11 +600,7 @@ pub fn avg_pool2d_backward(
     );
     let height_out = (height - window_h) / stride_h + 1;
     let width_out = (width - window_w) / stride_w + 1;
-    assert_eq!(
-        dx.len(),
-        channels * height * width,
-        "avg_pool2d_backward: dX shape"
-    );
+    assert_eq!(dx.len(), channels * height * width, "avg_pool2d_backward: dX shape");
     assert_eq!(
         dy.len(),
         channels * height_out * width_out,
@@ -632,10 +651,7 @@ pub fn conv1d_backward(
     dw: &mut [f32],
     db: &mut [f32],
 ) {
-    assert!(
-        length >= kernel_size,
-        "conv1d_backward: kernel larger than input"
-    );
+    assert!(length >= kernel_size, "conv1d_backward: kernel larger than input");
     let length_out = length - kernel_size + 1;
     assert_eq!(x.len(), in_channels * length, "conv1d_backward: X shape");
     assert_eq!(
@@ -696,10 +712,7 @@ pub fn max_pool1d_backward(
     dy: &[f32],
     dx: &mut [f32],
 ) {
-    assert!(
-        length >= window,
-        "max_pool1d_backward: window larger than input"
-    );
+    assert!(length >= window, "max_pool1d_backward: window larger than input");
     let length_out = (length - window) / stride + 1;
     assert_eq!(x.len(), channels * length, "max_pool1d_backward: X shape");
     assert_eq!(
@@ -743,10 +756,7 @@ pub fn avg_pool1d_backward(
     dy: &[f32],
     dx: &mut [f32],
 ) {
-    assert!(
-        length >= window,
-        "avg_pool1d_backward: window larger than input"
-    );
+    assert!(length >= window, "avg_pool1d_backward: window larger than input");
     let length_out = (length - window) / stride + 1;
     assert_eq!(dx.len(), channels * length, "avg_pool1d_backward: dX shape");
     assert_eq!(
@@ -772,12 +782,12 @@ pub fn avg_pool1d_backward(
 }
 
 /// Backward de BatchNorm **entraînement** (cf. en-tête de module pour la
-/// distinction avec [`crate::fixed::norm::batch_norm`], inférence) :
+/// distinction avec `crate::fixed::norm::batch_norm`, inférence) :
 /// `y[b,c,s] = (x[b,c,s] − μ_c)/√(σ²_c+eps)·γ_c + β_c`, où `μ_c`/`σ²_c`
 /// (variance **biaisée**) sont la moyenne/variance du canal `c` sur les
 /// `N = batch·spatial` éléments `x[:,c,:]`. `x`/`dy`/`dx` :
 /// `batch × channels × spatial` (même convention que
-/// [`crate::fixed::norm::batch_norm_batched`]) ; `gamma`/`dgamma`/`dbeta` :
+/// `crate::fixed::norm::batch_norm_batched`) ; `gamma`/`dgamma`/`dbeta` :
 /// `channels`. Produit `dx` et **accumule** `dgamma`, `dbeta` (mets-les à
 /// zéro avant si tu ne veux pas d'accumulation).
 ///
@@ -877,7 +887,7 @@ pub fn batch_norm_backward(
 
 /// Perte MSE (erreur quadratique moyenne) : `L = (1/N)·Σ_i (pred_i −
 /// target_i)²`, `N = pred.len()`. Régression/reconstruction (ex. autoencodeur
-/// bâti sur [`crate::fixed::conv2d::conv2d_transpose`] côté forward et
+/// bâti sur `crate::fixed::conv2d::conv2d_transpose` côté forward et
 /// [`conv2d_backward`] côté backward).
 pub fn mse_loss(pred: &[f32], target: &[f32]) -> f32 {
     assert_eq!(pred.len(), target.len(), "mse_loss: shape");
@@ -935,7 +945,7 @@ pub fn softmax_cross_entropy_loss(logits: &[f32], rows: usize, d: usize, targets
 /// (softmax(logits[r,:]) − one_hot(targets[r])) / rows` — le gradient
 /// **combiné** softmax + entropie croisée, sans jacobienne softmax explicite
 /// (cf. en-tête de module ; à la différence de [`softmax_backward`],
-/// réservée à [`attention_backward`]).
+/// réservée à `attention_backward`).
 ///
 /// Panique si `targets[r] ≥ d` pour une ligne.
 pub fn softmax_cross_entropy_backward(
@@ -1063,7 +1073,6 @@ mod tests {
         let x: Vec<f32> = (0..m * k).map(|i| (i as f32 * 0.11).sin()).collect();
         let w: Vec<f32> = (0..k * n).map(|i| (i as f32 * 0.07).cos()).collect();
         let b: Vec<f32> = (0..n).map(|i| i as f32 * 0.1 - 0.2).collect();
-        // seed = gradient de la sortie (dY).
         let seed: Vec<f32> = (0..m * n).map(|i| (i as f32 * 0.3).sin() + 0.2).collect();
 
         let mut dx = vec![0.0f32; m * k];
@@ -1072,20 +1081,16 @@ mod tests {
         linear_backward(&x, m, k, &w, n, &seed, &mut dx, &mut dw, &mut db);
 
         let h = 1e-3;
-        // dX
         let g_x = num_grad(&x, &seed, h, |xx| linear_fwd(xx, m, k, &w, n, &b));
         assert_close(&dx, &g_x, 2e-2, "dX");
-        // dW
         let g_w = num_grad(&w, &seed, h, |ww| linear_fwd(&x, m, k, ww, n, &b));
         assert_close(&dw, &g_w, 2e-2, "dW");
-        // db
         let g_b = num_grad(&b, &seed, h, |bb| linear_fwd(&x, m, k, &w, n, bb));
         assert_close(&db, &g_b, 2e-2, "db");
     }
 
     #[test]
     fn relu_backward_gradcheck() {
-        // On évite x proche de 0 (non différentiable).
         let x: Vec<f32> = (0..40)
             .map(|i| (i as f32 * 0.37).sin() * 3.0 + 0.5)
             .collect();
@@ -1122,15 +1127,11 @@ mod tests {
         let mut dg = vec![0.0f32; d];
         rmsnorm_backward(&x, rows, d, &g, eps, &seed, &mut dx, &mut dg);
 
-        // dX vs numérique (on fait varier x).
         let gx = num_grad(&x, &seed, 1e-3, |xx| rmsnorm_fwd(xx, rows, d, &g, eps));
         assert_close(&dx, &gx, 3e-2, "rmsnorm dX");
-        // dγ vs numérique (on fait varier g).
         let gg = num_grad(&g, &seed, 1e-3, |gg| rmsnorm_fwd(&x, rows, d, gg, eps));
         assert_close(&dg, &gg, 3e-2, "rmsnorm dgamma");
     }
-
-    // ---- Références forward supplémentaires ----
 
     fn gelu_fwd(x: &[f32]) -> Vec<f32> {
         const C0: f32 = 0.797_884_6;
@@ -1205,17 +1206,11 @@ mod tests {
         let mut db = vec![0.0f32; d];
         layernorm_backward(&x, rows, d, &g, eps, &seed, &mut dx, &mut dg, &mut db);
 
-        let gx = num_grad(&x, &seed, 1e-3, |xx| {
-            layernorm_fwd(xx, rows, d, &g, &b, eps)
-        });
+        let gx = num_grad(&x, &seed, 1e-3, |xx| layernorm_fwd(xx, rows, d, &g, &b, eps));
         assert_close(&dx, &gx, 3e-2, "layernorm dX");
-        let gg = num_grad(&g, &seed, 1e-3, |gg| {
-            layernorm_fwd(&x, rows, d, gg, &b, eps)
-        });
+        let gg = num_grad(&g, &seed, 1e-3, |gg| layernorm_fwd(&x, rows, d, gg, &b, eps));
         assert_close(&dg, &gg, 3e-2, "layernorm dgamma");
-        let gb = num_grad(&b, &seed, 1e-3, |bb| {
-            layernorm_fwd(&x, rows, d, &g, bb, eps)
-        });
+        let gb = num_grad(&b, &seed, 1e-3, |bb| layernorm_fwd(&x, rows, d, &g, bb, eps));
         assert_close(&db, &gb, 3e-2, "layernorm dbeta");
     }
 
@@ -1246,17 +1241,16 @@ mod tests {
         let q: Vec<f32> = (0..s * d).map(|i| (i as f32 * 0.11).sin()).collect();
         let k: Vec<f32> = (0..t * d).map(|i| (i as f32 * 0.07).cos()).collect();
         let v: Vec<f32> = (0..t * d).map(|i| (i as f32 * 0.05) - 0.3).collect();
-        let seed: Vec<f32> = (0..s * d).map(|i| (i as f32 * 0.13).cos() + 0.2).collect(); // = dO
+        let seed: Vec<f32> = (0..s * d).map(|i| (i as f32 * 0.13).cos() + 0.2).collect();
 
         let mut dq = vec![0.0f32; s * d];
         let mut dk = vec![0.0f32; t * d];
         let mut dv = vec![0.0f32; t * d];
         attention_backward(&q, s, d, &k, t, &v, scale, &seed, &mut dq, &mut dk, &mut dv);
 
-        // Perte L = Σ O·seed ; O = attention(Q,K,V).
         let fwd = |qq: &[f32], kk: &[f32], vv: &[f32]| -> Vec<f32> {
             let mut o = vec![0.0f32; s * d];
-            attention(qq, s, d, kk, t, vv, scale, &mut o);
+            crate::attention::attention(qq, s, d, kk, t, vv, scale, &mut o);
             o
         };
         let num = |input: &[f32], f: &dyn Fn(&[f32]) -> Vec<f32>| -> Vec<f32> {
@@ -1270,8 +1264,6 @@ mod tests {
         let gv = num(&v, &|vv| fwd(&q, &k, vv));
         assert_close(&dv, &gv, 3e-2, "attention dV");
     }
-
-    // ---- Références forward CNN (indépendantes) pour le gradcheck ----
 
     #[allow(clippy::too_many_arguments)]
     fn conv2d_fwd(
@@ -1414,61 +1406,21 @@ mod tests {
         let mut dw = vec![0.0f32; w.len()];
         let mut db = vec![0.0f32; out_channels];
         conv2d_backward(
-            &x,
-            in_channels,
-            height,
-            width,
-            &w,
-            out_channels,
-            kernel_h,
-            kernel_w,
-            &seed,
-            &mut dx,
-            &mut dw,
-            &mut db,
+            &x, in_channels, height, width, &w, out_channels, kernel_h, kernel_w, &seed, &mut dx,
+            &mut dw, &mut db,
         );
 
         let h = 1e-3;
         let g_x = num_grad(&x, &seed, h, |xx| {
-            conv2d_fwd(
-                xx,
-                in_channels,
-                height,
-                width,
-                &w,
-                out_channels,
-                kernel_h,
-                kernel_w,
-                &b,
-            )
+            conv2d_fwd(xx, in_channels, height, width, &w, out_channels, kernel_h, kernel_w, &b)
         });
         assert_close(&dx, &g_x, 2e-2, "conv2d dX");
         let g_w = num_grad(&w, &seed, h, |ww| {
-            conv2d_fwd(
-                &x,
-                in_channels,
-                height,
-                width,
-                ww,
-                out_channels,
-                kernel_h,
-                kernel_w,
-                &b,
-            )
+            conv2d_fwd(&x, in_channels, height, width, ww, out_channels, kernel_h, kernel_w, &b)
         });
         assert_close(&dw, &g_w, 2e-2, "conv2d dW");
         let g_b = num_grad(&b, &seed, h, |bb| {
-            conv2d_fwd(
-                &x,
-                in_channels,
-                height,
-                width,
-                &w,
-                out_channels,
-                kernel_h,
-                kernel_w,
-                bb,
-            )
+            conv2d_fwd(&x, in_channels, height, width, &w, out_channels, kernel_h, kernel_w, bb)
         });
         assert_close(&db, &g_b, 2e-2, "conv2d db");
     }
@@ -1480,14 +1432,7 @@ mod tests {
         let height_out = (height - window_h) / stride_h + 1;
         let width_out = (width - window_w) / stride_w + 1;
 
-        // Valeurs strictement croissantes (écart 0.7, très supérieur au pas de
-        // différences finies 1e-3) : le maximum de chaque fenêtre reste
-        // toujours la même position, quelle que soit la petite perturbation —
-        // le max n'est pas différentiable près d'une égalité, cf. en-tête de
-        // fonction, ce choix évite un tel cas limite dans le gradcheck.
-        let x: Vec<f32> = (0..channels * height * width)
-            .map(|i| i as f32 * 0.7)
-            .collect();
+        let x: Vec<f32> = (0..channels * height * width).map(|i| i as f32 * 0.7).collect();
         let seed: Vec<f32> = (0..channels * height_out * width_out)
             .map(|i| (i as f32 * 0.3).sin() + 0.2)
             .collect();
@@ -1499,9 +1444,7 @@ mod tests {
 
         let h = 1e-3;
         let g_x = num_grad(&x, &seed, h, |xx| {
-            max_pool2d_fwd(
-                xx, channels, height, width, window_h, window_w, stride_h, stride_w,
-            )
+            max_pool2d_fwd(xx, channels, height, width, window_h, window_w, stride_h, stride_w)
         });
         assert_close(&dx, &g_x, 2e-2, "max_pool2d dX");
     }
@@ -1522,22 +1465,15 @@ mod tests {
             channels, height, width, window_h, window_w, stride_h, stride_w, &seed, &mut dx,
         );
 
-        // avg_pool2d_fwd ne dépend de x que par sa forme ici (référence
-        // indépendante) : x arbitraire, seul le gradient (linéaire en x)
-        // importe pour le gradcheck.
         let x0: Vec<f32> = (0..channels * height * width)
             .map(|i| (i as f32 * 0.13).cos())
             .collect();
         let h = 1e-3;
         let g_x = num_grad(&x0, &seed, h, |xx| {
-            avg_pool2d_fwd(
-                xx, channels, height, width, window_h, window_w, stride_h, stride_w,
-            )
+            avg_pool2d_fwd(xx, channels, height, width, window_h, window_w, stride_h, stride_w)
         });
         assert_close(&dx, &g_x, 2e-2, "avg_pool2d dX");
     }
-
-    // ---- Références forward 1D (indépendantes) ----
 
     fn conv1d_fwd(
         x: &[f32],
@@ -1559,8 +1495,7 @@ mod tests {
                 {
                     for k in 0..kernel_size
                     {
-                        acc +=
-                            x[ci * length + o + k] * w[(co * in_channels + ci) * kernel_size + k];
+                        acc += x[ci * length + o + k] * w[(co * in_channels + ci) * kernel_size + k];
                     }
                 }
                 y[co * length_out + o] = acc;
@@ -1643,16 +1578,7 @@ mod tests {
         let mut dw = vec![0.0f32; w.len()];
         let mut db = vec![0.0f32; out_channels];
         conv1d_backward(
-            &x,
-            in_channels,
-            length,
-            &w,
-            out_channels,
-            kernel_size,
-            &seed,
-            &mut dx,
-            &mut dw,
-            &mut db,
+            &x, in_channels, length, &w, out_channels, kernel_size, &seed, &mut dx, &mut dw, &mut db,
         );
 
         let h = 1e-3;
@@ -1676,9 +1602,6 @@ mod tests {
         let (window, stride) = (3usize, 3usize);
         let length_out = (length - window) / stride + 1;
 
-        // Valeurs strictement croissantes (écart 0.7 ≫ pas de différences
-        // finies 1e-3) : le maximum de chaque fenêtre reste toujours à la
-        // même position — cf. `max_pool2d_backward_gradcheck`.
         let x: Vec<f32> = (0..channels * length).map(|i| i as f32 * 0.7).collect();
         let seed: Vec<f32> = (0..channels * length_out)
             .map(|i| (i as f32 * 0.3).sin() + 0.2)
@@ -1707,8 +1630,6 @@ mod tests {
         let mut dx = vec![0.0f32; channels * length];
         avg_pool1d_backward(channels, length, window, stride, &seed, &mut dx);
 
-        // avg_pool1d_fwd ne dépend de x que par sa forme ici — cf.
-        // `avg_pool2d_backward_gradcheck`.
         let x0: Vec<f32> = (0..channels * length)
             .map(|i| (i as f32 * 0.13).cos())
             .collect();
@@ -1718,8 +1639,6 @@ mod tests {
         });
         assert_close(&dx, &g_x, 2e-2, "avg_pool1d dX");
     }
-
-    // ---- Référence forward BatchNorm entraînement (indépendante) ----
 
     #[allow(clippy::too_many_arguments)]
     fn batch_norm_train_fwd(
@@ -1786,16 +1705,7 @@ mod tests {
         let mut dgamma = vec![0.0f32; channels];
         let mut dbeta = vec![0.0f32; channels];
         batch_norm_backward(
-            &x,
-            batch,
-            channels,
-            spatial,
-            &gamma,
-            eps,
-            &seed,
-            &mut dx,
-            &mut dgamma,
-            &mut dbeta,
+            &x, batch, channels, spatial, &gamma, eps, &seed, &mut dx, &mut dgamma, &mut dbeta,
         );
 
         let h = 1e-3;
