@@ -26,7 +26,7 @@
 //!
 //! [`simulate_material_deformation`] is the full orchestration ported from the
 //! reference `simulate_material_deformation`: it runs the historical eulerian
-//! simulation ([`simulate`](crate::simulate::simulate)) unchanged, then walks
+//! simulation ([`simulate`]) unchanged, then walks
 //! the same time grid once more adding the per-interval material diagnostic,
 //! reduces each rate series to a duration-weighted index, interpolates the
 //! interval series back to the time nodes, and reports the maximum discrepancy
@@ -364,7 +364,7 @@ where
 /// from another source than the scenario's velocity.
 ///
 /// `velocity` and `curvature` drive the baseline run exactly as in
-/// [`simulate`](crate::simulate::simulate)); `advection` is evaluated once per
+/// [`simulate`]); `advection` is evaluated once per
 /// interval at the interval's midpoint time. The diagnostic is reported
 /// alongside the baseline and is not injected into the structural signature.
 #[allow(clippy::too_many_arguments)]
