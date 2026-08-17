@@ -77,7 +77,7 @@
 //! - [`two_wattmeter`] — méthode des deux wattmètres : puissance active/réactive, angle et facteur de puissance.
 //! - [`line_parameters`] — paramètres linéiques d'une ligne aérienne : inductance/capacité linéiques, réactance, DMG triphasée.
 //! - [`corona_discharge`] — effet couronne (Peek) : densité de l'air, tension critique disruptive, perte.
-//! - [`line_voltage_regulation`] — régulation d'un départ : chute de tension, régulation %, effet Ferranti.
+//! - [`line_voltage_regulation()`] — régulation d'un départ : chute de tension, régulation %, effet Ferranti.
 //! - [`busbar`] — jeu de barres : résistance continue, densité de courant, force électrodynamique, pertes Joule.
 //! - [`insulation_testing`] — essai d'isolement : résistance en continu, indice de polarisation, DAR, correction thermique.
 //! - [`relay_coordination`] — sélectivité chronométrique : marge de discrimination, critère, rapport de réglage.

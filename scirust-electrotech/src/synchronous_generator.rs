@@ -4,20 +4,20 @@
 //! tension.
 //!
 //! ```text
-//! f.é.m. par phase (Kapp) E   = 4,44 · f · Φ · N · k_w          [V]
+//! f.é.m. par phase (Kapp) E   = 4,44 · f · Φ · N · k_w          `V`
 //! vitesse de synchronisme N_s = 60 · f / p                       [tr/min]
-//! puissance active        P   = E · V · sin δ / X_s              [W]
+//! puissance active        P   = E · V · sin δ / X_s              `W`
 //! régulation de tension   ΔU  = (E0 − V) / V                     [sans dim.]
-//! (cas limite)            P_max = E · V / X_s   pour δ = π/2      [W]
+//! (cas limite)            P_max = E · V / X_s   pour δ = π/2      `W`
 //! ```
 //!
-//! `f` fréquence électrique [Hz], `Φ` flux utile par pôle [Wb], `N`
+//! `f` fréquence électrique `Hz`, `Φ` flux utile par pôle `Wb`, `N`
 //! nombre de spires **en série par phase** [sans dimension], `k_w` facteur
-//! de bobinage [sans dimension, 0…1], `E` f.é.m. efficace par phase [V],
+//! de bobinage [sans dimension, 0…1], `E` f.é.m. efficace par phase `V`,
 //! `N_s` vitesse de synchronisme [tr/min], `p` nombre de **paires** de pôles
-//! [sans dimension], `V` tension aux bornes (par phase) [V], `X_s` réactance
-//! synchrone [Ω], `δ` angle de charge (angle interne) [rad], `E0` f.é.m. à
-//! vide [V], `ΔU` régulation de tension [sans dimension, ×100 pour des %].
+//! [sans dimension], `V` tension aux bornes (par phase) `V`, `X_s` réactance
+//! synchrone `Ω`, `δ` angle de charge (angle interne) `rad`, `E0` f.é.m. à
+//! vide `V`, `ΔU` régulation de tension [sans dimension, ×100 pour des %].
 //! Le coefficient `4,44 = √2 · π` (valeur efficace d'une f.é.m. sinusoïdale).
 //!
 //! **Limite honnête** : modèle de machine synchrone à **pôles lisses**
@@ -33,7 +33,7 @@
 /// sinusoïdale (sans dimension).
 pub const SYNCGEN_KAPP_COEFFICIENT: f64 = 4.44;
 
-/// F.é.m. efficace induite par phase `E = 4,44 · f · Φ · N · k_w` [V]
+/// F.é.m. efficace induite par phase `E = 4,44 · f · Φ · N · k_w` `V`
 /// (formule de Kapp).
 ///
 /// `frequency` fréquence électrique en hertz (Hz), `flux_per_pole` flux
@@ -88,7 +88,7 @@ pub fn syncgen_synchronous_speed_rpm(frequency: f64, pole_pairs: f64) -> f64 {
     60.0 * frequency / pole_pairs
 }
 
-/// Puissance active développée `P = E · V · sin δ / X_s` [W] (machine à
+/// Puissance active développée `P = E · V · sin δ / X_s` `W` (machine à
 /// rotor cylindrique, résistance d'induit négligée).
 ///
 /// `emf` f.é.m. efficace par phase en volts (V), `terminal_voltage` tension
