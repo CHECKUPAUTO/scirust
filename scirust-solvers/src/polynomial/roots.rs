@@ -7,7 +7,7 @@
 //! Convergence quadratique près de racines simples ; converge globalement
 //! depuis presque tous les points de départ, sur des polynômes modérément
 //! mal conditionnés (racines entières bien séparées de degré ~5-10, voir
-//! [`tests::degree_5`]).
+//! `tests::degree_5`).
 //!
 //! **Limite connue** : cette implémentation travaille sur les coefficients
 //! sous forme développée (base monomiale), qui est numériquement instable
