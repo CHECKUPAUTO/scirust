@@ -16,11 +16,13 @@ pub enum VmapError {
 
 impl fmt::Display for VmapError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self
+        {
             Self::InvalidGraph(error) => write!(f, "invalid graph during vmap: {error}"),
-            Self::InvalidSemantics(error) => {
+            Self::InvalidSemantics(error) =>
+            {
                 write!(f, "invalid tensor semantics during vmap: {error}")
-            }
+            },
             Self::InvalidMappedInput(node) => write!(
                 f,
                 "vmap node {} was requested as a mapped input but is not an Input node",
@@ -72,11 +74,15 @@ pub fn vmap(
     validate_semantics(source).map_err(VmapError::InvalidSemantics)?;
 
     let mut requested = vec![false; source.nodes().len()];
-    for &input in mapped_inputs {
-        let Some(node) = source.nodes().get(input.get() as usize) else {
+    for &input in mapped_inputs
+    {
+        let Some(node) = source.nodes().get(input.get() as usize)
+        else
+        {
             return Err(VmapError::InvalidMappedInput(input));
         };
-        if !matches!(&node.operation, Operation::Input { .. }) {
+        if !matches!(&node.operation, Operation::Input { .. })
+        {
             return Err(VmapError::InvalidMappedInput(input));
         }
         requested[input.get() as usize] = true;
@@ -86,7 +92,8 @@ pub fn vmap(
     let mut mapping = Vec::with_capacity(source.nodes().len());
     let mut mapped = Vec::with_capacity(source.nodes().len());
 
-    for (index, node) in source.nodes().iter().enumerate() {
+    for (index, node) in source.nodes().iter().enumerate()
+    {
         let input_ids = node
             .inputs
             .iter()
@@ -108,31 +115,38 @@ pub fn vmap(
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let (new_id, is_mapped) = match &node.operation {
-            Operation::Input { name } => {
+        let (new_id, is_mapped) = match &node.operation
+        {
+            Operation::Input { name } =>
+            {
                 let is_mapped = requested[index];
-                let output = if is_mapped {
+                let output = if is_mapped
+                {
                     batched_type(&node.output, batch_size)
-                } else {
+                }
+                else
+                {
                     node.output.clone()
                 };
                 (graph.add_input(name.clone(), output)?, is_mapped)
-            }
-            Operation::Constant { id } => {
-                (graph.add_constant(*id, node.output.clone())?, false)
-            }
+            },
+            Operation::Constant { id } => (graph.add_constant(*id, node.output.clone())?, false),
             Operation::Add
             | Operation::Sub
             | Operation::Mul
             | Operation::Div
-            | Operation::ReluGrad => {
+            | Operation::ReluGrad =>
+            {
                 let is_mapped = input_mapped.iter().copied().any(|value| value);
-                if !is_mapped {
+                if !is_mapped
+                {
                     (
                         graph.add_node(node.operation.clone(), input_ids, node.output.clone())?,
                         false,
                     )
-                } else {
+                }
+                else
+                {
                     let output = batched_type(&node.output, batch_size);
                     let operands = batch_operands(
                         &mut graph,
@@ -147,7 +161,7 @@ pub fn vmap(
                         true,
                     )
                 }
-            }
+            },
             Operation::Relu
             | Operation::Exp
             | Operation::Log
@@ -155,93 +169,129 @@ pub fn vmap(
             | Operation::ZerosLike
             | Operation::OnesLike
             | Operation::StopGradient
-            | Operation::Checkpoint => {
+            | Operation::Checkpoint =>
+            {
                 let is_mapped = input_mapped[0];
-                let output = if is_mapped {
+                let output = if is_mapped
+                {
                     batched_type(&node.output, batch_size)
-                } else {
+                }
+                else
+                {
                     node.output.clone()
                 };
                 (
                     graph.add_node(node.operation.clone(), input_ids, output)?,
                     is_mapped,
                 )
-            }
-            Operation::Reshape { shape } => {
+            },
+            Operation::Reshape { shape } =>
+            {
                 let is_mapped = input_mapped[0];
-                let operation = if is_mapped {
+                let operation = if is_mapped
+                {
                     Operation::Reshape {
                         shape: batched_shape(shape, batch_size),
                     }
-                } else {
+                }
+                else
+                {
                     node.operation.clone()
                 };
-                let output = if is_mapped {
+                let output = if is_mapped
+                {
                     batched_type(&node.output, batch_size)
-                } else {
+                }
+                else
+                {
                     node.output.clone()
                 };
                 (graph.add_node(operation, input_ids, output)?, is_mapped)
-            }
-            Operation::Transpose { permutation } => {
+            },
+            Operation::Transpose { permutation } =>
+            {
                 let is_mapped = input_mapped[0];
-                let operation = if is_mapped {
+                let operation = if is_mapped
+                {
                     let mut lifted = Vec::with_capacity(permutation.len() + 1);
                     lifted.push(0);
                     lifted.extend(permutation.iter().map(|axis| axis + 1));
                     Operation::Transpose {
                         permutation: lifted,
                     }
-                } else {
+                }
+                else
+                {
                     node.operation.clone()
                 };
-                let output = if is_mapped {
+                let output = if is_mapped
+                {
                     batched_type(&node.output, batch_size)
-                } else {
+                }
+                else
+                {
                     node.output.clone()
                 };
                 (graph.add_node(operation, input_ids, output)?, is_mapped)
-            }
-            Operation::BroadcastTo { shape } => {
+            },
+            Operation::BroadcastTo { shape } =>
+            {
                 let is_mapped = input_mapped[0];
-                let operation = if is_mapped {
+                let operation = if is_mapped
+                {
                     Operation::BroadcastTo {
                         shape: batched_shape(shape, batch_size),
                     }
-                } else {
+                }
+                else
+                {
                     node.operation.clone()
                 };
-                let output = if is_mapped {
+                let output = if is_mapped
+                {
                     batched_type(&node.output, batch_size)
-                } else {
+                }
+                else
+                {
                     node.output.clone()
                 };
                 (graph.add_node(operation, input_ids, output)?, is_mapped)
-            }
-            Operation::ReduceSumTo { shape } => {
+            },
+            Operation::ReduceSumTo { shape } =>
+            {
                 let is_mapped = input_mapped[0];
-                let operation = if is_mapped {
+                let operation = if is_mapped
+                {
                     Operation::ReduceSumTo {
                         shape: batched_shape(shape, batch_size),
                     }
-                } else {
+                }
+                else
+                {
                     node.operation.clone()
                 };
-                let output = if is_mapped {
+                let output = if is_mapped
+                {
                     batched_type(&node.output, batch_size)
-                } else {
+                }
+                else
+                {
                     node.output.clone()
                 };
                 (graph.add_node(operation, input_ids, output)?, is_mapped)
-            }
-            Operation::MatMul | Operation::BatchMatMul => {
+            },
+            Operation::MatMul | Operation::BatchMatMul =>
+            {
                 let is_mapped = input_mapped.iter().copied().any(|value| value);
-                if !is_mapped {
+                if !is_mapped
+                {
                     (
                         graph.add_node(node.operation.clone(), input_ids, node.output.clone())?,
                         false,
                     )
-                } else {
+                }
+                else
+                {
                     let operands = batch_operands(
                         &mut graph,
                         source,
@@ -256,7 +306,7 @@ pub fn vmap(
                         true,
                     )
                 }
-            }
+            },
         };
 
         mapping.push(new_id);
@@ -294,8 +344,10 @@ fn batch_operands(
     batch_size: usize,
 ) -> Result<Vec<NodeId>, VmapError> {
     let mut operands = Vec::with_capacity(input_ids.len());
-    for (position, &value) in input_ids.iter().enumerate() {
-        if input_mapped[position] {
+    for (position, &value) in input_ids.iter().enumerate()
+    {
+        if input_mapped[position]
+        {
             operands.push(value);
             continue;
         }
@@ -343,7 +395,9 @@ mod tests {
         let mut graph = Graph::new();
         let x = graph.add_input("x", vector()).unwrap();
         let bias = graph.add_input("bias", vector()).unwrap();
-        let sum = graph.add_node(Operation::Add, vec![x, bias], vector()).unwrap();
+        let sum = graph
+            .add_node(Operation::Add, vec![x, bias], vector())
+            .unwrap();
         let out = graph
             .add_node(
                 Operation::Scale {
@@ -358,11 +412,13 @@ mod tests {
         let transformed = vmap(&graph, 8, &[x]).unwrap();
         let output = &transformed.graph.nodes()[transformed.outputs[0].get() as usize].output;
         assert_eq!(output.shape.dims(), &[8, 3]);
-        assert!(transformed
-            .graph
-            .nodes()
-            .iter()
-            .any(|node| matches!(&node.operation, Operation::BroadcastTo { .. })));
+        assert!(
+            transformed
+                .graph
+                .nodes()
+                .iter()
+                .any(|node| matches!(&node.operation, Operation::BroadcastTo { .. }))
+        );
     }
 
     #[test]

@@ -18,7 +18,8 @@ impl SpmdInputs {
     }
 
     pub fn insert(&mut self, node: NodeId, tensor: Tensor) -> Result<(), SpmdError> {
-        if self.values.iter().any(|(existing, _)| *existing == node) {
+        if self.values.iter().any(|(existing, _)| *existing == node)
+        {
             return Err(SpmdError::DuplicateInput(node));
         }
         self.values.push((node, tensor));
@@ -71,24 +72,27 @@ pub enum SpmdError {
 
 impl fmt::Display for SpmdError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self
+        {
             Self::Shard(error) => write!(f, "SPMD sharding failed: {error}"),
             Self::Runtime(error) => write!(f, "SPMD local execution failed: {error}"),
             Self::Tensor(error) => write!(f, "SPMD tensor operation failed: {error}"),
             Self::MissingInput(node) => write!(f, "missing SPMD input node {}", node.get()),
             Self::DuplicateInput(node) => write!(f, "duplicate SPMD input node {}", node.get()),
             Self::UnexpectedInput(node) => write!(f, "unexpected SPMD input node {}", node.get()),
-            Self::InputTypeMismatch { node } => {
+            Self::InputTypeMismatch { node } =>
+            {
                 write!(f, "SPMD input type mismatch at node {}", node.get())
-            }
+            },
             Self::InputMustBeHost { node } => write!(
                 f,
                 "reference SPMD input node {} must use Host placement",
                 node.get()
             ),
-            Self::OutputMappingLost(node) => {
+            Self::OutputMappingLost(node) =>
+            {
                 write!(f, "SPMD output mapping lost node {}", node.get())
-            }
+            },
             Self::ReplicatedOutputDiverged { node, rank } => write!(
                 f,
                 "replicated SPMD output node {} diverged at rank {rank}",
@@ -171,17 +175,21 @@ impl ReferenceSpmdSession {
         self.validate_global_inputs(inputs)?;
 
         let mut rank_outputs = Vec::with_capacity(self.transform.world_size);
-        for rank in 0..self.transform.world_size {
+        for rank in 0..self.transform.world_size
+        {
             let mut local_inputs = Core2Inputs::new();
-            for (index, node) in self.source.nodes().iter().enumerate() {
-                if !matches!(&node.operation, Operation::Input { .. }) {
+            for (index, node) in self.source.nodes().iter().enumerate()
+            {
+                if !matches!(&node.operation, Operation::Input { .. })
+                {
                     continue;
                 }
                 let source_id = NodeId::new(index as u32);
                 let global = inputs
                     .get(source_id)
                     .ok_or(SpmdError::MissingInput(source_id))?;
-                let local_value = if self.transform.sharded[index] {
+                let local_value = if self.transform.sharded[index]
+                {
                     let start = rank
                         .checked_mul(self.transform.local_batch)
                         .ok_or(TensorError::ShapeOverflow)?;
@@ -189,7 +197,9 @@ impl ReferenceSpmdSession {
                         .checked_add(self.transform.local_batch)
                         .ok_or(TensorError::ShapeOverflow)?;
                     global.slice(0, start, end, 1)?
-                } else {
+                }
+                else
+                {
                     global.clone()
                 };
                 local_inputs.insert(self.transform.mapping[index], local_value)?;
@@ -198,26 +208,26 @@ impl ReferenceSpmdSession {
         }
 
         let mut outputs = Vec::with_capacity(self.source.outputs().len());
-        for (position, &source_output) in self.source.outputs().iter().enumerate() {
+        for (position, &source_output) in self.source.outputs().iter().enumerate()
+        {
             let transformed_output = *self
                 .transform
                 .outputs
                 .get(position)
                 .ok_or(SpmdError::OutputMappingLost(source_output))?;
             let source_type = &self.source.nodes()[source_output.get() as usize].output;
-            let value = if self.transform.sharded[source_output.get() as usize] {
+            let value = if self.transform.sharded[source_output.get() as usize]
+            {
                 reassemble_sharded_output(
                     source_output,
                     transformed_output,
                     source_type,
                     &rank_outputs,
                 )?
-            } else {
-                verify_replicated_output(
-                    source_output,
-                    transformed_output,
-                    &rank_outputs,
-                )?
+            }
+            else
+            {
+                verify_replicated_output(source_output, transformed_output, &rank_outputs)?
             };
             outputs.push((source_output, value));
         }
@@ -225,17 +235,23 @@ impl ReferenceSpmdSession {
     }
 
     fn validate_global_inputs(&self, inputs: &SpmdInputs) -> Result<(), SpmdError> {
-        for (node, _) in inputs.entries() {
-            let Some(source) = self.source.nodes().get(node.get() as usize) else {
+        for (node, _) in inputs.entries()
+        {
+            let Some(source) = self.source.nodes().get(node.get() as usize)
+            else
+            {
                 return Err(SpmdError::UnexpectedInput(*node));
             };
-            if !matches!(&source.operation, Operation::Input { .. }) {
+            if !matches!(&source.operation, Operation::Input { .. })
+            {
                 return Err(SpmdError::UnexpectedInput(*node));
             }
         }
 
-        for (index, node) in self.source.nodes().iter().enumerate() {
-            if !matches!(&node.operation, Operation::Input { .. }) {
+        for (index, node) in self.source.nodes().iter().enumerate()
+        {
+            if !matches!(&node.operation, Operation::Input { .. })
+            {
                 continue;
             }
             let id = NodeId::new(index as u32);
@@ -246,11 +262,17 @@ impl ReferenceSpmdSession {
     }
 }
 
-fn validate_input_type(node: NodeId, tensor: &Tensor, expected: &TensorType) -> Result<(), SpmdError> {
-    if tensor.dtype() != expected.dtype || tensor.shape() != &expected.shape {
+fn validate_input_type(
+    node: NodeId,
+    tensor: &Tensor,
+    expected: &TensorType,
+) -> Result<(), SpmdError> {
+    if tensor.dtype() != expected.dtype || tensor.shape() != &expected.shape
+    {
         return Err(SpmdError::InputTypeMismatch { node });
     }
-    if tensor.device() != &TensorDevice::Host {
+    if tensor.device() != &TensorDevice::Host
+    {
         return Err(SpmdError::InputMustBeHost { node });
     }
     Ok(())
@@ -271,7 +293,8 @@ fn reassemble_sharded_output(
         .checked_mul(element_width)
         .ok_or(TensorError::ShapeOverflow)?;
     let mut bytes = Vec::with_capacity(capacity);
-    for outputs in rank_outputs {
+    for outputs in rank_outputs
+    {
         let local = outputs
             .get(transformed_node)
             .ok_or(SpmdError::OutputMappingLost(source_node))?;
@@ -295,7 +318,8 @@ fn verify_replicated_output(
         .and_then(|outputs| outputs.get(transformed_node))
         .ok_or(SpmdError::OutputMappingLost(source_node))?;
     let first_bytes = first.to_contiguous_bytes();
-    for (rank, outputs) in rank_outputs.iter().enumerate().skip(1) {
+    for (rank, outputs) in rank_outputs.iter().enumerate().skip(1)
+    {
         let candidate = outputs
             .get(transformed_node)
             .ok_or(SpmdError::OutputMappingLost(source_node))?;
@@ -348,8 +372,8 @@ mod tests {
                 batched_x,
                 Tensor::from_f32(
                     vec![
-                        1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15.,
-                        16., 17., 18., 19., 20., 21., 22., 23., 24.,
+                        1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15., 16., 17.,
+                        18., 19., 20., 21., 22., 23., 24.,
                     ],
                     vec![8, 3],
                 )
@@ -362,8 +386,8 @@ mod tests {
         assert_eq!(
             gradient,
             vec![
-                2., 4., 6., 8., 10., 12., 14., 16., 18., 20., 22., 24., 26., 28., 30., 32.,
-                34., 36., 38., 40., 42., 44., 46., 48.,
+                2., 4., 6., 8., 10., 12., 14., 16., 18., 20., 22., 24., 26., 28., 30., 32., 34.,
+                36., 38., 40., 42., 44., 46., 48.,
             ]
         );
     }
@@ -381,13 +405,9 @@ mod tests {
         let batched = vmap(&scalar, 4, &[x]).unwrap();
         let batched_x = batched.mapping[x.get() as usize];
         let batched_bias = batched.mapping[bias.get() as usize];
-        let session = ReferenceSpmdSession::prepare(
-            batched.graph,
-            Core2Constants::new(),
-            2,
-            &[batched_x],
-        )
-        .unwrap();
+        let session =
+            ReferenceSpmdSession::prepare(batched.graph, Core2Constants::new(), 2, &[batched_x])
+                .unwrap();
 
         let mut inputs = SpmdInputs::new();
         inputs

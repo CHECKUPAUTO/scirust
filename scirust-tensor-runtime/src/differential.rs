@@ -18,7 +18,8 @@ pub enum DifferentialError {
 
 impl fmt::Display for DifferentialError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self
+        {
             Self::Autodiff(error) => write!(f, "differential graph construction failed: {error}"),
             Self::Runtime(error) => write!(f, "differential reference execution failed: {error}"),
             Self::Tensor(error) => write!(f, "differential tensor construction failed: {error}"),
@@ -99,7 +100,8 @@ pub fn jacfwd_reference(
         .ok_or(DifferentialError::Tensor(TensorError::ShapeOverflow))?;
     let mut jacobian = vec![0.0f32; matrix_elements];
 
-    for input_index in 0..input_elements {
+    for input_index in 0..input_elements
+    {
         let mut tangent = vec![0.0f32; input_elements];
         tangent[input_index] = 1.0;
         let mut execution_inputs = copy_bindings(bindings)?;
@@ -112,7 +114,8 @@ pub fn jacfwd_reference(
             .get(tangent_output)
             .ok_or(DifferentialError::MissingTransformedOutput(tangent_output))?
             .to_f32_vec()?;
-        for (output_index, derivative) in tangent_value.into_iter().enumerate() {
+        for (output_index, derivative) in tangent_value.into_iter().enumerate()
+        {
             jacobian[output_index * input_elements + input_index] = derivative;
         }
     }
@@ -147,7 +150,8 @@ pub fn jacrev_reference(
         .ok_or(DifferentialError::Tensor(TensorError::ShapeOverflow))?;
     let mut jacobian = vec![0.0f32; matrix_elements];
 
-    for output_index in 0..output_elements {
+    for output_index in 0..output_elements
+    {
         let mut cotangent = vec![0.0f32; output_elements];
         cotangent[output_index] = 1.0;
         let mut execution_inputs = copy_bindings(bindings)?;
@@ -180,9 +184,12 @@ pub fn jacobian_reference(
 ) -> Result<Tensor, DifferentialError> {
     let input_elements = checked_elements(tensor_type(graph, wrt)?)?;
     let output_elements = checked_elements(tensor_type(graph, output)?)?;
-    if input_elements <= output_elements {
+    if input_elements <= output_elements
+    {
         jacfwd_reference(graph, output, wrt, bindings, constants)
-    } else {
+    }
+    else
+    {
         jacrev_reference(graph, output, wrt, bindings, constants)
     }
 }
@@ -196,7 +203,8 @@ pub fn hessian_reference(
     constants: &Core2Constants,
 ) -> Result<Tensor, DifferentialError> {
     let output_elements = checked_elements(tensor_type(graph, output)?)?;
-    if output_elements != 1 {
+    if output_elements != 1
+    {
         return Err(DifferentialError::ScalarOutputRequired {
             node: output,
             elements: output_elements,
@@ -228,9 +236,12 @@ fn checked_elements(tensor_type: &TensorType) -> Result<usize, DifferentialError
 }
 
 fn require_f32(node: NodeId, tensor_type: &TensorType) -> Result<(), DifferentialError> {
-    if tensor_type.dtype == DType::F32 {
+    if tensor_type.dtype == DType::F32
+    {
         Ok(())
-    } else {
+    }
+    else
+    {
         Err(DifferentialError::UnsupportedDType {
             node,
             dtype: tensor_type.dtype,
@@ -247,8 +258,10 @@ fn jacobian_shape(output: &TensorType, input: &TensorType) -> Vec<usize> {
 
 fn copy_bindings(bindings: &[DifferentialBinding]) -> Result<Core2Inputs, DifferentialError> {
     let mut inputs = Core2Inputs::new();
-    for binding in bindings {
-        if binding.value.device() != &TensorDevice::Host {
+    for binding in bindings
+    {
+        if binding.value.device() != &TensorDevice::Host
+        {
             return Err(DifferentialError::Runtime(
                 Core2RuntimeError::HostReferenceRequired { node: binding.node },
             ));
@@ -303,14 +316,8 @@ mod tests {
             Tensor::from_f32(vec![3.], vec![1]).unwrap(),
         )];
 
-        let hessian = hessian_reference(
-            &graph,
-            square,
-            x,
-            &bindings,
-            &Core2Constants::new(),
-        )
-        .unwrap();
+        let hessian =
+            hessian_reference(&graph, square, x, &bindings, &Core2Constants::new()).unwrap();
         assert_eq!(hessian.shape().dims(), &[1, 1]);
         assert_eq!(hessian.to_f32_vec().unwrap(), vec![2.]);
     }

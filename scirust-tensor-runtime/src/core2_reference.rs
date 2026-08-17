@@ -24,18 +24,38 @@ pub enum Core2RuntimeError {
 
 impl fmt::Display for Core2RuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self
+        {
             Self::InvalidGraph(error) => write!(f, "invalid Core2 graph: {error}"),
             Self::InvalidSemantics(error) => write!(f, "invalid Core2 tensor semantics: {error}"),
             Self::MissingInput(node) => write!(f, "missing Core2 input node {}", node.get()),
             Self::DuplicateInput(node) => write!(f, "duplicate Core2 input node {}", node.get()),
             Self::MissingConstant(id) => write!(f, "missing Core2 constant {}", id.get()),
             Self::DuplicateConstant(id) => write!(f, "duplicate Core2 constant {}", id.get()),
-            Self::TypeMismatch { node } => write!(f, "Core2 value type mismatch at node {}", node.get()),
-            Self::HostReferenceRequired { node } => write!(f, "Core2 reference runtime requires Host placement at node {}", node.get()),
-            Self::UnsupportedDType { node, dtype } => write!(f, "Core2 reference runtime does not yet execute dtype {dtype:?} at node {}", node.get()),
-            Self::InvalidScale { node } => write!(f, "Core2 scale attribute is not an F32 scalar at node {}", node.get()),
-            Self::UnsupportedOperation { node, operation } => write!(f, "Core2 reference runtime has no executor for node {} operation {operation:?}", node.get()),
+            Self::TypeMismatch { node } =>
+            {
+                write!(f, "Core2 value type mismatch at node {}", node.get())
+            },
+            Self::HostReferenceRequired { node } => write!(
+                f,
+                "Core2 reference runtime requires Host placement at node {}",
+                node.get()
+            ),
+            Self::UnsupportedDType { node, dtype } => write!(
+                f,
+                "Core2 reference runtime does not yet execute dtype {dtype:?} at node {}",
+                node.get()
+            ),
+            Self::InvalidScale { node } => write!(
+                f,
+                "Core2 scale attribute is not an F32 scalar at node {}",
+                node.get()
+            ),
+            Self::UnsupportedOperation { node, operation } => write!(
+                f,
+                "Core2 reference runtime has no executor for node {} operation {operation:?}",
+                node.get()
+            ),
             Self::Tensor(error) => write!(f, "Core2 tensor error: {error}"),
         }
     }
@@ -66,7 +86,8 @@ impl Core2Inputs {
     }
 
     pub fn insert(&mut self, node: NodeId, tensor: Tensor) -> Result<(), Core2RuntimeError> {
-        if self.values.iter().any(|(existing, _)| *existing == node) {
+        if self.values.iter().any(|(existing, _)| *existing == node)
+        {
             return Err(Core2RuntimeError::DuplicateInput(node));
         }
         self.values.push((node, tensor));
@@ -92,7 +113,8 @@ impl Core2Constants {
     }
 
     pub fn insert(&mut self, id: ConstantId, tensor: Tensor) -> Result<(), Core2RuntimeError> {
-        if self.values.iter().any(|(existing, _)| *existing == id) {
+        if self.values.iter().any(|(existing, _)| *existing == id)
+        {
             return Err(Core2RuntimeError::DuplicateConstant(id));
         }
         self.values.push((id, tensor));
@@ -140,10 +162,12 @@ impl Core2ReferenceSession {
         graph.validate()?;
         validate_semantics(&graph).map_err(Core2RuntimeError::InvalidSemantics)?;
 
-        for (index, node) in graph.nodes().iter().enumerate() {
+        for (index, node) in graph.nodes().iter().enumerate()
+        {
             let node_id = NodeId::new(index as u32);
             require_f32(node_id, &node.output)?;
-            if let Operation::Constant { id } = &node.operation {
+            if let Operation::Constant { id } = &node.operation
+            {
                 let tensor = constants
                     .get(*id)
                     .ok_or(Core2RuntimeError::MissingConstant(*id))?;
@@ -161,7 +185,8 @@ impl Core2ReferenceSession {
     pub fn execute(&self, inputs: &Core2Inputs) -> Result<Core2Outputs, Core2RuntimeError> {
         let mut values: Vec<Option<Tensor>> = vec![None; self.graph.nodes().len()];
 
-        for (index, node) in self.graph.nodes().iter().enumerate() {
+        for (index, node) in self.graph.nodes().iter().enumerate()
+        {
             let node_id = NodeId::new(index as u32);
             let value = self.execute_node(node_id, node, &values, inputs)?;
             validate_value(node_id, &value, &node.output)?;
@@ -169,7 +194,8 @@ impl Core2ReferenceSession {
         }
 
         let mut outputs = Vec::with_capacity(self.graph.outputs().len());
-        for &output in self.graph.outputs() {
+        for &output in self.graph.outputs()
+        {
             outputs.push((output, value_at(&values, output)?.clone()));
         }
         Ok(Core2Outputs { values: outputs })
@@ -182,14 +208,16 @@ impl Core2ReferenceSession {
         values: &[Option<Tensor>],
         inputs: &Core2Inputs,
     ) -> Result<Tensor, Core2RuntimeError> {
-        match &node.operation {
-            Operation::Input { .. } => {
+        match &node.operation
+        {
+            Operation::Input { .. } =>
+            {
                 let tensor = inputs
                     .get(node_id)
                     .ok_or(Core2RuntimeError::MissingInput(node_id))?;
                 validate_value(node_id, tensor, &node.output)?;
                 Ok(tensor.clone())
-            }
+            },
             Operation::Constant { id } => Ok(self
                 .constants
                 .get(*id)
@@ -199,16 +227,18 @@ impl Core2ReferenceSession {
             Operation::Sub => binary_f32(values, node, |a, b| a - b),
             Operation::Mul => binary_f32(values, node, |a, b| a * b),
             Operation::Div => binary_f32(values, node, |a, b| a / b),
-            Operation::Scale { factor } => {
+            Operation::Scale { factor } =>
+            {
                 let factor = factor
                     .as_f32()
                     .ok_or(Core2RuntimeError::InvalidScale { node: node_id })?;
                 unary_f32(values, node, |value| value * factor)
-            }
+            },
             Operation::Relu => unary_f32(values, node, |value| value.max(0.0)),
             Operation::Exp => unary_f32(values, node, f32::exp),
             Operation::Log => unary_f32(values, node, f32::ln),
-            Operation::ReluGrad => {
+            Operation::ReluGrad =>
+            {
                 let primal = value_at(values, node.inputs[0])?.to_f32_vec()?;
                 let tangent = value_at(values, node.inputs[1])?.to_f32_vec()?;
                 let data = primal
@@ -217,7 +247,7 @@ impl Core2ReferenceSession {
                     .map(|(primal, tangent)| if primal > 0.0 { tangent } else { 0.0 })
                     .collect();
                 Ok(Tensor::from_f32(data, node.output.shape.dims().to_vec())?)
-            }
+            },
             Operation::ZerosLike => Ok(Tensor::zeros(
                 DType::F32,
                 node.output.shape.clone(),
@@ -229,26 +259,34 @@ impl Core2ReferenceSession {
             )?),
             Operation::MatMul => matmul_f32(values, node, false),
             Operation::BatchMatMul => matmul_f32(values, node, true),
-            Operation::Reshape { shape } => {
+            Operation::Reshape { shape } =>
+            {
                 let input = value_at(values, node.inputs[0])?;
-                if input.is_contiguous() {
+                if input.is_contiguous()
+                {
                     Ok(input.reshape(shape.clone())?)
-                } else {
+                }
+                else
+                {
                     Ok(input.contiguous()?.reshape(shape.clone())?)
                 }
-            }
-            Operation::Transpose { permutation } => {
+            },
+            Operation::Transpose { permutation } =>
+            {
                 Ok(value_at(values, node.inputs[0])?.permute(permutation)?)
-            }
-            Operation::BroadcastTo { shape } => {
+            },
+            Operation::BroadcastTo { shape } =>
+            {
                 Ok(value_at(values, node.inputs[0])?.broadcast_to(shape.clone())?)
-            }
-            Operation::ReduceSumTo { shape } => {
+            },
+            Operation::ReduceSumTo { shape } =>
+            {
                 reduce_sum_to_f32(value_at(values, node.inputs[0])?, shape)
-            }
-            Operation::StopGradient | Operation::Checkpoint => {
+            },
+            Operation::StopGradient | Operation::Checkpoint =>
+            {
                 Ok(value_at(values, node.inputs[0])?.clone())
-            }
+            },
             operation => Err(Core2RuntimeError::UnsupportedOperation {
                 node: node_id,
                 operation: operation.clone(),
@@ -265,9 +303,12 @@ fn value_at(values: &[Option<Tensor>], id: NodeId) -> Result<&Tensor, Core2Runti
 }
 
 fn require_f32(node: NodeId, ty: &TensorType) -> Result<(), Core2RuntimeError> {
-    if ty.dtype == DType::F32 {
+    if ty.dtype == DType::F32
+    {
         Ok(())
-    } else {
+    }
+    else
+    {
         Err(Core2RuntimeError::UnsupportedDType {
             node,
             dtype: ty.dtype,
@@ -276,10 +317,12 @@ fn require_f32(node: NodeId, ty: &TensorType) -> Result<(), Core2RuntimeError> {
 }
 
 fn validate_value(node: NodeId, tensor: &Tensor, ty: &TensorType) -> Result<(), Core2RuntimeError> {
-    if tensor.dtype() != ty.dtype || tensor.shape() != &ty.shape {
+    if tensor.dtype() != ty.dtype || tensor.shape() != &ty.shape
+    {
         return Err(Core2RuntimeError::TypeMismatch { node });
     }
-    if tensor.device() != &TensorDevice::Host {
+    if tensor.device() != &TensorDevice::Host
+    {
         return Err(Core2RuntimeError::HostReferenceRequired { node });
     }
     Ok(())
@@ -334,20 +377,27 @@ fn matmul_f32(
     let m = lhs_dims[rank - 2];
     let k = lhs_dims[rank - 1];
     let n = rhs_dims[rank - 1];
-    let batches = if batched {
+    let batches = if batched
+    {
         lhs_dims[..rank - 2].iter().copied().product()
-    } else {
+    }
+    else
+    {
         1
     };
     let mut output = vec![0.0f32; batches * m * n];
-    for batch in 0..batches {
+    for batch in 0..batches
+    {
         let lhs_base = batch * m * k;
         let rhs_base = batch * k * n;
         let out_base = batch * m * n;
-        for row in 0..m {
-            for col in 0..n {
+        for row in 0..m
+        {
+            for col in 0..n
+            {
                 let mut sum = 0.0f32;
-                for inner in 0..k {
+                for inner in 0..k
+                {
                     sum += lhs[lhs_base + row * k + inner] * rhs[rhs_base + inner * n + col];
                 }
                 output[out_base + row * n + col] = sum;
@@ -366,18 +416,24 @@ fn reduce_sum_to_f32(input: &Tensor, target: &Shape) -> Result<Tensor, Core2Runt
     let target_strides = contiguous_strides(target_dims);
     let rank_delta = source_dims.len() - target_dims.len();
 
-    for (linear, value) in source.into_iter().enumerate() {
+    for (linear, value) in source.into_iter().enumerate()
+    {
         let mut remainder = linear;
         let mut target_offset = 0usize;
-        for source_axis in (0..source_dims.len()).rev() {
+        for source_axis in (0..source_dims.len()).rev()
+        {
             let dimension = source_dims[source_axis];
             let coordinate = remainder % dimension;
             remainder /= dimension;
-            if source_axis >= rank_delta {
+            if source_axis >= rank_delta
+            {
                 let target_axis = source_axis - rank_delta;
-                let target_coordinate = if target_dims[target_axis] == 1 {
+                let target_coordinate = if target_dims[target_axis] == 1
+                {
                     0
-                } else {
+                }
+                else
+                {
                     coordinate
                 };
                 target_offset += target_coordinate * target_strides[target_axis];
@@ -391,8 +447,10 @@ fn reduce_sum_to_f32(input: &Tensor, target: &Shape) -> Result<Tensor, Core2Runt
 
 fn contiguous_strides(shape: &[usize]) -> Vec<usize> {
     let mut strides = vec![1usize; shape.len()];
-    if shape.len() > 1 {
-        for axis in (0..shape.len() - 1).rev() {
+    if shape.len() > 1
+    {
+        for axis in (0..shape.len() - 1).rev()
+        {
             strides[axis] = strides[axis + 1] * shape[axis + 1];
         }
     }
@@ -420,11 +478,8 @@ mod tests {
         let batched = vmap(&source, 2, &[x]).unwrap();
         let batched_x = batched.mapping[x.get() as usize];
         let differentiated = grad(&batched.graph, batched.outputs[0], &[batched_x]).unwrap();
-        let session = Core2ReferenceSession::prepare(
-            differentiated.graph,
-            Core2Constants::new(),
-        )
-        .unwrap();
+        let session =
+            Core2ReferenceSession::prepare(differentiated.graph, Core2Constants::new()).unwrap();
         let mut inputs = Core2Inputs::new();
         inputs
             .insert(
@@ -463,6 +518,9 @@ mod tests {
             )
             .unwrap();
         let outputs = session.execute(&inputs).unwrap();
-        assert_eq!(outputs.get(out).unwrap().to_f32_vec().unwrap(), vec![17., 53.]);
+        assert_eq!(
+            outputs.get(out).unwrap().to_f32_vec().unwrap(),
+            vec![17., 53.]
+        );
     }
 }

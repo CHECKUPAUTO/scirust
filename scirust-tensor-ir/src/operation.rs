@@ -46,14 +46,20 @@ impl Scalar {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Operation {
-    Input { name: String },
-    Constant { id: ConstantId },
+    Input {
+        name: String,
+    },
+    Constant {
+        id: ConstantId,
+    },
 
     Add,
     Sub,
     Mul,
     Div,
-    Scale { factor: Scalar },
+    Scale {
+        factor: Scalar,
+    },
 
     Relu,
     Exp,
@@ -69,12 +75,20 @@ pub enum Operation {
     /// batch prefix. This is the canonical lowering target of `vmap(MatMul)`.
     BatchMatMul,
 
-    Reshape { shape: Shape },
-    Transpose { permutation: Vec<usize> },
+    Reshape {
+        shape: Shape,
+    },
+    Transpose {
+        permutation: Vec<usize>,
+    },
     /// NumPy-style right-aligned zero-stride broadcast in the value model.
-    BroadcastTo { shape: Shape },
+    BroadcastTo {
+        shape: Shape,
+    },
     /// Sum broadcasted axes so the result has exactly `shape`.
-    ReduceSumTo { shape: Shape },
+    ReduceSumTo {
+        shape: Shape,
+    },
 
     /// Identity in the primal program and a barrier to differentiation.
     StopGradient,
