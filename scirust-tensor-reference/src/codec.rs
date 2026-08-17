@@ -389,7 +389,9 @@ fn validate_opcode_shapes(
         ReferenceOpcode::Relu
         | ReferenceOpcode::Exp
         | ReferenceOpcode::Log
-        | ReferenceOpcode::Scale =>
+        | ReferenceOpcode::Scale
+        | ReferenceOpcode::ZerosLike
+        | ReferenceOpcode::OnesLike =>
         {
             if operands[0].dims() != result.dims()
             {
@@ -399,7 +401,8 @@ fn validate_opcode_shapes(
         ReferenceOpcode::Add
         | ReferenceOpcode::Sub
         | ReferenceOpcode::Mul
-        | ReferenceOpcode::Div =>
+        | ReferenceOpcode::Div
+        | ReferenceOpcode::ReluGrad =>
         {
             if operands[0].dims() != result.dims() || operands[1].dims() != result.dims()
             {
@@ -411,6 +414,74 @@ fn validate_opcode_shapes(
             if operands[0].elements() != result.elements()
             {
                 return Err(ReferenceDecodeError::ElementCountMismatch);
+            }
+        },
+        ReferenceOpcode::BroadcastTo =>
+        {
+            let source = operands[0].dims();
+            let target = result.dims();
+            if source.len() > target.len()
+            {
+                return Err(ReferenceDecodeError::ShapeMismatch);
+            }
+            let offset = target.len() - source.len();
+            if !source
+                .iter()
+                .zip(&target[offset..])
+                .all(|(&source_dim, &target_dim)| source_dim == target_dim || source_dim == 1)
+            {
+                return Err(ReferenceDecodeError::ShapeMismatch);
+            }
+        },
+        ReferenceOpcode::ReduceSumTo =>
+        {
+            let source = operands[0].dims();
+            let target = result.dims();
+            if target.len() > source.len()
+            {
+                return Err(ReferenceDecodeError::ShapeMismatch);
+            }
+            let offset = source.len() - target.len();
+            if !target
+                .iter()
+                .zip(&source[offset..])
+                .all(|(&target_dim, &source_dim)| target_dim == source_dim || target_dim == 1)
+            {
+                return Err(ReferenceDecodeError::ShapeMismatch);
+            }
+        },
+        ReferenceOpcode::MatMul =>
+        {
+            let lhs = operands[0].dims();
+            let rhs = operands[1].dims();
+            let out = result.dims();
+            if lhs.len() != 2
+                || rhs.len() != 2
+                || out.len() != 2
+                || lhs[1] != rhs[0]
+                || out[0] != lhs[0]
+                || out[1] != rhs[1]
+            {
+                return Err(ReferenceDecodeError::ShapeMismatch);
+            }
+        },
+        ReferenceOpcode::BatchMatMul =>
+        {
+            let lhs = operands[0].dims();
+            let rhs = operands[1].dims();
+            let out = result.dims();
+            if lhs.len() < 3 || lhs.len() != rhs.len() || lhs.len() != out.len()
+            {
+                return Err(ReferenceDecodeError::ShapeMismatch);
+            }
+            let rank = lhs.len();
+            if lhs[..rank - 2] != rhs[..rank - 2]
+                || lhs[..rank - 2] != out[..rank - 2]
+                || lhs[rank - 1] != rhs[rank - 2]
+                || out[rank - 2] != lhs[rank - 2]
+                || out[rank - 1] != rhs[rank - 1]
+            {
+                return Err(ReferenceDecodeError::ShapeMismatch);
             }
         },
         ReferenceOpcode::Permute =>

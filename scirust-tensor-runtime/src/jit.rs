@@ -68,7 +68,6 @@ pub struct JitInputSpec {
 ///
 /// `prepare` is the compilation boundary. `execute` performs no graph
 /// optimization, lowering, kernel generation, or backend compilation.
-#[derive(Debug)]
 pub struct ReferenceJitSession<B: ComputeBackend> {
     session: ReferenceGraphSession<B>,
     inputs: Vec<JitInputSpec>,

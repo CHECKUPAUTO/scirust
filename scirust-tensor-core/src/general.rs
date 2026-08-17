@@ -8,16 +8,14 @@ use scirust_compute::{DType, Shape, Strides};
 /// `scirust-tensor-core` deliberately owns no backend buffer. A non-host
 /// placement therefore describes where a runtime should materialise the value;
 /// the canonical byte payload remains host-visible and deterministic.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum TensorDevice {
+    #[default]
     Host,
-    Backend { name: String, ordinal: u32 },
-}
-
-impl Default for TensorDevice {
-    fn default() -> Self {
-        Self::Host
-    }
+    Backend {
+        name: String,
+        ordinal: u32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -256,7 +254,7 @@ impl Tensor {
         }
         let bytes = self.to_contiguous_bytes();
         Ok(bytes
-            .chunks_exact(4)
+            .chunks(4)
             .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
             .collect())
     }
@@ -459,7 +457,7 @@ impl Tensor {
             });
         }
         let width = dtype.size_bytes();
-        if storage.len() % width != 0
+        if storage.len().checked_rem(width) != Some(0)
         {
             return Err(TensorError::ViewOutOfBounds);
         }
