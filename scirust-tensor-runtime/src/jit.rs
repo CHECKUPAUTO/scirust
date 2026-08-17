@@ -20,7 +20,8 @@ pub enum JitPreparationError {
 
 impl fmt::Display for JitPreparationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self
+        {
             Self::Optimization(error) => write!(f, "JIT optimization failed: {error}"),
             Self::Compilation(error) => write!(f, "JIT compilation failed: {error}"),
             Self::InputMappingLost { optimized } => write!(
@@ -44,7 +45,8 @@ pub enum JitExecutionError {
 
 impl fmt::Display for JitExecutionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self
+        {
             Self::UnexpectedInput { node } => write!(f, "unexpected JIT input node {}", node.get()),
             Self::DuplicateInput { node } => write!(f, "duplicate JIT input node {}", node.get()),
             Self::MissingInput { node } => write!(f, "missing JIT input node {}", node.get()),
@@ -94,7 +96,8 @@ impl<B: ComputeBackend> ReferenceJitSession<B> {
             .map_err(JitPreparationError::Compilation)?;
 
         let mut inputs = Vec::with_capacity(session.inputs().len());
-        for optimized_spec in session.inputs() {
+        for optimized_spec in session.inputs()
+        {
             let source_node = source_input_for_optimized(graph, &optimization, optimized_spec.node)
                 .ok_or(JitPreparationError::InputMappingLost {
                     optimized: optimized_spec.node,
@@ -132,22 +135,26 @@ impl<B: ComputeBackend> ReferenceJitSession<B> {
     pub fn execute(&self, inputs: &GraphInputs<'_>) -> Result<PlanOutputs, JitExecutionError> {
         let mut ordered: Vec<Option<&[f32]>> = vec![None; self.inputs.len()];
 
-        for &(source_node, values) in inputs.entries() {
+        for &(source_node, values) in inputs.entries()
+        {
             let Some(position) = self
                 .inputs
                 .iter()
                 .position(|spec| spec.source_node == source_node)
-            else {
+            else
+            {
                 return Err(JitExecutionError::UnexpectedInput { node: source_node });
             };
-            if ordered[position].is_some() {
+            if ordered[position].is_some()
+            {
                 return Err(JitExecutionError::DuplicateInput { node: source_node });
             }
             ordered[position] = Some(values);
         }
 
         let mut remapped = GraphInputs::new();
-        for (spec, values) in self.inputs.iter().zip(ordered) {
+        for (spec, values) in self.inputs.iter().zip(ordered)
+        {
             let values = values.ok_or(JitExecutionError::MissingInput {
                 node: spec.source_node,
             })?;
@@ -172,7 +179,8 @@ fn source_input_for_optimized(
         .filter(|(_, node)| matches!(&node.operation, Operation::Input { .. }))
         .find_map(|(index, _)| {
             let source_id = NodeId::new(index as u32);
-            match optimization.old_to_new.get(index).copied().flatten() {
+            match optimization.old_to_new.get(index).copied().flatten()
+            {
                 Some(mapped) if mapped == optimized => Some(source_id),
                 _ => None,
             }

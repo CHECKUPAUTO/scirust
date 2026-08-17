@@ -45,10 +45,17 @@ pub enum OptimizationError {
 
 impl fmt::Display for OptimizationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self
+        {
             Self::InvalidGraph(error) => write!(f, "cannot optimize invalid graph: {error}"),
-            Self::InvalidSemantics(error) => write!(f, "cannot optimize semantically invalid graph: {error}"),
-            Self::MissingMappedInput(node) => write!(f, "optimizer lost mapping for node {}", node.get()),
+            Self::InvalidSemantics(error) =>
+            {
+                write!(f, "cannot optimize semantically invalid graph: {error}")
+            },
+            Self::MissingMappedInput(node) =>
+            {
+                write!(f, "optimizer lost mapping for node {}", node.get())
+            },
         }
     }
 }
@@ -75,9 +82,12 @@ pub fn optimize_graph(
     source.validate()?;
     validate_semantics(source).map_err(OptimizationError::InvalidSemantics)?;
 
-    let reachable = if config.dead_code_elimination {
+    let reachable = if config.dead_code_elimination
+    {
         reachable_nodes(source)
-    } else {
+    }
+    else
+    {
         vec![true; source.nodes().len()]
     };
 
@@ -88,8 +98,10 @@ pub fn optimize_graph(
         ..OptimizationStats::default()
     };
 
-    for (index, node) in source.nodes().iter().enumerate() {
-        if !reachable[index] {
+    for (index, node) in source.nodes().iter().enumerate()
+    {
+        if !reachable[index]
+        {
             stats.eliminated_dead_nodes += 1;
             continue;
         }
@@ -98,13 +110,15 @@ pub fn optimize_graph(
             .inputs
             .iter()
             .map(|&input| {
-                mapping[input.get() as usize]
-                    .ok_or(OptimizationError::MissingMappedInput(input))
+                mapping[input.get() as usize].ok_or(OptimizationError::MissingMappedInput(input))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        if config.algebraic_simplification {
-            if let Some(alias) = simplify_alias(&graph, &node.operation, &mapped_inputs, &node.output) {
+        if config.algebraic_simplification
+        {
+            if let Some(alias) =
+                simplify_alias(&graph, &node.operation, &mapped_inputs, &node.output)
+            {
                 mapping[index] = Some(alias);
                 stats.simplified_nodes += 1;
                 continue;
@@ -112,15 +126,20 @@ pub fn optimize_graph(
         }
 
         let mut operation = node.operation.clone();
-        if config.algebraic_simplification {
-            if let Some(folded) = simplify_operation(&operation) {
+        if config.algebraic_simplification
+        {
+            if let Some(folded) = simplify_operation(&operation)
+            {
                 operation = folded;
                 stats.simplified_nodes += 1;
             }
         }
 
-        if config.common_subexpression_elimination && cse_eligible(&operation) {
-            if let Some(existing) = find_equivalent(&graph, &operation, &mapped_inputs, &node.output) {
+        if config.common_subexpression_elimination && cse_eligible(&operation)
+        {
+            if let Some(existing) =
+                find_equivalent(&graph, &operation, &mapped_inputs, &node.output)
+            {
                 mapping[index] = Some(existing);
                 stats.common_subexpressions += 1;
                 continue;
@@ -135,8 +154,7 @@ pub fn optimize_graph(
         .outputs()
         .iter()
         .map(|&output| {
-            mapping[output.get() as usize]
-                .ok_or(OptimizationError::MissingMappedInput(output))
+            mapping[output.get() as usize].ok_or(OptimizationError::MissingMappedInput(output))
         })
         .collect::<Result<Vec<_>, _>>()?;
     graph.set_outputs(outputs)?;
@@ -152,9 +170,11 @@ pub fn optimize_graph(
 fn reachable_nodes(graph: &Graph) -> Vec<bool> {
     let mut reachable = vec![false; graph.nodes().len()];
     let mut pending = graph.outputs().to_vec();
-    while let Some(node) = pending.pop() {
+    while let Some(node) = pending.pop()
+    {
         let index = node.get() as usize;
-        if reachable[index] {
+        if reachable[index]
+        {
             continue;
         }
         reachable[index] = true;
@@ -171,16 +191,29 @@ fn simplify_alias(
 ) -> Option<NodeId> {
     let &input = inputs.first()?;
     let input_type = &graph.nodes()[input.get() as usize].output;
-    match operation {
+    match operation
+    {
         Operation::Scale { factor } if factor.as_f32() == Some(1.0) => Some(input),
         Operation::Reshape { shape }
-            if input_type.dtype == output.dtype && input_type.shape == *shape => Some(input),
+            if input_type.dtype == output.dtype && input_type.shape == *shape =>
+        {
+            Some(input)
+        },
         Operation::Transpose { permutation }
-            if permutation.iter().copied().eq(0..permutation.len()) => Some(input),
+            if permutation.iter().copied().eq(0..permutation.len()) =>
+        {
+            Some(input)
+        },
         Operation::BroadcastTo { shape }
-            if input_type.dtype == output.dtype && input_type.shape == *shape => Some(input),
+            if input_type.dtype == output.dtype && input_type.shape == *shape =>
+        {
+            Some(input)
+        },
         Operation::ReduceSumTo { shape }
-            if input_type.dtype == output.dtype && input_type.shape == *shape => Some(input),
+            if input_type.dtype == output.dtype && input_type.shape == *shape =>
+        {
+            Some(input)
+        },
         _ => None,
     }
 }
@@ -190,7 +223,8 @@ fn simplify_alias(
 /// `scale(scale(x, a), b)` by `scale(scale(x, a), a*b)` would apply `a` twice
 /// unless the parent edge is rewritten at the same time.
 fn simplify_operation(operation: &Operation) -> Option<Operation> {
-    match operation {
+    match operation
+    {
         Operation::Scale { factor } if factor.as_f32() == Some(0.0) => Some(Operation::ZerosLike),
         _ => None,
     }
@@ -238,7 +272,9 @@ mod tests {
         let b = graph.add_input("b", ty()).unwrap();
         let first = graph.add_node(Operation::Add, vec![a, b], ty()).unwrap();
         let second = graph.add_node(Operation::Add, vec![a, b], ty()).unwrap();
-        let live = graph.add_node(Operation::Mul, vec![first, second], ty()).unwrap();
+        let live = graph
+            .add_node(Operation::Mul, vec![first, second], ty())
+            .unwrap();
         let _dead = graph.add_node(Operation::Relu, vec![a], ty()).unwrap();
         graph.set_outputs(vec![live]).unwrap();
 
@@ -254,13 +290,21 @@ mod tests {
         let x = graph.add_input("x", ty()).unwrap();
         let scale = graph
             .add_node(
-                Operation::Scale { factor: crate::Scalar::f32(1.0) },
+                Operation::Scale {
+                    factor: crate::Scalar::f32(1.0),
+                },
                 vec![x],
                 ty(),
             )
             .unwrap();
         let reshape = graph
-            .add_node(Operation::Reshape { shape: Shape::new(vec![4]) }, vec![scale], ty())
+            .add_node(
+                Operation::Reshape {
+                    shape: Shape::new(vec![4]),
+                },
+                vec![scale],
+                ty(),
+            )
             .unwrap();
         graph.set_outputs(vec![reshape]).unwrap();
 
@@ -276,7 +320,9 @@ mod tests {
         let x = graph.add_input("x", ty()).unwrap();
         let zero = graph
             .add_node(
-                Operation::Scale { factor: crate::Scalar::f32(0.0) },
+                Operation::Scale {
+                    factor: crate::Scalar::f32(0.0),
+                },
                 vec![x],
                 ty(),
             )

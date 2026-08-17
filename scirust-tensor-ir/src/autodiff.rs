@@ -20,9 +20,13 @@ pub enum AutodiffError {
 
 impl fmt::Display for AutodiffError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self
+        {
             Self::InvalidGraph(error) => write!(f, "invalid graph during autodiff: {error}"),
-            Self::InvalidSemantics(error) => write!(f, "invalid tensor semantics during autodiff: {error}"),
+            Self::InvalidSemantics(error) =>
+            {
+                write!(f, "invalid tensor semantics during autodiff: {error}")
+            },
             Self::InvalidNode(node) => write!(f, "autodiff references unknown node {}", node.get()),
             Self::UnsupportedDType { node, dtype } => write!(
                 f,
@@ -34,11 +38,10 @@ impl fmt::Display for AutodiffError {
                 "autodiff does not define a rule for node {} operation {operation:?}",
                 node.get()
             ),
-            Self::MatMulRequiresRank2 { node } => write!(
-                f,
-                "autodiff requires rank-2 MatMul at node {}",
-                node.get()
-            ),
+            Self::MatMulRequiresRank2 { node } =>
+            {
+                write!(f, "autodiff requires rank-2 MatMul at node {}", node.get())
+            },
             Self::BatchMatMulRequiresRankAtLeast3 { node } => write!(
                 f,
                 "autodiff requires BatchMatMul rank >= 3 at node {}",
@@ -88,10 +91,8 @@ pub fn vjp(source: &Graph, output: NodeId, wrt: &[NodeId]) -> Result<VjpGraph, A
     validate_for_autodiff(source, output, wrt)?;
     let (mut graph, primal) = copy_primal(source)?;
     let primal_output = mapped(&primal, output)?;
-    let cotangent_input = graph.add_input(
-        "__scirust_cotangent",
-        node_type(source, output)?.clone(),
-    )?;
+    let cotangent_input =
+        graph.add_input("__scirust_cotangent", node_type(source, output)?.clone())?;
     let gradients = reverse_accumulate(source, &mut graph, &primal, output, cotangent_input, wrt)?;
     graph.set_outputs(gradients.clone())?;
     Ok(VjpGraph {
@@ -148,7 +149,8 @@ pub fn jvp(source: &Graph, output: NodeId, wrt: &[NodeId]) -> Result<JvpGraph, A
     let mut tangents = vec![None; source.nodes().len()];
     let mut tangent_inputs = Vec::with_capacity(wrt.len());
 
-    for &node in wrt {
+    for &node in wrt
+    {
         let tangent = graph.add_input(
             format!("__scirust_tangent_{}", node.get()),
             node_type(source, node)?.clone(),
@@ -157,8 +159,10 @@ pub fn jvp(source: &Graph, output: NodeId, wrt: &[NodeId]) -> Result<JvpGraph, A
         tangent_inputs.push(tangent);
     }
 
-    for (index, node) in source.nodes().iter().enumerate() {
-        if tangents[index].is_some() {
+    for (index, node) in source.nodes().iter().enumerate()
+    {
+        if tangents[index].is_some()
+        {
             continue;
         }
         let id = NodeId::new(index as u32);
@@ -166,7 +170,8 @@ pub fn jvp(source: &Graph, output: NodeId, wrt: &[NodeId]) -> Result<JvpGraph, A
     }
 
     let primal_output = mapped(&primal, output)?;
-    let tangent_output = match tangents[output.get() as usize] {
+    let tangent_output = match tangents[output.get() as usize]
+    {
         Some(id) => id,
         None => graph.add_node(
             Operation::ZerosLike,
@@ -191,7 +196,8 @@ fn validate_for_autodiff(
     source.validate()?;
     validate_semantics(source).map_err(AutodiffError::InvalidSemantics)?;
     ensure_supported_dtype(source, output)?;
-    for &node in wrt {
+    for &node in wrt
+    {
         ensure_supported_dtype(source, node)?;
     }
     Ok(())
@@ -208,8 +214,11 @@ fn reverse_accumulate(
     let mut adjoints = vec![None; source.nodes().len()];
     adjoints[output.get() as usize] = Some(seed);
 
-    for index in (0..source.nodes().len()).rev() {
-        let Some(cotangent) = adjoints[index] else {
+    for index in (0..source.nodes().len()).rev()
+    {
+        let Some(cotangent) = adjoints[index]
+        else
+        {
             continue;
         };
         let id = NodeId::new(index as u32);
@@ -225,8 +234,10 @@ fn reverse_accumulate(
     }
 
     let mut gradients = Vec::with_capacity(wrt.len());
-    for &node in wrt {
-        let gradient = match adjoints[node.get() as usize] {
+    for &node in wrt
+    {
+        let gradient = match adjoints[node.get() as usize]
+        {
             Some(id) => id,
             None => graph.add_node(
                 Operation::ZerosLike,
@@ -251,14 +262,36 @@ fn reverse_rule(
     let p = |node_id| mapped(primal, node_id);
     let ty = |node_id| node_type(source, node_id).cloned();
 
-    match &node.operation {
-        Operation::Input { .. } | Operation::Constant { .. } => {}
-        Operation::Add => {
-            accumulate(graph, adjoints, node.inputs[0], cotangent, ty(node.inputs[0])?)?;
-            accumulate(graph, adjoints, node.inputs[1], cotangent, ty(node.inputs[1])?)?;
-        }
-        Operation::Sub => {
-            accumulate(graph, adjoints, node.inputs[0], cotangent, ty(node.inputs[0])?)?;
+    match &node.operation
+    {
+        Operation::Input { .. } | Operation::Constant { .. } =>
+        {},
+        Operation::Add =>
+        {
+            accumulate(
+                graph,
+                adjoints,
+                node.inputs[0],
+                cotangent,
+                ty(node.inputs[0])?,
+            )?;
+            accumulate(
+                graph,
+                adjoints,
+                node.inputs[1],
+                cotangent,
+                ty(node.inputs[1])?,
+            )?;
+        },
+        Operation::Sub =>
+        {
+            accumulate(
+                graph,
+                adjoints,
+                node.inputs[0],
+                cotangent,
+                ty(node.inputs[0])?,
+            )?;
             let neg = graph.add_node(
                 Operation::Scale {
                     factor: crate::Scalar::f32(-1.0),
@@ -267,8 +300,9 @@ fn reverse_rule(
                 ty(node.inputs[1])?,
             )?;
             accumulate(graph, adjoints, node.inputs[1], neg, ty(node.inputs[1])?)?;
-        }
-        Operation::Mul => {
+        },
+        Operation::Mul =>
+        {
             let left = graph.add_node(
                 Operation::Mul,
                 vec![cotangent, p(node.inputs[1])?],
@@ -281,8 +315,9 @@ fn reverse_rule(
             )?;
             accumulate(graph, adjoints, node.inputs[0], left, ty(node.inputs[0])?)?;
             accumulate(graph, adjoints, node.inputs[1], right, ty(node.inputs[1])?)?;
-        }
-        Operation::Div => {
+        },
+        Operation::Div =>
+        {
             let left = graph.add_node(
                 Operation::Div,
                 vec![cotangent, p(node.inputs[1])?],
@@ -312,52 +347,93 @@ fn reverse_rule(
             )?;
             accumulate(graph, adjoints, node.inputs[0], left, ty(node.inputs[0])?)?;
             accumulate(graph, adjoints, node.inputs[1], right, ty(node.inputs[1])?)?;
-        }
-        Operation::Scale { factor } => {
+        },
+        Operation::Scale { factor } =>
+        {
             let contribution = graph.add_node(
                 Operation::Scale { factor: *factor },
                 vec![cotangent],
                 ty(node.inputs[0])?,
             )?;
-            accumulate(graph, adjoints, node.inputs[0], contribution, ty(node.inputs[0])?)?;
-        }
-        Operation::Relu => {
+            accumulate(
+                graph,
+                adjoints,
+                node.inputs[0],
+                contribution,
+                ty(node.inputs[0])?,
+            )?;
+        },
+        Operation::Relu =>
+        {
             let contribution = graph.add_node(
                 Operation::ReluGrad,
                 vec![p(node.inputs[0])?, cotangent],
                 ty(node.inputs[0])?,
             )?;
-            accumulate(graph, adjoints, node.inputs[0], contribution, ty(node.inputs[0])?)?;
-        }
-        Operation::Exp => {
-            let contribution = graph.add_node(
-                Operation::Mul,
-                vec![cotangent, p(id)?],
+            accumulate(
+                graph,
+                adjoints,
+                node.inputs[0],
+                contribution,
                 ty(node.inputs[0])?,
             )?;
-            accumulate(graph, adjoints, node.inputs[0], contribution, ty(node.inputs[0])?)?;
-        }
-        Operation::Log => {
+        },
+        Operation::Exp =>
+        {
+            let contribution =
+                graph.add_node(Operation::Mul, vec![cotangent, p(id)?], ty(node.inputs[0])?)?;
+            accumulate(
+                graph,
+                adjoints,
+                node.inputs[0],
+                contribution,
+                ty(node.inputs[0])?,
+            )?;
+        },
+        Operation::Log =>
+        {
             let contribution = graph.add_node(
                 Operation::Div,
                 vec![cotangent, p(node.inputs[0])?],
                 ty(node.inputs[0])?,
             )?;
-            accumulate(graph, adjoints, node.inputs[0], contribution, ty(node.inputs[0])?)?;
-        }
-        Operation::ReluGrad => {
+            accumulate(
+                graph,
+                adjoints,
+                node.inputs[0],
+                contribution,
+                ty(node.inputs[0])?,
+            )?;
+        },
+        Operation::ReluGrad =>
+        {
             let contribution = graph.add_node(
                 Operation::ReluGrad,
                 vec![p(node.inputs[0])?, cotangent],
                 ty(node.inputs[1])?,
             )?;
-            accumulate(graph, adjoints, node.inputs[1], contribution, ty(node.inputs[1])?)?;
-        }
-        Operation::ZerosLike | Operation::OnesLike | Operation::StopGradient => {}
-        Operation::Checkpoint => {
-            accumulate(graph, adjoints, node.inputs[0], cotangent, ty(node.inputs[0])?)?;
-        }
-        Operation::Reshape { .. } => {
+            accumulate(
+                graph,
+                adjoints,
+                node.inputs[1],
+                contribution,
+                ty(node.inputs[1])?,
+            )?;
+        },
+        Operation::ZerosLike | Operation::OnesLike | Operation::StopGradient =>
+        {},
+        Operation::Checkpoint =>
+        {
+            accumulate(
+                graph,
+                adjoints,
+                node.inputs[0],
+                cotangent,
+                ty(node.inputs[0])?,
+            )?;
+        },
+        Operation::Reshape { .. } =>
+        {
             let contribution = graph.add_node(
                 Operation::Reshape {
                     shape: ty(node.inputs[0])?.shape.clone(),
@@ -365,9 +441,16 @@ fn reverse_rule(
                 vec![cotangent],
                 ty(node.inputs[0])?,
             )?;
-            accumulate(graph, adjoints, node.inputs[0], contribution, ty(node.inputs[0])?)?;
-        }
-        Operation::Transpose { permutation } => {
+            accumulate(
+                graph,
+                adjoints,
+                node.inputs[0],
+                contribution,
+                ty(node.inputs[0])?,
+            )?;
+        },
+        Operation::Transpose { permutation } =>
+        {
             let inverse = inverse_permutation(permutation).ok_or_else(|| {
                 AutodiffError::UnsupportedOperation {
                     node: id,
@@ -381,9 +464,16 @@ fn reverse_rule(
                 vec![cotangent],
                 ty(node.inputs[0])?,
             )?;
-            accumulate(graph, adjoints, node.inputs[0], contribution, ty(node.inputs[0])?)?;
-        }
-        Operation::BroadcastTo { .. } => {
+            accumulate(
+                graph,
+                adjoints,
+                node.inputs[0],
+                contribution,
+                ty(node.inputs[0])?,
+            )?;
+        },
+        Operation::BroadcastTo { .. } =>
+        {
             let input_type = ty(node.inputs[0])?;
             let contribution = graph.add_node(
                 Operation::ReduceSumTo {
@@ -393,8 +483,9 @@ fn reverse_rule(
                 input_type.clone(),
             )?;
             accumulate(graph, adjoints, node.inputs[0], contribution, input_type)?;
-        }
-        Operation::ReduceSumTo { .. } => {
+        },
+        Operation::ReduceSumTo { .. } =>
+        {
             let input_type = ty(node.inputs[0])?;
             let contribution = graph.add_node(
                 Operation::BroadcastTo {
@@ -404,8 +495,9 @@ fn reverse_rule(
                 input_type.clone(),
             )?;
             accumulate(graph, adjoints, node.inputs[0], contribution, input_type)?;
-        }
-        Operation::MatMul => {
+        },
+        Operation::MatMul =>
+        {
             require_rank2(source, id, node.inputs[0], node.inputs[1])?;
             reverse_matmul(
                 graph,
@@ -416,8 +508,9 @@ fn reverse_rule(
                 cotangent,
                 Operation::MatMul,
             )?;
-        }
-        Operation::BatchMatMul => {
+        },
+        Operation::BatchMatMul =>
+        {
             require_batch_rank(source, id, node.inputs[0], node.inputs[1])?;
             reverse_matmul(
                 graph,
@@ -428,7 +521,7 @@ fn reverse_rule(
                 cotangent,
                 Operation::BatchMatMul,
             )?;
-        }
+        },
     }
     Ok(())
 }
@@ -453,11 +546,7 @@ fn reverse_matmul(
         vec![mapped(primal, node.inputs[1])?],
         rhs_t_type,
     )?;
-    let lhs_grad = graph.add_node(
-        product.clone(),
-        vec![cotangent, rhs_t],
-        lhs_type.clone(),
-    )?;
+    let lhs_grad = graph.add_node(product.clone(), vec![cotangent, rhs_t], lhs_type.clone())?;
     let lhs_t = graph.add_node(
         Operation::Transpose {
             permutation: lhs_perm,
@@ -465,11 +554,7 @@ fn reverse_matmul(
         vec![mapped(primal, node.inputs[0])?],
         lhs_t_type,
     )?;
-    let rhs_grad = graph.add_node(
-        product,
-        vec![lhs_t, cotangent],
-        rhs_type.clone(),
-    )?;
+    let rhs_grad = graph.add_node(product, vec![lhs_t, cotangent], rhs_type.clone())?;
     accumulate(graph, adjoints, node.inputs[0], lhs_grad, lhs_type)?;
     accumulate(graph, adjoints, node.inputs[1], rhs_grad, rhs_type)?;
     Ok(())
@@ -487,11 +572,19 @@ fn forward_rule(
     let t = |node_id: NodeId| tangents[node_id.get() as usize];
     let ty = |node_id| node_type(source, node_id).cloned();
 
-    let result = match &node.operation {
+    let result = match &node.operation
+    {
         Operation::Input { .. } | Operation::Constant { .. } => None,
-        Operation::Add => add_optional(graph, t(node.inputs[0]), t(node.inputs[1]), node.output.clone())?,
-        Operation::Sub => {
-            let right = match t(node.inputs[1]) {
+        Operation::Add => add_optional(
+            graph,
+            t(node.inputs[0]),
+            t(node.inputs[1]),
+            node.output.clone(),
+        )?,
+        Operation::Sub =>
+        {
+            let right = match t(node.inputs[1])
+            {
                 Some(value) => Some(graph.add_node(
                     Operation::Scale {
                         factor: crate::Scalar::f32(-1.0),
@@ -502,8 +595,9 @@ fn forward_rule(
                 None => None,
             };
             add_optional(graph, t(node.inputs[0]), right, node.output.clone())?
-        }
-        Operation::Mul => {
+        },
+        Operation::Mul =>
+        {
             let left = optional_product(
                 graph,
                 t(node.inputs[0]),
@@ -519,9 +613,11 @@ fn forward_rule(
                 Operation::Mul,
             )?;
             add_optional(graph, left, right, node.output.clone())?
-        }
-        Operation::Div => {
-            let left = match t(node.inputs[0]) {
+        },
+        Operation::Div =>
+        {
+            let left = match t(node.inputs[0])
+            {
                 Some(value) => Some(graph.add_node(
                     Operation::Div,
                     vec![value, p(node.inputs[1])?],
@@ -529,8 +625,10 @@ fn forward_rule(
                 )?),
                 None => None,
             };
-            let right = match t(node.inputs[1]) {
-                Some(value) => {
+            let right = match t(node.inputs[1])
+            {
+                Some(value) =>
+                {
                     let numerator = graph.add_node(
                         Operation::Mul,
                         vec![p(node.inputs[0])?, value],
@@ -553,12 +651,13 @@ fn forward_rule(
                         vec![quotient],
                         node.output.clone(),
                     )?)
-                }
+                },
                 None => None,
             };
             add_optional(graph, left, right, node.output.clone())?
-        }
-        Operation::Scale { factor } => match t(node.inputs[0]) {
+        },
+        Operation::Scale { factor } => match t(node.inputs[0])
+        {
             Some(value) => Some(graph.add_node(
                 Operation::Scale { factor: *factor },
                 vec![value],
@@ -566,7 +665,8 @@ fn forward_rule(
             )?),
             None => None,
         },
-        Operation::Relu => match t(node.inputs[0]) {
+        Operation::Relu => match t(node.inputs[0])
+        {
             Some(value) => Some(graph.add_node(
                 Operation::ReluGrad,
                 vec![p(node.inputs[0])?, value],
@@ -574,15 +674,16 @@ fn forward_rule(
             )?),
             None => None,
         },
-        Operation::Exp => match t(node.inputs[0]) {
-            Some(value) => Some(graph.add_node(
-                Operation::Mul,
-                vec![p(id)?, value],
-                node.output.clone(),
-            )?),
+        Operation::Exp => match t(node.inputs[0])
+        {
+            Some(value) =>
+            {
+                Some(graph.add_node(Operation::Mul, vec![p(id)?, value], node.output.clone())?)
+            },
             None => None,
         },
-        Operation::Log => match t(node.inputs[0]) {
+        Operation::Log => match t(node.inputs[0])
+        {
             Some(value) => Some(graph.add_node(
                 Operation::Div,
                 vec![value, p(node.inputs[0])?],
@@ -590,7 +691,8 @@ fn forward_rule(
             )?),
             None => None,
         },
-        Operation::ReluGrad => match t(node.inputs[1]) {
+        Operation::ReluGrad => match t(node.inputs[1])
+        {
             Some(value) => Some(graph.add_node(
                 Operation::ReluGrad,
                 vec![p(node.inputs[0])?, value],
@@ -599,15 +701,16 @@ fn forward_rule(
             None => None,
         },
         Operation::ZerosLike | Operation::OnesLike | Operation::StopGradient => None,
-        Operation::Checkpoint => match t(node.inputs[0]) {
-            Some(value) => Some(graph.add_node(
-                Operation::Checkpoint,
-                vec![value],
-                node.output.clone(),
-            )?),
+        Operation::Checkpoint => match t(node.inputs[0])
+        {
+            Some(value) =>
+            {
+                Some(graph.add_node(Operation::Checkpoint, vec![value], node.output.clone())?)
+            },
             None => None,
         },
-        Operation::Reshape { shape } => match t(node.inputs[0]) {
+        Operation::Reshape { shape } => match t(node.inputs[0])
+        {
             Some(value) => Some(graph.add_node(
                 Operation::Reshape {
                     shape: shape.clone(),
@@ -617,7 +720,8 @@ fn forward_rule(
             )?),
             None => None,
         },
-        Operation::Transpose { permutation } => match t(node.inputs[0]) {
+        Operation::Transpose { permutation } => match t(node.inputs[0])
+        {
             Some(value) => Some(graph.add_node(
                 Operation::Transpose {
                     permutation: permutation.clone(),
@@ -627,7 +731,8 @@ fn forward_rule(
             )?),
             None => None,
         },
-        Operation::BroadcastTo { shape } => match t(node.inputs[0]) {
+        Operation::BroadcastTo { shape } => match t(node.inputs[0])
+        {
             Some(value) => Some(graph.add_node(
                 Operation::BroadcastTo {
                     shape: shape.clone(),
@@ -637,7 +742,8 @@ fn forward_rule(
             )?),
             None => None,
         },
-        Operation::ReduceSumTo { shape } => match t(node.inputs[0]) {
+        Operation::ReduceSumTo { shape } => match t(node.inputs[0])
+        {
             Some(value) => Some(graph.add_node(
                 Operation::ReduceSumTo {
                     shape: shape.clone(),
@@ -647,14 +753,16 @@ fn forward_rule(
             )?),
             None => None,
         },
-        Operation::MatMul => {
+        Operation::MatMul =>
+        {
             require_rank2(source, id, node.inputs[0], node.inputs[1])?;
             forward_matmul(graph, primal, tangents, node, Operation::MatMul)?
-        }
-        Operation::BatchMatMul => {
+        },
+        Operation::BatchMatMul =>
+        {
             require_batch_rank(source, id, node.inputs[0], node.inputs[1])?;
             forward_matmul(graph, primal, tangents, node, Operation::BatchMatMul)?
-        }
+        },
     };
     Ok(result)
 }
@@ -668,7 +776,8 @@ fn forward_matmul(
 ) -> Result<Option<NodeId>, AutodiffError> {
     let lhs_tangent = tangents[node.inputs[0].get() as usize];
     let rhs_tangent = tangents[node.inputs[1].get() as usize];
-    let left = match lhs_tangent {
+    let left = match lhs_tangent
+    {
         Some(value) => Some(graph.add_node(
             product.clone(),
             vec![value, mapped(primal, node.inputs[1])?],
@@ -676,7 +785,8 @@ fn forward_matmul(
         )?),
         None => None,
     };
-    let right = match rhs_tangent {
+    let right = match rhs_tangent
+    {
         Some(value) => Some(graph.add_node(
             product,
             vec![mapped(primal, node.inputs[0])?, value],
@@ -694,8 +804,13 @@ fn optional_product(
     output: TensorType,
     operation: Operation,
 ) -> Result<Option<NodeId>, AutodiffError> {
-    match tangent {
-        Some(value) => Ok(Some(graph.add_node(operation, vec![value, primal], output)?)),
+    match tangent
+    {
+        Some(value) => Ok(Some(graph.add_node(
+            operation,
+            vec![value, primal],
+            output,
+        )?)),
         None => Ok(None),
     }
 }
@@ -703,7 +818,8 @@ fn optional_product(
 fn copy_primal(source: &Graph) -> Result<(Graph, Vec<NodeId>), AutodiffError> {
     let mut graph = Graph::new();
     let mut mapped_nodes = Vec::with_capacity(source.nodes().len());
-    for node in source.nodes() {
+    for node in source.nodes()
+    {
         let inputs = node
             .inputs
             .iter()
@@ -723,7 +839,8 @@ fn accumulate(
     ty: TensorType,
 ) -> Result<(), AutodiffError> {
     let slot = &mut adjoints[target.get() as usize];
-    *slot = Some(match *slot {
+    *slot = Some(match *slot
+    {
         Some(existing) => graph.add_node(Operation::Add, vec![existing, contribution], ty)?,
         None => contribution,
     });
@@ -736,7 +853,8 @@ fn add_optional(
     rhs: Option<NodeId>,
     ty: TensorType,
 ) -> Result<Option<NodeId>, AutodiffError> {
-    Ok(match (lhs, rhs) {
+    Ok(match (lhs, rhs)
+    {
         (Some(lhs), Some(rhs)) => Some(graph.add_node(Operation::Add, vec![lhs, rhs], ty)?),
         (Some(value), None) | (None, Some(value)) => Some(value),
         (None, None) => None,
@@ -760,17 +878,22 @@ fn node_type(graph: &Graph, id: NodeId) -> Result<&TensorType, AutodiffError> {
 
 fn ensure_supported_dtype(graph: &Graph, id: NodeId) -> Result<(), AutodiffError> {
     let dtype = node_type(graph, id)?.dtype;
-    if dtype == DType::F32 {
+    if dtype == DType::F32
+    {
         Ok(())
-    } else {
+    }
+    else
+    {
         Err(AutodiffError::UnsupportedDType { node: id, dtype })
     }
 }
 
 fn inverse_permutation(permutation: &[usize]) -> Option<Vec<usize>> {
     let mut inverse = vec![usize::MAX; permutation.len()];
-    for (output_axis, &input_axis) in permutation.iter().enumerate() {
-        if input_axis >= permutation.len() || inverse[input_axis] != usize::MAX {
+    for (output_axis, &input_axis) in permutation.iter().enumerate()
+    {
+        if input_axis >= permutation.len() || inverse[input_axis] != usize::MAX
+        {
             return None;
         }
         inverse[input_axis] = output_axis;
@@ -784,9 +907,12 @@ fn require_rank2(
     lhs: NodeId,
     rhs: NodeId,
 ) -> Result<(), AutodiffError> {
-    if node_type(graph, lhs)?.shape.rank() == 2 && node_type(graph, rhs)?.shape.rank() == 2 {
+    if node_type(graph, lhs)?.shape.rank() == 2 && node_type(graph, rhs)?.shape.rank() == 2
+    {
         Ok(())
-    } else {
+    }
+    else
+    {
         Err(AutodiffError::MatMulRequiresRank2 { node })
     }
 }
@@ -797,9 +923,12 @@ fn require_batch_rank(
     lhs: NodeId,
     rhs: NodeId,
 ) -> Result<(), AutodiffError> {
-    if node_type(graph, lhs)?.shape.rank() >= 3 && node_type(graph, rhs)?.shape.rank() >= 3 {
+    if node_type(graph, lhs)?.shape.rank() >= 3 && node_type(graph, rhs)?.shape.rank() >= 3
+    {
         Ok(())
-    } else {
+    }
+    else
+    {
         Err(AutodiffError::BatchMatMulRequiresRankAtLeast3 { node })
     }
 }
@@ -810,10 +939,7 @@ fn transpose_last_two(ty: &TensorType) -> (Vec<usize>, TensorType) {
     permutation.swap(rank - 2, rank - 1);
     let mut dims = ty.shape.dims().to_vec();
     dims.swap(rank - 2, rank - 1);
-    (
-        permutation,
-        TensorType::new(ty.dtype, Shape::new(dims)),
-    )
+    (permutation, TensorType::new(ty.dtype, Shape::new(dims)))
 }
 
 #[cfg(test)]
@@ -836,17 +962,24 @@ mod tests {
 
         let transformed = grad(&graph, square, &[x]).unwrap();
         assert_eq!(transformed.gradients.len(), 1);
-        assert_eq!(transformed.graph.outputs(), transformed.gradients.as_slice());
-        assert!(transformed
-            .graph
-            .nodes()
-            .iter()
-            .any(|node| matches!(node.operation, Operation::OnesLike)));
-        assert!(transformed
-            .graph
-            .nodes()
-            .iter()
-            .any(|node| matches!(node.operation, Operation::Add)));
+        assert_eq!(
+            transformed.graph.outputs(),
+            transformed.gradients.as_slice()
+        );
+        assert!(
+            transformed
+                .graph
+                .nodes()
+                .iter()
+                .any(|node| matches!(node.operation, Operation::OnesLike))
+        );
+        assert!(
+            transformed
+                .graph
+                .nodes()
+                .iter()
+                .any(|node| matches!(node.operation, Operation::Add))
+        );
     }
 
     #[test]
@@ -904,9 +1037,13 @@ mod tests {
             .unwrap();
         graph.set_outputs(vec![y]).unwrap();
         let transformed = grad(&graph, y, &[x]).unwrap();
-        assert!(transformed.graph.nodes().iter().any(|node| {
-            matches!(node.operation, Operation::ReduceSumTo { .. })
-        }));
+        assert!(
+            transformed
+                .graph
+                .nodes()
+                .iter()
+                .any(|node| { matches!(node.operation, Operation::ReduceSumTo { .. }) })
+        );
     }
 
     #[test]
@@ -923,8 +1060,12 @@ mod tests {
         graph.set_outputs(vec![out]).unwrap();
         let transformed = value_and_grad(&graph, out, &[a, b]).unwrap();
         assert_eq!(transformed.gradients.len(), 2);
-        assert!(transformed.graph.nodes().iter().any(|node| {
-            matches!(node.operation, Operation::BatchMatMul)
-        }));
+        assert!(
+            transformed
+                .graph
+                .nodes()
+                .iter()
+                .any(|node| { matches!(node.operation, Operation::BatchMatMul) })
+        );
     }
 }

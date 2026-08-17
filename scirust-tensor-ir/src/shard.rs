@@ -1,7 +1,9 @@
 use alloc::{string::String, vec, vec::Vec};
 use core::fmt;
 
-use crate::{Graph, GraphError, NodeId, Operation, SemanticError, Shape, TensorType, validate_semantics};
+use crate::{
+    Graph, GraphError, NodeId, Operation, SemanticError, Shape, TensorType, validate_semantics,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MeshAxis {
@@ -11,7 +13,8 @@ pub struct MeshAxis {
 
 impl MeshAxis {
     pub fn new(name: impl Into<String>, size: usize) -> Result<Self, ShardError> {
-        if size == 0 {
+        if size == 0
+        {
             return Err(ShardError::EmptyMeshAxis);
         }
         Ok(Self {
@@ -39,12 +42,15 @@ pub struct DeviceMesh {
 
 impl DeviceMesh {
     pub fn new(axes: Vec<MeshAxis>) -> Result<Self, ShardError> {
-        if axes.is_empty() {
+        if axes.is_empty()
+        {
             return Err(ShardError::EmptyMesh);
         }
         let mut world_size = 1usize;
-        for (index, axis) in axes.iter().enumerate() {
-            if axes[..index].iter().any(|other| other.name == axis.name) {
+        for (index, axis) in axes.iter().enumerate()
+        {
+            if axes[..index].iter().any(|other| other.name == axis.name)
+            {
                 return Err(ShardError::DuplicateMeshAxis(axis.name.clone()));
             }
             world_size = world_size
@@ -67,7 +73,8 @@ impl DeviceMesh {
     }
 
     pub fn coordinates(&self, rank: usize) -> Result<Vec<usize>, ShardError> {
-        if rank >= self.world_size {
+        if rank >= self.world_size
+        {
             return Err(ShardError::InvalidRank {
                 rank,
                 world_size: self.world_size,
@@ -75,7 +82,8 @@ impl DeviceMesh {
         }
         let mut remainder = rank;
         let mut coordinates = vec![0usize; self.axes.len()];
-        for axis in (0..self.axes.len()).rev() {
+        for axis in (0..self.axes.len()).rev()
+        {
             let size = self.axes[axis].size;
             coordinates[axis] = remainder % size;
             remainder /= size;
@@ -153,9 +161,12 @@ pub struct ShardPlan {
 impl ShardPlan {
     pub fn uniform_local_type(&self) -> Option<&TensorType> {
         let first = self.ranks.first()?.local_type.clone();
-        if self.ranks.iter().all(|rank| rank.local_type == first) {
+        if self.ranks.iter().all(|rank| rank.local_type == first)
+        {
             self.ranks.first().map(|rank| &rank.local_type)
-        } else {
+        }
+        else
+        {
             None
         }
     }
@@ -169,34 +180,70 @@ pub enum ShardError {
     EmptyMeshAxis,
     DuplicateMeshAxis(String),
     MeshSizeOverflow,
-    PartitionRankMismatch { tensor_rank: usize, spec_rank: usize },
-    InvalidMeshAxis { tensor_axis: usize, mesh_axis: usize },
-    MeshAxisReused { mesh_axis: usize },
-    UnevenPartition { tensor_axis: usize, dimension: usize, parts: usize },
-    InvalidRank { rank: usize, world_size: usize },
+    PartitionRankMismatch {
+        tensor_rank: usize,
+        spec_rank: usize,
+    },
+    InvalidMeshAxis {
+        tensor_axis: usize,
+        mesh_axis: usize,
+    },
+    MeshAxisReused {
+        mesh_axis: usize,
+    },
+    UnevenPartition {
+        tensor_axis: usize,
+        dimension: usize,
+        parts: usize,
+    },
+    InvalidRank {
+        rank: usize,
+        world_size: usize,
+    },
     InvalidShardedInput(NodeId),
-    BatchAxisRequired { node: NodeId },
-    UnsupportedOperation { node: NodeId, operation: Operation },
-    MixedShardedBinary { node: NodeId },
-    BatchAxisMoved { node: NodeId },
-    BatchReductionRequiresCollective { node: NodeId },
+    BatchAxisRequired {
+        node: NodeId,
+    },
+    UnsupportedOperation {
+        node: NodeId,
+        operation: Operation,
+    },
+    MixedShardedBinary {
+        node: NodeId,
+    },
+    BatchAxisMoved {
+        node: NodeId,
+    },
+    BatchReductionRequiresCollective {
+        node: NodeId,
+    },
     MissingMappedNode(NodeId),
 }
 
 impl fmt::Display for ShardError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self
+        {
             Self::InvalidGraph(error) => write!(f, "invalid graph during sharding: {error}"),
-            Self::InvalidSemantics(error) => write!(f, "invalid tensor semantics during sharding: {error}"),
+            Self::InvalidSemantics(error) =>
+            {
+                write!(f, "invalid tensor semantics during sharding: {error}")
+            },
             Self::EmptyMesh => f.write_str("device mesh must contain at least one axis"),
             Self::EmptyMeshAxis => f.write_str("device mesh axis size must be non-zero"),
             Self::DuplicateMeshAxis(name) => write!(f, "duplicate device mesh axis {name:?}"),
             Self::MeshSizeOverflow => f.write_str("device mesh world size overflows usize"),
-            Self::PartitionRankMismatch { tensor_rank, spec_rank } => write!(
+            Self::PartitionRankMismatch {
+                tensor_rank,
+                spec_rank,
+            } => write!(
                 f,
                 "partition rank {spec_rank} does not match tensor rank {tensor_rank}"
             ),
-            Self::InvalidMeshAxis { tensor_axis, mesh_axis } => write!(
+            Self::InvalidMeshAxis {
+                tensor_axis,
+                mesh_axis,
+            } => write!(
                 f,
                 "tensor axis {tensor_axis} references unknown mesh axis {mesh_axis}"
             ),
@@ -204,23 +251,27 @@ impl fmt::Display for ShardError {
                 f,
                 "mesh axis {mesh_axis} is assigned to more than one tensor axis"
             ),
-            Self::UnevenPartition { tensor_axis, dimension, parts } => write!(
+            Self::UnevenPartition {
+                tensor_axis,
+                dimension,
+                parts,
+            } => write!(
                 f,
                 "tensor axis {tensor_axis} of size {dimension} is not divisible by {parts} shards"
             ),
-            Self::InvalidRank { rank, world_size } => {
+            Self::InvalidRank { rank, world_size } =>
+            {
                 write!(f, "rank {rank} is outside world size {world_size}")
-            }
+            },
             Self::InvalidShardedInput(node) => write!(
                 f,
                 "node {} was requested as a sharded input but is not an Input node",
                 node.get()
             ),
-            Self::BatchAxisRequired { node } => write!(
-                f,
-                "node {} has no leading batch axis to shard",
-                node.get()
-            ),
+            Self::BatchAxisRequired { node } =>
+            {
+                write!(f, "node {} has no leading batch axis to shard", node.get())
+            },
             Self::UnsupportedOperation { node, operation } => write!(
                 f,
                 "shard_map has no communication-free rule for node {} operation {operation:?}",
@@ -241,7 +292,10 @@ impl fmt::Display for ShardError {
                 "node {} reduces the sharded batch axis and therefore requires a collective",
                 node.get()
             ),
-            Self::MissingMappedNode(node) => write!(f, "shard_map lost mapping for node {}", node.get()),
+            Self::MissingMappedNode(node) =>
+            {
+                write!(f, "shard_map lost mapping for node {}", node.get())
+            },
         }
     }
 }
@@ -262,7 +316,8 @@ pub fn plan_sharding(
     partition: PartitionSpec,
     policy: ShardPolicy,
 ) -> Result<ShardPlan, ShardError> {
-    if partition.axes.len() != tensor_type.shape.rank() {
+    if partition.axes.len() != tensor_type.shape.rank()
+    {
         return Err(ShardError::PartitionRankMismatch {
             tensor_rank: tensor_type.shape.rank(),
             spec_rank: partition.axes.len(),
@@ -270,24 +325,30 @@ pub fn plan_sharding(
     }
 
     let mut used_mesh_axes = vec![false; mesh.axes.len()];
-    for (tensor_axis, assignment) in partition.axes.iter().enumerate() {
-        if let Some(mesh_axis) = assignment {
-            if *mesh_axis >= mesh.axes.len() {
+    for (tensor_axis, assignment) in partition.axes.iter().enumerate()
+    {
+        if let Some(mesh_axis) = assignment
+        {
+            if *mesh_axis >= mesh.axes.len()
+            {
                 return Err(ShardError::InvalidMeshAxis {
                     tensor_axis,
                     mesh_axis: *mesh_axis,
                 });
             }
-            if used_mesh_axes[*mesh_axis] {
+            if used_mesh_axes[*mesh_axis]
+            {
                 return Err(ShardError::MeshAxisReused {
                     mesh_axis: *mesh_axis,
                 });
             }
             used_mesh_axes[*mesh_axis] = true;
-            if policy == ShardPolicy::Even {
+            if policy == ShardPolicy::Even
+            {
                 let dimension = tensor_type.shape.dims()[tensor_axis];
                 let parts = mesh.axes[*mesh_axis].size;
-                if dimension % parts != 0 {
+                if dimension % parts != 0
+                {
                     return Err(ShardError::UnevenPartition {
                         tensor_axis,
                         dimension,
@@ -299,19 +360,24 @@ pub fn plan_sharding(
     }
 
     let mut ranks = Vec::with_capacity(mesh.world_size);
-    for rank in 0..mesh.world_size {
+    for rank in 0..mesh.world_size
+    {
         let coordinates = mesh.coordinates(rank)?;
         let mut local_dims = tensor_type.shape.dims().to_vec();
         let mut ranges = Vec::with_capacity(local_dims.len());
-        for tensor_axis in 0..local_dims.len() {
+        for tensor_axis in 0..local_dims.len()
+        {
             let dimension = tensor_type.shape.dims()[tensor_axis];
-            if let Some(mesh_axis) = partition.axes[tensor_axis] {
+            if let Some(mesh_axis) = partition.axes[tensor_axis]
+            {
                 let parts = mesh.axes[mesh_axis].size;
                 let coordinate = coordinates[mesh_axis];
                 let range = partition_range(dimension, parts, coordinate, policy, tensor_axis)?;
                 local_dims[tensor_axis] = range.len();
                 ranges.push(range);
-            } else {
+            }
+            else
+            {
                 ranges.push(AxisShard {
                     start: 0,
                     end: dimension,
@@ -342,9 +408,12 @@ fn partition_range(
     policy: ShardPolicy,
     tensor_axis: usize,
 ) -> Result<AxisShard, ShardError> {
-    match policy {
-        ShardPolicy::Even => {
-            if dimension % parts != 0 {
+    match policy
+    {
+        ShardPolicy::Even =>
+        {
+            if dimension % parts != 0
+            {
                 return Err(ShardError::UnevenPartition {
                     tensor_axis,
                     dimension,
@@ -356,8 +425,9 @@ fn partition_range(
                 start: coordinate * width,
                 end: (coordinate + 1) * width,
             })
-        }
-        ShardPolicy::Balanced => {
+        },
+        ShardPolicy::Balanced =>
+        {
             let base = dimension / parts;
             let remainder = dimension % parts;
             let width = base + usize::from(coordinate < remainder);
@@ -366,7 +436,7 @@ fn partition_range(
                 start,
                 end: start + width,
             })
-        }
+        },
     }
 }
 
@@ -393,35 +463,46 @@ pub fn shard_map(
 ) -> Result<ShardMapGraph, ShardError> {
     source.validate()?;
     validate_semantics(source).map_err(ShardError::InvalidSemantics)?;
-    if world_size == 0 {
+    if world_size == 0
+    {
         return Err(ShardError::EmptyMeshAxis);
     }
 
     let mut requested = vec![false; source.nodes().len()];
     let mut global_batch = None;
-    for &input in sharded_inputs {
-        let Some(node) = source.nodes().get(input.get() as usize) else {
+    for &input in sharded_inputs
+    {
+        let Some(node) = source.nodes().get(input.get() as usize)
+        else
+        {
             return Err(ShardError::InvalidShardedInput(input));
         };
-        if !matches!(&node.operation, Operation::Input { .. }) {
+        if !matches!(&node.operation, Operation::Input { .. })
+        {
             return Err(ShardError::InvalidShardedInput(input));
         }
-        let Some(&batch) = node.output.shape.dims().first() else {
+        let Some(&batch) = node.output.shape.dims().first()
+        else
+        {
             return Err(ShardError::BatchAxisRequired { node: input });
         };
-        if batch % world_size != 0 {
+        if batch % world_size != 0
+        {
             return Err(ShardError::UnevenPartition {
                 tensor_axis: 0,
                 dimension: batch,
                 parts: world_size,
             });
         }
-        match global_batch {
-            Some(existing) if existing != batch => {
+        match global_batch
+        {
+            Some(existing) if existing != batch =>
+            {
                 return Err(ShardError::MixedShardedBinary { node: input });
-            }
+            },
             None => global_batch = Some(batch),
-            _ => {}
+            _ =>
+            {},
         }
         requested[input.get() as usize] = true;
     }
@@ -432,7 +513,8 @@ pub fn shard_map(
     let mut mapping = Vec::with_capacity(source.nodes().len());
     let mut sharded = Vec::with_capacity(source.nodes().len());
 
-    for (index, node) in source.nodes().iter().enumerate() {
+    for (index, node) in source.nodes().iter().enumerate()
+    {
         let old_id = NodeId::new(index as u32);
         let inputs = node
             .inputs
@@ -455,31 +537,43 @@ pub fn shard_map(
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let (new_id, is_sharded) = match &node.operation {
-            Operation::Input { name } => {
+        let (new_id, is_sharded) = match &node.operation
+        {
+            Operation::Input { name } =>
+            {
                 let is_sharded = requested[index];
-                let output = if is_sharded {
+                let output = if is_sharded
+                {
                     local_batch_type(&node.output, world_size, old_id)?
-                } else {
+                }
+                else
+                {
                     node.output.clone()
                 };
                 (graph.add_input(name.clone(), output)?, is_sharded)
-            }
-            Operation::Constant { id } => {
-                (graph.add_constant(*id, node.output.clone())?, false)
-            }
-            Operation::Add | Operation::Sub | Operation::Mul | Operation::Div | Operation::ReluGrad => {
+            },
+            Operation::Constant { id } => (graph.add_constant(*id, node.output.clone())?, false),
+            Operation::Add
+            | Operation::Sub
+            | Operation::Mul
+            | Operation::Div
+            | Operation::ReluGrad =>
+            {
                 let any = input_sharded.iter().any(|value| *value);
-                if any && input_sharded.iter().any(|value| !*value) {
+                if any && input_sharded.iter().any(|value| !*value)
+                {
                     return Err(ShardError::MixedShardedBinary { node: old_id });
                 }
-                let output = if any {
+                let output = if any
+                {
                     local_batch_type(&node.output, world_size, old_id)?
-                } else {
+                }
+                else
+                {
                     node.output.clone()
                 };
                 (graph.add_node(node.operation.clone(), inputs, output)?, any)
-            }
+            },
             Operation::Relu
             | Operation::Exp
             | Operation::Log
@@ -487,32 +581,47 @@ pub fn shard_map(
             | Operation::ZerosLike
             | Operation::OnesLike
             | Operation::StopGradient
-            | Operation::Checkpoint => {
+            | Operation::Checkpoint =>
+            {
                 let is_sharded = input_sharded[0];
-                let output = if is_sharded {
+                let output = if is_sharded
+                {
                     local_batch_type(&node.output, world_size, old_id)?
-                } else {
+                }
+                else
+                {
                     node.output.clone()
                 };
-                (graph.add_node(node.operation.clone(), inputs, output)?, is_sharded)
-            }
-            Operation::BroadcastTo { shape } => {
+                (
+                    graph.add_node(node.operation.clone(), inputs, output)?,
+                    is_sharded,
+                )
+            },
+            Operation::BroadcastTo { shape } =>
+            {
                 let is_sharded = input_sharded[0] || shape.dims().first() == Some(&global_batch);
-                let operation = if is_sharded {
+                let operation = if is_sharded
+                {
                     Operation::BroadcastTo {
                         shape: local_batch_shape(shape, world_size, old_id)?,
                     }
-                } else {
+                }
+                else
+                {
                     node.operation.clone()
                 };
-                let output = if is_sharded {
+                let output = if is_sharded
+                {
                     local_batch_type(&node.output, world_size, old_id)?
-                } else {
+                }
+                else
+                {
                     node.output.clone()
                 };
                 (graph.add_node(operation, inputs, output)?, is_sharded)
-            }
-            Operation::Reshape { shape } => {
+            },
+            Operation::Reshape { shape } =>
+            {
                 let is_sharded = input_sharded[0];
                 if is_sharded
                     && (node.output.shape.dims().first() != Some(&global_batch)
@@ -520,65 +629,94 @@ pub fn shard_map(
                 {
                     return Err(ShardError::BatchAxisMoved { node: old_id });
                 }
-                let operation = if is_sharded {
+                let operation = if is_sharded
+                {
                     Operation::Reshape {
                         shape: local_batch_shape(shape, world_size, old_id)?,
                     }
-                } else {
+                }
+                else
+                {
                     node.operation.clone()
                 };
-                let output = if is_sharded {
+                let output = if is_sharded
+                {
                     local_batch_type(&node.output, world_size, old_id)?
-                } else {
+                }
+                else
+                {
                     node.output.clone()
                 };
                 (graph.add_node(operation, inputs, output)?, is_sharded)
-            }
-            Operation::Transpose { permutation } => {
+            },
+            Operation::Transpose { permutation } =>
+            {
                 let is_sharded = input_sharded[0];
-                if is_sharded && permutation.first() != Some(&0) {
+                if is_sharded && permutation.first() != Some(&0)
+                {
                     return Err(ShardError::BatchAxisMoved { node: old_id });
                 }
-                let output = if is_sharded {
+                let output = if is_sharded
+                {
                     local_batch_type(&node.output, world_size, old_id)?
-                } else {
+                }
+                else
+                {
                     node.output.clone()
                 };
-                (graph.add_node(node.operation.clone(), inputs, output)?, is_sharded)
-            }
-            Operation::ReduceSumTo { shape } => {
+                (
+                    graph.add_node(node.operation.clone(), inputs, output)?,
+                    is_sharded,
+                )
+            },
+            Operation::ReduceSumTo { shape } =>
+            {
                 let is_sharded = input_sharded[0];
-                if is_sharded && shape.dims().first() != Some(&global_batch) {
+                if is_sharded && shape.dims().first() != Some(&global_batch)
+                {
                     return Err(ShardError::BatchReductionRequiresCollective { node: old_id });
                 }
-                let operation = if is_sharded {
+                let operation = if is_sharded
+                {
                     Operation::ReduceSumTo {
                         shape: local_batch_shape(shape, world_size, old_id)?,
                     }
-                } else {
+                }
+                else
+                {
                     node.operation.clone()
                 };
-                let output = if is_sharded {
+                let output = if is_sharded
+                {
                     local_batch_type(&node.output, world_size, old_id)?
-                } else {
+                }
+                else
+                {
                     node.output.clone()
                 };
                 (graph.add_node(operation, inputs, output)?, is_sharded)
-            }
-            Operation::BatchMatMul => {
+            },
+            Operation::BatchMatMul =>
+            {
                 let any = input_sharded.iter().any(|value| *value);
-                if any && input_sharded.iter().any(|value| !*value) {
+                if any && input_sharded.iter().any(|value| !*value)
+                {
                     return Err(ShardError::MixedShardedBinary { node: old_id });
                 }
-                let output = if any {
+                let output = if any
+                {
                     local_batch_type(&node.output, world_size, old_id)?
-                } else {
+                }
+                else
+                {
                     node.output.clone()
                 };
                 (graph.add_node(Operation::BatchMatMul, inputs, output)?, any)
-            }
-            Operation::MatMul => {
-                if input_sharded.iter().any(|value| *value) {
+            },
+            Operation::MatMul =>
+            {
+                if input_sharded.iter().any(|value| *value)
+                {
                     return Err(ShardError::UnsupportedOperation {
                         node: old_id,
                         operation: node.operation.clone(),
@@ -588,7 +726,7 @@ pub fn shard_map(
                     graph.add_node(Operation::MatMul, inputs, node.output.clone())?,
                     false,
                 )
-            }
+            },
         };
         mapping.push(new_id);
         sharded.push(is_sharded);
@@ -628,15 +766,14 @@ fn local_batch_type(
     ))
 }
 
-fn local_batch_shape(
-    shape: &Shape,
-    world_size: usize,
-    node: NodeId,
-) -> Result<Shape, ShardError> {
-    let Some(&batch) = shape.dims().first() else {
+fn local_batch_shape(shape: &Shape, world_size: usize, node: NodeId) -> Result<Shape, ShardError> {
+    let Some(&batch) = shape.dims().first()
+    else
+    {
         return Err(ShardError::BatchAxisRequired { node });
     };
-    if batch % world_size != 0 {
+    if batch % world_size != 0
+    {
         return Err(ShardError::UnevenPartition {
             tensor_axis: 0,
             dimension: batch,
@@ -699,9 +836,21 @@ mod tests {
         let batched_x = batched.mapping[x.get() as usize];
         let sharded = shard_map(&batched.graph, 4, &[batched_x]).unwrap();
         let local_x = sharded.mapping[batched_x.get() as usize];
-        assert_eq!(sharded.graph.nodes()[local_x.get() as usize].output.shape.dims(), &[2, 3]);
+        assert_eq!(
+            sharded.graph.nodes()[local_x.get() as usize]
+                .output
+                .shape
+                .dims(),
+            &[2, 3]
+        );
         let local_output = sharded.outputs[0];
-        assert_eq!(sharded.graph.nodes()[local_output.get() as usize].output.shape.dims(), &[2, 3]);
+        assert_eq!(
+            sharded.graph.nodes()[local_output.get() as usize]
+                .output
+                .shape
+                .dims(),
+            &[2, 3]
+        );
     }
 
     #[test]

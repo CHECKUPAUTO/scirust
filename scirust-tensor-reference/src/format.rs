@@ -75,7 +75,8 @@ pub enum ReferenceOpcode {
 impl ReferenceOpcode {
     /// Stable wire value. Never reassigned to a different operation.
     pub const fn code(self) -> u16 {
-        match self {
+        match self
+        {
             Self::Relu => 0x0001,
             Self::Exp => 0x0002,
             Self::Log => 0x0003,
@@ -98,7 +99,8 @@ impl ReferenceOpcode {
 
     /// Recovers the opcode named by a wire value, or `None` if unknown.
     pub const fn from_code(code: u16) -> Option<Self> {
-        match code {
+        match code
+        {
             0x0001 => Some(Self::Relu),
             0x0002 => Some(Self::Exp),
             0x0003 => Some(Self::Log),
@@ -122,7 +124,8 @@ impl ReferenceOpcode {
 
     /// Fixed operand arity of this opcode.
     pub const fn operand_count(self) -> u16 {
-        match self {
+        match self
+        {
             Self::Add
             | Self::Sub
             | Self::Mul
@@ -145,7 +148,8 @@ impl ReferenceOpcode {
 
     /// Minimum Reference minor version in which this opcode is valid.
     pub const fn minimum_minor(self) -> u16 {
-        match self {
+        match self
+        {
             Self::ReluGrad
             | Self::ZerosLike
             | Self::OnesLike
@@ -160,7 +164,8 @@ impl ReferenceOpcode {
 
 /// Maps a `DType` to its stable wire tag.
 pub(crate) const fn dtype_to_tag(dtype: DType) -> u16 {
-    match dtype {
+    match dtype
+    {
         DType::Bool => 0x0001,
         DType::U8 => 0x0002,
         DType::I8 => 0x0003,
@@ -180,7 +185,8 @@ pub(crate) const fn dtype_to_tag(dtype: DType) -> u16 {
 
 /// Recovers the `DType` named by a wire tag.
 pub(crate) const fn dtype_from_tag(tag: u16) -> Option<DType> {
-    match tag {
+    match tag
+    {
         0x0001 => Some(DType::Bool),
         0x0002 => Some(DType::U8),
         0x0003 => Some(DType::I8),
@@ -226,7 +232,8 @@ mod tests {
 
     #[test]
     fn opcode_round_trips_through_its_code() {
-        for opcode in all_opcodes() {
+        for opcode in all_opcodes()
+        {
             assert_eq!(ReferenceOpcode::from_code(opcode.code()), Some(opcode));
         }
     }
@@ -237,15 +244,16 @@ mod tests {
         assert_eq!(
             codes,
             [
-                0x0001, 0x0002, 0x0003, 0x0004, 0x0005, 0x0006, 0x0007, 0x0010, 0x0011,
-                0x0012, 0x0013, 0x0020, 0x0021, 0x0022, 0x0030, 0x0040, 0x0041,
+                0x0001, 0x0002, 0x0003, 0x0004, 0x0005, 0x0006, 0x0007, 0x0010, 0x0011, 0x0012,
+                0x0013, 0x0020, 0x0021, 0x0022, 0x0030, 0x0040, 0x0041,
             ]
         );
     }
 
     #[test]
     fn v1_1_only_opcodes_are_version_marked() {
-        for opcode in all_opcodes() {
+        for opcode in all_opcodes()
+        {
             let expected = if matches!(
                 opcode,
                 ReferenceOpcode::ReluGrad
@@ -255,9 +263,12 @@ mod tests {
                     | ReferenceOpcode::ReduceSumTo
                     | ReferenceOpcode::MatMul
                     | ReferenceOpcode::BatchMatMul
-            ) {
+            )
+            {
                 1
-            } else {
+            }
+            else
+            {
                 0
             };
             assert_eq!(opcode.minimum_minor(), expected);
@@ -285,7 +296,8 @@ mod tests {
             DType::U64,
             DType::I64,
             DType::F64,
-        ] {
+        ]
+        {
             assert_eq!(dtype_from_tag(dtype_to_tag(dtype)), Some(dtype));
         }
     }

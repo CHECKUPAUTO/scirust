@@ -95,7 +95,8 @@ impl TensorRuntime {
         output: &str,
     ) -> Result<(), String> {
         let mut tensors = Vec::with_capacity(inputs.len());
-        for name in inputs {
+        for name in inputs
+        {
             tensors.push(
                 self.regs
                     .get(*name)
@@ -111,15 +112,20 @@ impl TensorRuntime {
     pub fn run_graph(&mut self, graph: &TensorGraph) -> Result<TensorND, String> {
         let mut buffers = graph.buffers.clone();
 
-        for op in &graph.ops {
-            match op {
-                TensorOp::MatMul(a, b) => {
+        for op in &graph.ops
+        {
+            match op
+            {
+                TensorOp::MatMul(a, b) =>
+                {
                     let res =
                         scirust_tensor_einsum::einsum("ij,jk->ik", &[&buffers[*a], &buffers[*b]])?;
                     buffers.push(res);
-                }
-                TensorOp::Add(a, b) => {
-                    if buffers[*a].shape != buffers[*b].shape {
+                },
+                TensorOp::Add(a, b) =>
+                {
+                    if buffers[*a].shape != buffers[*b].shape
+                    {
                         return Err("Add: shape mismatch".to_string());
                     }
                     let data = buffers[*a]
@@ -129,43 +135,52 @@ impl TensorRuntime {
                         .map(|(x, y)| x + y)
                         .collect();
                     buffers.push(TensorND::new(data, buffers[*a].shape.clone()));
-                }
-                TensorOp::ReLU(a) => {
+                },
+                TensorOp::ReLU(a) =>
+                {
                     let data = buffers[*a].data.iter().map(|x| x.max(0.0)).collect();
                     buffers.push(TensorND::new(data, buffers[*a].shape.clone()));
-                }
-                TensorOp::Fused(fused) => match fused {
+                },
+                TensorOp::Fused(fused) => match fused
+                {
                     FusedOp::Linear {
                         input_idx,
                         weight_idx,
                         bias_idx,
                         activation,
-                    } => {
+                    } =>
+                    {
                         let mut res = scirust_tensor_einsum::einsum(
                             "ij,jk->ik",
                             &[&buffers[*input_idx], &buffers[*weight_idx]],
                         )?;
-                        if let Some(b_idx) = bias_idx {
-                            if buffers[*b_idx].data.len() != res.shape[1] {
+                        if let Some(b_idx) = bias_idx
+                        {
+                            if buffers[*b_idx].data.len() != res.shape[1]
+                            {
                                 return Err("Bias dimension mismatch".to_string());
                             }
-                            for r in 0..res.shape[0] {
-                                for c in 0..res.shape[1] {
+                            for r in 0..res.shape[0]
+                            {
+                                for c in 0..res.shape[1]
+                                {
                                     res.data[r * res.shape[1] + c] += buffers[*b_idx].data[c];
                                 }
                             }
                         }
-                        if let Some(kernel) = activation {
+                        if let Some(kernel) = activation
+                        {
                             res = kernel.apply(&res);
                         }
                         buffers.push(res);
-                    }
-                    FusedOp::OptimizedContraction(_plan) => {
+                    },
+                    FusedOp::OptimizedContraction(_plan) =>
+                    {
                         return Err(
                             "OptimizedContraction in TensorGraph not yet fully implemented"
                                 .to_string(),
                         );
-                    }
+                    },
                 },
             }
         }
@@ -182,14 +197,8 @@ mod tests {
     #[test]
     fn executes_contraction_then_fused_activation() {
         let mut rt = TensorRuntime::new();
-        rt.set(
-            "a",
-            TensorND::new(vec![1., 2., 3., 4., 5., 6.], vec![2, 3]),
-        );
-        rt.set(
-            "b",
-            TensorND::new(vec![1., 0., 0., 1., 1., 0.], vec![3, 2]),
-        );
+        rt.set("a", TensorND::new(vec![1., 2., 3., 4., 5., 6.], vec![2, 3]));
+        rt.set("b", TensorND::new(vec![1., 0., 0., 1., 1., 0.], vec![3, 2]));
 
         let plan = ContractionPlan::new("ij,jk->ik").unwrap();
         rt.run_contraction(&plan, &["a", "b"], "c").unwrap();

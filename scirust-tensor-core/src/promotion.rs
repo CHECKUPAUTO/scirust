@@ -10,7 +10,11 @@ pub struct PromotionError {
 
 impl fmt::Display for PromotionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "no safe implicit promotion for {:?} and {:?}", self.lhs, self.rhs)
+        write!(
+            f,
+            "no safe implicit promotion for {:?} and {:?}",
+            self.lhs, self.rhs
+        )
     }
 }
 
@@ -26,20 +30,26 @@ impl std::error::Error for PromotionError {}
 pub fn promote_types(lhs: DType, rhs: DType) -> Result<DType, PromotionError> {
     use DType::*;
 
-    if lhs == rhs {
+    if lhs == rhs
+    {
         return Ok(lhs);
     }
 
-    if lhs == Bool || rhs == Bool {
+    if lhs == Bool || rhs == Bool
+    {
         return Err(PromotionError { lhs, rhs });
     }
 
-    let result = match (lhs, rhs) {
+    let result = match (lhs, rhs)
+    {
         (F64, F64) => F64,
         (F64, other) | (other, F64) if !matches!(other, U64 | I64) => F64,
 
         (F32, other) | (other, F32)
-            if matches!(other, F16 | Bf16 | U8 | I8 | U16 | I16 | U32 | I32) => F32,
+            if matches!(other, F16 | Bf16 | U8 | I8 | U16 | I16 | U32 | I32) =>
+        {
+            F32
+        },
         (F16, Bf16) | (Bf16, F16) => F32,
         (F16, other) | (other, F16) if matches!(other, U8 | I8 | U16 | I16) => F16,
         (Bf16, other) | (other, Bf16) if matches!(other, U8 | I8) => Bf16,

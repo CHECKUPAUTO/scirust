@@ -23,25 +23,48 @@ impl Default for TensorDevice {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TensorError {
     ShapeOverflow,
-    ByteLengthMismatch { expected: usize, actual: usize },
-    RankMismatch { shape_rank: usize, stride_rank: usize },
+    ByteLengthMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    RankMismatch {
+        shape_rank: usize,
+        stride_rank: usize,
+    },
     ViewOutOfBounds,
     InvalidPermutation,
-    InvalidAxis { axis: usize, rank: usize },
+    InvalidAxis {
+        axis: usize,
+        rank: usize,
+    },
     InvalidSlice,
-    BroadcastMismatch { source: Vec<usize>, target: Vec<usize> },
-    ReshapeElementCount { current: usize, requested: usize },
+    BroadcastMismatch {
+        source: Vec<usize>,
+        target: Vec<usize>,
+    },
+    ReshapeElementCount {
+        current: usize,
+        requested: usize,
+    },
     ReshapeRequiresContiguous,
-    DTypeMismatch { expected: DType, actual: DType },
+    DTypeMismatch {
+        expected: DType,
+        actual: DType,
+    },
 }
 
 impl fmt::Display for TensorError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self
+        {
             Self::ShapeOverflow => f.write_str("tensor shape or layout overflows usize"),
-            Self::ByteLengthMismatch { expected, actual } => {
-                write!(f, "tensor byte length mismatch: expected {expected}, got {actual}")
-            }
+            Self::ByteLengthMismatch { expected, actual } =>
+            {
+                write!(
+                    f,
+                    "tensor byte length mismatch: expected {expected}, got {actual}"
+                )
+            },
             Self::RankMismatch {
                 shape_rank,
                 stride_rank,
@@ -51,23 +74,27 @@ impl fmt::Display for TensorError {
             ),
             Self::ViewOutOfBounds => f.write_str("tensor view reaches outside its storage"),
             Self::InvalidPermutation => f.write_str("tensor permutation is not a rank permutation"),
-            Self::InvalidAxis { axis, rank } => {
+            Self::InvalidAxis { axis, rank } =>
+            {
                 write!(f, "tensor axis {axis} is invalid for rank {rank}")
-            }
+            },
             Self::InvalidSlice => f.write_str("invalid tensor slice"),
-            Self::BroadcastMismatch { source, target } => {
+            Self::BroadcastMismatch { source, target } =>
+            {
                 write!(f, "cannot broadcast shape {source:?} to {target:?}")
-            }
+            },
             Self::ReshapeElementCount { current, requested } => write!(
                 f,
                 "reshape changes element count from {current} to {requested}"
             ),
-            Self::ReshapeRequiresContiguous => {
+            Self::ReshapeRequiresContiguous =>
+            {
                 f.write_str("zero-copy reshape requires a contiguous tensor view")
-            }
-            Self::DTypeMismatch { expected, actual } => {
+            },
+            Self::DTypeMismatch { expected, actual } =>
+            {
                 write!(f, "dtype mismatch: expected {expected:?}, got {actual:?}")
-            }
+            },
         }
     }
 }
@@ -102,7 +129,8 @@ impl Tensor {
         let expected = numel
             .checked_mul(dtype.size_bytes())
             .ok_or(TensorError::ShapeOverflow)?;
-        if bytes.len() != expected {
+        if bytes.len() != expected
+        {
             return Err(TensorError::ByteLengthMismatch {
                 expected,
                 actual: bytes.len(),
@@ -114,7 +142,8 @@ impl Tensor {
 
     pub fn from_f32(data: Vec<f32>, shape: impl Into<Vec<usize>>) -> Result<Self, TensorError> {
         let mut bytes = Vec::with_capacity(data.len().saturating_mul(4));
-        for value in data {
+        for value in data
+        {
             bytes.extend_from_slice(&value.to_le_bytes());
         }
         Self::from_bytes(
@@ -127,7 +156,8 @@ impl Tensor {
 
     pub fn from_f64(data: Vec<f64>, shape: impl Into<Vec<usize>>) -> Result<Self, TensorError> {
         let mut bytes = Vec::with_capacity(data.len().saturating_mul(8));
-        for value in data {
+        for value in data
+        {
             bytes.extend_from_slice(&value.to_le_bytes());
         }
         Self::from_bytes(
@@ -140,7 +170,8 @@ impl Tensor {
 
     pub fn from_i64(data: Vec<i64>, shape: impl Into<Vec<usize>>) -> Result<Self, TensorError> {
         let mut bytes = Vec::with_capacity(data.len().saturating_mul(8));
-        for value in data {
+        for value in data
+        {
             bytes.extend_from_slice(&value.to_le_bytes());
         }
         Self::from_bytes(
@@ -207,7 +238,8 @@ impl Tensor {
     pub fn to_contiguous_bytes(&self) -> Vec<u8> {
         let width = self.dtype.size_bytes();
         let mut out = Vec::with_capacity(self.numel().saturating_mul(width));
-        for storage_index in self.logical_storage_offsets() {
+        for storage_index in self.logical_storage_offsets()
+        {
             let byte_start = storage_index * width;
             out.extend_from_slice(&self.storage[byte_start..byte_start + width]);
         }
@@ -215,7 +247,8 @@ impl Tensor {
     }
 
     pub fn to_f32_vec(&self) -> Result<Vec<f32>, TensorError> {
-        if self.dtype != DType::F32 {
+        if self.dtype != DType::F32
+        {
             return Err(TensorError::DTypeMismatch {
                 expected: DType::F32,
                 actual: self.dtype,
@@ -231,13 +264,15 @@ impl Tensor {
     /// Zero-copy reshape. Non-contiguous views must be made contiguous first.
     pub fn reshape(&self, new_shape: Shape) -> Result<Self, TensorError> {
         let requested = checked_numel(&new_shape)?;
-        if requested != self.numel() {
+        if requested != self.numel()
+        {
             return Err(TensorError::ReshapeElementCount {
                 current: self.numel(),
                 requested,
             });
         }
-        if !self.is_contiguous() {
+        if !self.is_contiguous()
+        {
             return Err(TensorError::ReshapeRequiresContiguous);
         }
         let strides = Strides::contiguous(&new_shape).map_err(|_| TensorError::ShapeOverflow)?;
@@ -252,13 +287,15 @@ impl Tensor {
     }
 
     pub fn transpose(&self, first: usize, second: usize) -> Result<Self, TensorError> {
-        if first >= self.rank() {
+        if first >= self.rank()
+        {
             return Err(TensorError::InvalidAxis {
                 axis: first,
                 rank: self.rank(),
             });
         }
-        if second >= self.rank() {
+        if second >= self.rank()
+        {
             return Err(TensorError::InvalidAxis {
                 axis: second,
                 rank: self.rank(),
@@ -270,12 +307,15 @@ impl Tensor {
     }
 
     pub fn permute(&self, permutation: &[usize]) -> Result<Self, TensorError> {
-        if permutation.len() != self.rank() {
+        if permutation.len() != self.rank()
+        {
             return Err(TensorError::InvalidPermutation);
         }
         let mut seen = vec![false; self.rank()];
-        for &axis in permutation {
-            if axis >= self.rank() || seen[axis] {
+        for &axis in permutation
+        {
+            if axis >= self.rank() || seen[axis]
+            {
                 return Err(TensorError::InvalidPermutation);
             }
             seen[axis] = true;
@@ -307,14 +347,16 @@ impl Tensor {
         end: usize,
         step: usize,
     ) -> Result<Self, TensorError> {
-        if axis >= self.rank() {
+        if axis >= self.rank()
+        {
             return Err(TensorError::InvalidAxis {
                 axis,
                 rank: self.rank(),
             });
         }
         let dim = self.shape.dims()[axis];
-        if step == 0 || start > end || end > dim {
+        if step == 0 || start > end || end > dim
+        {
             return Err(TensorError::InvalidSlice);
         }
         let span = end - start;
@@ -348,7 +390,8 @@ impl Tensor {
 
     /// NumPy-style right-aligned broadcasting as a zero-stride view.
     pub fn broadcast_to(&self, target: Shape) -> Result<Self, TensorError> {
-        if target.rank() < self.rank() {
+        if target.rank() < self.rank()
+        {
             return Err(TensorError::BroadcastMismatch {
                 source: self.shape.dims().to_vec(),
                 target: target.dims().to_vec(),
@@ -357,15 +400,21 @@ impl Tensor {
 
         let mut strides = vec![0usize; target.rank()];
         let rank_delta = target.rank() - self.rank();
-        for source_axis in 0..self.rank() {
+        for source_axis in 0..self.rank()
+        {
             let target_axis = source_axis + rank_delta;
             let source_dim = self.shape.dims()[source_axis];
             let target_dim = target.dims()[target_axis];
-            if source_dim == target_dim {
+            if source_dim == target_dim
+            {
                 strides[target_axis] = self.strides.values()[source_axis];
-            } else if source_dim == 1 {
+            }
+            else if source_dim == 1
+            {
                 strides[target_axis] = 0;
-            } else {
+            }
+            else
+            {
                 return Err(TensorError::BroadcastMismatch {
                     source: self.shape.dims().to_vec(),
                     target: target.dims().to_vec(),
@@ -402,14 +451,16 @@ impl Tensor {
         offset_elements: usize,
         device: TensorDevice,
     ) -> Result<Self, TensorError> {
-        if shape.rank() != strides.values().len() {
+        if shape.rank() != strides.values().len()
+        {
             return Err(TensorError::RankMismatch {
                 shape_rank: shape.rank(),
                 stride_rank: strides.values().len(),
             });
         }
         let width = dtype.size_bytes();
-        if storage.len() % width != 0 {
+        if storage.len() % width != 0
+        {
             return Err(TensorError::ViewOutOfBounds);
         }
         let storage_elements = storage.len() / width;
@@ -447,12 +498,14 @@ impl Iterator for LogicalOffsets<'_> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.linear >= self.total {
+        if self.linear >= self.total
+        {
             return None;
         }
         let mut remainder = self.linear;
         let mut offset = self.base;
-        for axis in (0..self.shape.len()).rev() {
+        for axis in (0..self.shape.len()).rev()
+        {
             let dim = self.shape[axis];
             let coordinate = remainder % dim;
             remainder /= dim;
@@ -476,16 +529,21 @@ fn validate_view_bounds(
     storage_elements: usize,
 ) -> Result<(), TensorError> {
     let numel = checked_numel(shape)?;
-    if numel == 0 {
-        return if offset <= storage_elements {
+    if numel == 0
+    {
+        return if offset <= storage_elements
+        {
             Ok(())
-        } else {
+        }
+        else
+        {
             Err(TensorError::ViewOutOfBounds)
         };
     }
 
     let mut max_index = offset;
-    for (&dim, &stride) in shape.dims().iter().zip(strides.values()) {
+    for (&dim, &stride) in shape.dims().iter().zip(strides.values())
+    {
         debug_assert!(dim > 0);
         max_index = max_index
             .checked_add(
@@ -495,9 +553,12 @@ fn validate_view_bounds(
             )
             .ok_or(TensorError::ShapeOverflow)?;
     }
-    if max_index >= storage_elements {
+    if max_index >= storage_elements
+    {
         Err(TensorError::ViewOutOfBounds)
-    } else {
+    }
+    else
+    {
         Ok(())
     }
 }
@@ -516,10 +577,7 @@ mod tests {
         assert!(tensor.shares_storage_with(&sliced));
         assert_eq!(transposed.shape().dims(), &[4, 3]);
         assert_eq!(sliced.shape().dims(), &[2, 3]);
-        assert_eq!(
-            sliced.to_f32_vec().unwrap(),
-            vec![1., 5., 9., 3., 7., 11.]
-        );
+        assert_eq!(sliced.to_f32_vec().unwrap(), vec![1., 5., 9., 3., 7., 11.]);
     }
 
     #[test]
@@ -527,10 +585,7 @@ mod tests {
         let tensor = Tensor::from_f32(vec![1., 2., 3., 4., 5., 6.], vec![2, 3]).unwrap();
         let reshaped = tensor.reshape(Shape::new(vec![3, 2])).unwrap();
         assert!(tensor.shares_storage_with(&reshaped));
-        assert_eq!(
-            reshaped.to_f32_vec().unwrap(),
-            vec![1., 2., 3., 4., 5., 6.]
-        );
+        assert_eq!(reshaped.to_f32_vec().unwrap(), vec![1., 2., 3., 4., 5., 6.]);
     }
 
     #[test]

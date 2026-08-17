@@ -6,21 +6,47 @@ use crate::{Graph, NodeId, Operation, TensorType};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SemanticError {
     InvalidNode(NodeId),
-    TypeMismatch { node: NodeId, expected: TensorType, actual: TensorType },
-    BinaryTypeMismatch { node: NodeId },
-    InvalidReshape { node: NodeId },
-    InvalidTranspose { node: NodeId },
-    InvalidBroadcast { node: NodeId },
-    InvalidReduction { node: NodeId },
-    InvalidMatMul { node: NodeId },
-    InvalidBatchMatMul { node: NodeId },
+    TypeMismatch {
+        node: NodeId,
+        expected: TensorType,
+        actual: TensorType,
+    },
+    BinaryTypeMismatch {
+        node: NodeId,
+    },
+    InvalidReshape {
+        node: NodeId,
+    },
+    InvalidTranspose {
+        node: NodeId,
+    },
+    InvalidBroadcast {
+        node: NodeId,
+    },
+    InvalidReduction {
+        node: NodeId,
+    },
+    InvalidMatMul {
+        node: NodeId,
+    },
+    InvalidBatchMatMul {
+        node: NodeId,
+    },
 }
 
 impl fmt::Display for SemanticError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidNode(node) => write!(f, "semantic verifier cannot resolve node {}", node.get()),
-            Self::TypeMismatch { node, expected, actual } => write!(
+        match self
+        {
+            Self::InvalidNode(node) =>
+            {
+                write!(f, "semantic verifier cannot resolve node {}", node.get())
+            },
+            Self::TypeMismatch {
+                node,
+                expected,
+                actual,
+            } => write!(
                 f,
                 "node {} declares type {actual:?}, expected {expected:?}",
                 node.get()
@@ -30,12 +56,30 @@ impl fmt::Display for SemanticError {
                 "node {} requires identical operand and result tensor types",
                 node.get()
             ),
-            Self::InvalidReshape { node } => write!(f, "node {} has an invalid reshape", node.get()),
-            Self::InvalidTranspose { node } => write!(f, "node {} has an invalid transpose", node.get()),
-            Self::InvalidBroadcast { node } => write!(f, "node {} has an invalid broadcast", node.get()),
-            Self::InvalidReduction { node } => write!(f, "node {} has an invalid reduce-sum-to", node.get()),
-            Self::InvalidMatMul { node } => write!(f, "node {} has an invalid rank-2 matmul", node.get()),
-            Self::InvalidBatchMatMul { node } => write!(f, "node {} has an invalid batched matmul", node.get()),
+            Self::InvalidReshape { node } =>
+            {
+                write!(f, "node {} has an invalid reshape", node.get())
+            },
+            Self::InvalidTranspose { node } =>
+            {
+                write!(f, "node {} has an invalid transpose", node.get())
+            },
+            Self::InvalidBroadcast { node } =>
+            {
+                write!(f, "node {} has an invalid broadcast", node.get())
+            },
+            Self::InvalidReduction { node } =>
+            {
+                write!(f, "node {} has an invalid reduce-sum-to", node.get())
+            },
+            Self::InvalidMatMul { node } =>
+            {
+                write!(f, "node {} has an invalid rank-2 matmul", node.get())
+            },
+            Self::InvalidBatchMatMul { node } =>
+            {
+                write!(f, "node {} has an invalid batched matmul", node.get())
+            },
         }
     }
 }
@@ -46,7 +90,8 @@ impl std::error::Error for SemanticError {}
 /// Validate shape and dtype semantics in addition to [`Graph::validate`]'s
 /// structural checks.
 pub fn validate_semantics(graph: &Graph) -> Result<(), SemanticError> {
-    for (index, node) in graph.nodes().iter().enumerate() {
+    for (index, node) in graph.nodes().iter().enumerate()
+    {
         let id = NodeId::new(index as u32);
         let inputs = node
             .inputs
@@ -60,38 +105,48 @@ pub fn validate_semantics(graph: &Graph) -> Result<(), SemanticError> {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        match &node.operation {
-            Operation::Input { .. } | Operation::Constant { .. } => {}
-            Operation::Add | Operation::Sub | Operation::Mul | Operation::Div => {
-                if inputs.len() != 2 || *inputs[0] != node.output || *inputs[1] != node.output {
+        match &node.operation
+        {
+            Operation::Input { .. } | Operation::Constant { .. } =>
+            {},
+            Operation::Add | Operation::Sub | Operation::Mul | Operation::Div =>
+            {
+                if inputs.len() != 2 || *inputs[0] != node.output || *inputs[1] != node.output
+                {
                     return Err(SemanticError::BinaryTypeMismatch { node: id });
                 }
-            }
-            Operation::Scale { factor } => {
+            },
+            Operation::Scale { factor } =>
+            {
                 require_same(id, inputs[0], &node.output)?;
-                if factor.dtype() != node.output.dtype {
+                if factor.dtype() != node.output.dtype
+                {
                     return Err(SemanticError::TypeMismatch {
                         node: id,
                         expected: TensorType::new(factor.dtype(), node.output.shape.clone()),
                         actual: node.output.clone(),
                     });
                 }
-            }
+            },
             Operation::Relu
             | Operation::Exp
             | Operation::Log
             | Operation::ZerosLike
             | Operation::OnesLike
             | Operation::StopGradient
-            | Operation::Checkpoint => {
+            | Operation::Checkpoint =>
+            {
                 require_same(id, inputs[0], &node.output)?;
-            }
-            Operation::ReluGrad => {
-                if *inputs[0] != node.output || *inputs[1] != node.output {
+            },
+            Operation::ReluGrad =>
+            {
+                if *inputs[0] != node.output || *inputs[1] != node.output
+                {
                     return Err(SemanticError::BinaryTypeMismatch { node: id });
                 }
-            }
-            Operation::Reshape { shape } => {
+            },
+            Operation::Reshape { shape } =>
+            {
                 let input = inputs[0];
                 let source_elements = input
                     .shape
@@ -106,8 +161,9 @@ pub fn validate_semantics(graph: &Graph) -> Result<(), SemanticError> {
                 {
                     return Err(SemanticError::InvalidReshape { node: id });
                 }
-            }
-            Operation::Transpose { permutation } => {
+            },
+            Operation::Transpose { permutation } =>
+            {
                 let input = inputs[0];
                 if permutation.len() != input.shape.rank()
                     || node.output.dtype != input.dtype
@@ -116,7 +172,8 @@ pub fn validate_semantics(graph: &Graph) -> Result<(), SemanticError> {
                     return Err(SemanticError::InvalidTranspose { node: id });
                 }
                 let mut seen = alloc::vec![false; permutation.len()];
-                for (output_axis, &input_axis) in permutation.iter().enumerate() {
+                for (output_axis, &input_axis) in permutation.iter().enumerate()
+                {
                     if input_axis >= permutation.len()
                         || seen[input_axis]
                         || node.output.shape.dims()[output_axis] != input.shape.dims()[input_axis]
@@ -125,8 +182,9 @@ pub fn validate_semantics(graph: &Graph) -> Result<(), SemanticError> {
                     }
                     seen[input_axis] = true;
                 }
-            }
-            Operation::BroadcastTo { shape } => {
+            },
+            Operation::BroadcastTo { shape } =>
+            {
                 let input = inputs[0];
                 if input.dtype != node.output.dtype
                     || node.output.shape != *shape
@@ -134,8 +192,9 @@ pub fn validate_semantics(graph: &Graph) -> Result<(), SemanticError> {
                 {
                     return Err(SemanticError::InvalidBroadcast { node: id });
                 }
-            }
-            Operation::ReduceSumTo { shape } => {
+            },
+            Operation::ReduceSumTo { shape } =>
+            {
                 let input = inputs[0];
                 if input.dtype != node.output.dtype
                     || node.output.shape != *shape
@@ -143,28 +202,33 @@ pub fn validate_semantics(graph: &Graph) -> Result<(), SemanticError> {
                 {
                     return Err(SemanticError::InvalidReduction { node: id });
                 }
-            }
-            Operation::MatMul => {
+            },
+            Operation::MatMul =>
+            {
                 let lhs = inputs[0];
                 let rhs = inputs[1];
-                if !valid_rank2_matmul(lhs, rhs, &node.output) {
+                if !valid_rank2_matmul(lhs, rhs, &node.output)
+                {
                     return Err(SemanticError::InvalidMatMul { node: id });
                 }
-            }
-            Operation::BatchMatMul => {
+            },
+            Operation::BatchMatMul =>
+            {
                 let lhs = inputs[0];
                 let rhs = inputs[1];
-                if !valid_batch_matmul(lhs, rhs, &node.output) {
+                if !valid_batch_matmul(lhs, rhs, &node.output)
+                {
                     return Err(SemanticError::InvalidBatchMatMul { node: id });
                 }
-            }
+            },
         }
     }
     Ok(())
 }
 
 fn can_broadcast_to(source: &[usize], target: &[usize]) -> bool {
-    if source.len() > target.len() {
+    if source.len() > target.len()
+    {
         return false;
     }
     let offset = target.len() - source.len();
@@ -175,7 +239,8 @@ fn can_broadcast_to(source: &[usize], target: &[usize]) -> bool {
 }
 
 fn can_reduce_sum_to(source: &[usize], target: &[usize]) -> bool {
-    if target.len() > source.len() {
+    if target.len() > source.len()
+    {
         return false;
     }
     let offset = source.len() - target.len();
@@ -217,10 +282,17 @@ fn valid_batch_matmul(lhs: &TensorType, rhs: &TensorType, output: &TensorType) -
         && out_dims[rank - 1] == rhs_dims[rank - 1]
 }
 
-fn require_same(node: NodeId, expected: &TensorType, actual: &TensorType) -> Result<(), SemanticError> {
-    if expected == actual {
+fn require_same(
+    node: NodeId,
+    expected: &TensorType,
+    actual: &TensorType,
+) -> Result<(), SemanticError> {
+    if expected == actual
+    {
         Ok(())
-    } else {
+    }
+    else
+    {
         Err(SemanticError::TypeMismatch {
             node,
             expected: expected.clone(),
