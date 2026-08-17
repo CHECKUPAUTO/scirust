@@ -48,7 +48,11 @@ A thin dispatcher over capabilities that already exist and are tested
 elsewhere (it adds no new compute). Without installing:
 `cargo run -p scirust-cli -- <command>`.
 
-**Exit codes**: `0` success, `1` domain failure (fault/MISMATCH), `2` usage/IO.
+**Exit codes**: `0` success, `1` domain failure (fault/MISMATCH), `2` usage/IO,
+`3` validation/invalid Studio model state, `5` numerical failure, `6` cancelled,
+`7` internal/store/serialization failure. Not every command emits every code;
+see [`docs/CLI_CONTRACT.md`](CLI_CONTRACT.md) for the cross-command contract and
+command-specific sections below for narrower meanings.
 
 **Determinism**: every command that accepts `--seed N` produces bit-identical
 output for a given seed. Elapsed-time reporting goes to stderr on interactive
