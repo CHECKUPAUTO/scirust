@@ -774,6 +774,33 @@ mod tests {
         assert_eq!(run(&s(&["frobnicate"])), 2);
     }
 
+    #[test]
+    fn library_capability_crates_are_not_dispatchable_subcommands() {
+        for command in [
+            "scirust-vision",
+            "scirust-audio",
+            "scirust-graph",
+            "scirust-sequential",
+            "scirust-multivariate",
+            "scirust-unsupervised",
+            "scirust-seasonal",
+            "scirust-nlp-advanced",
+            "scirust-automl",
+            "scirust-synthesis",
+            "scirust-algogen",
+            "scirust-codetrans",
+            "scirust-rl-algo",
+            "scirust-scaffold",
+        ]
+        {
+            assert_eq!(
+                run(&s(&[command])),
+                2,
+                "library-only capability `{command}` must not be dispatched as a command"
+            );
+        }
+    }
+
     /// The module promises `scirust help` "lists everything". Every command that
     /// `run` actually dispatches must therefore appear in the help GROUPS. This
     /// guards against dispatched-but-undocumented commands (regression: kvcache,
