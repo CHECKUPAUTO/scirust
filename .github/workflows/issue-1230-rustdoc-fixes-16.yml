@@ -1,0 +1,51 @@
+name: Issue 1230 rustdoc fixes 16
+
+on:
+  push:
+    branches: [fix/issue-1230-workspace-rustdoc]
+    paths:
+      - ".github/workflows/issue-1230-rustdoc-fixes-16.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch-rustdoc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+      - name: Fix SOM dataset private rustdoc links
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('scirust-som/crates/dataset/src/batch.rs')
+          text = path.read_text()
+          replacements = [
+              ('borrow [`BORROW_NA`], invalid [`INVALID_PAD`].',
+               'borrow [`BORROW_NA`], invalid `INVALID_PAD`.'),
+              ('Fisher–Yates ([`shuffle_in_place`]); the first `n_train` shuffled indices',
+               'Fisher–Yates (`shuffle_in_place`); the first `n_train` shuffled indices'),
+          ]
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected one {old!r}, found {count}')
+              text = text.replace(old, new, 1)
+          path.write_text(text)
+          PY
+      - name: Commit rustdoc fixes
+        shell: bash
+        env:
+          HEAD_REF: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add scirust-som/crates/dataset/src/batch.rs
+          git diff --cached --check
+          git commit -m "docs(som): avoid private dataset rustdoc links"
+          git push origin "HEAD:${HEAD_REF}"
