@@ -1,0 +1,66 @@
+name: Issue 1230 rustdoc fixes 10
+
+on:
+  push:
+    branches: [fix/issue-1230-workspace-rustdoc]
+    paths:
+      - ".github/workflows/issue-1230-rustdoc-fixes-10.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch-rustdoc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+      - name: Fix scirust-vision rustdoc links
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          replacements = {
+              'scirust-vision/src/denoise.rs': [
+                  ('/// (see [`median`] for why `partial_cmp` would panic on a NaN pixel).',
+                   '/// (see `median` for why `partial_cmp` would panic on a NaN pixel).'),
+                  ('/// [`NLM_AUTO_H_FACTOR`]`·σ` (see its calibration note).',
+                   '/// `NLM_AUTO_H_FACTOR·σ` (see its calibration note).'),
+                  ('/// `patch_half + search_half` pixels per side ([`pad_replicate`]) so every',
+                   '/// `patch_half + search_half` pixels per side (`pad_replicate`) so every'),
+                  ('/// four independent accumulators ([`patch_dist_padded`] / [`sum_sq_diff`]) —',
+                   '/// four independent accumulators (`patch_dist_padded` / `sum_sq_diff`) —'),
+              ],
+              'scirust-vision/src/optics.rs': [
+                  ("//! This module works on the crate's [`Image`](crate::Image) and reuses its",
+                   "//! This module works on the crate's [`Image`] and reuses its"),
+                  ('//! spatial [`convolve2d`](crate::convolve2d). The MTF is a direct DFT of the',
+                   '//! spatial [`convolve2d`]. The MTF is a direct DFT of the'),
+              ],
+          }
+
+          for filename, pairs in replacements.items():
+              path = Path(filename)
+              text = path.read_text()
+              for old, new in pairs:
+                  count = text.count(old)
+                  if count != 1:
+                      raise SystemExit(f'{filename}: expected one {old!r}, found {count}')
+                  text = text.replace(old, new, 1)
+              path.write_text(text)
+          PY
+      - name: Commit rustdoc fixes
+        shell: bash
+        env:
+          HEAD_REF: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add scirust-vision/src/denoise.rs scirust-vision/src/optics.rs
+          git diff --cached --check
+          git commit -m "docs(vision): fix rustdoc links"
+          git push origin "HEAD:${HEAD_REF}"
