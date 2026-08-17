@@ -1,7 +1,7 @@
 //! # `scirust-stats` — probability distributions & statistical inference
 //!
 //! A unified [`Distribution`] trait and a suite of classical hypothesis tests,
-//! built entirely on the audited [`scirust-special`] numeric base. This is the
+//! built entirely on the audited `scirust-special` numeric base. This is the
 //! rigorous statistics layer a scientific/industrial platform needs and that the
 //! SPC, tolerancing, metrology, reliability and predictive-maintenance crates
 //! previously approximated piecemeal.
