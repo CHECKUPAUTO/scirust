@@ -108,6 +108,11 @@ jobs:
               "[`sample_next`] so any decoder",
               "`sample_next` so any decoder",
           )
+          replace_exact(
+              "scirust-finmigrate/src/audit.rs",
+              "[`crate::store_money_rounded`] /",
+              "`store_money_rounded` /",
+          )
       - name: Verify strict workspace rustdoc
         run: cargo +stable doc --workspace --no-deps --locked
       - name: Commit verified repairs and remove one-shot workflow
@@ -124,7 +129,8 @@ jobs:
                   scirust-core/src/representation_graph.rs \
                   scirust-srcc-bench/src/certified_pipeline.rs \
                   scirust-srcc-bench/src/tournament.rs \
-                  scirust-sciagent/src/generate.rs
+                  scirust-sciagent/src/generate.rs \
+                  scirust-finmigrate/src/audit.rs
           git diff --cached --check
           git commit -m "docs: repair strict workspace rustdoc links"
           git push origin HEAD:codex/gate-workspace-rustdoc
