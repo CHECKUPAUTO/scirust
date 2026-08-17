@@ -1,0 +1,29 @@
+name: Temporary last rustdoc sync
+
+on:
+  push:
+    branches:
+      - codex/gate-workspace-rustdoc
+    paths:
+      - .github/workflows/_tmp_sync_rustdoc_master_last.yml
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: codex/gate-workspace-rustdoc
+          fetch-depth: 0
+      - name: Merge current master exactly
+        run: |
+          git config user.name "scirust-rustdoc-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git fetch origin master
+          git merge --no-commit --no-ff origin/master
+          git rm .github/workflows/_tmp_sync_rustdoc_master_last.yml
+          git commit -m "chore(rustdoc): final sync with merged issue fixes"
+          git push origin HEAD:codex/gate-workspace-rustdoc
