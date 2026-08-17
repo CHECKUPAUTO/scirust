@@ -58,6 +58,8 @@ jobs:
           replace_exact("scirust-retrieval/src/forgetting.rs", "[`DenseIndex`] / [`LshIndex`] / [`Bm25Index`]", "[`DenseIndex`] / `LshIndex` / `Bm25Index`")
           replace_exact("scirust-retrieval/src/forgetting.rs", "and [`ImprovementLoop`] accumulates feedback forever", "and `ImprovementLoop` accumulates feedback forever")
           replace_exact("scirust-retrieval/src/license.rs", "[`Encoder`](crate::Encoder)", "[`Encoder`]")
+          replace_exact("scirust-integration/src/pipeline.rs", "[`StationConfig::default`]", "`StationConfig::default`")
+          replace_exact("scirust-trader/src/scanner.rs", "(see [`Opportunity::seal`]).", "(see `Opportunity::seal`).")
       - name: Verify strict workspace rustdoc
         run: cargo +stable doc --workspace --no-deps --locked
       - name: Commit verified repairs and remove one-shot workflow
@@ -80,7 +82,9 @@ jobs:
                   scirust-license/src/lib.rs \
                   scirust-modalg/src/ring.rs \
                   scirust-retrieval/src/forgetting.rs \
-                  scirust-retrieval/src/license.rs
+                  scirust-retrieval/src/license.rs \
+                  scirust-integration/src/pipeline.rs \
+                  scirust-trader/src/scanner.rs
           git diff --cached --check
           git commit -m "docs: repair strict workspace rustdoc links"
           git push origin HEAD:codex/gate-workspace-rustdoc
