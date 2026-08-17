@@ -1,0 +1,75 @@
+name: Rustdoc fix scirust-process psychrometry
+
+on:
+  push:
+    branches: [codex/gate-workspace-rustdoc]
+    paths:
+      - .github/workflows/rustdoc-fix-process-psychrometry.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/gate-workspace-rustdoc
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Fix psychrometry units and validate scirust-process
+        shell: bash
+        run: |
+          set -u
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path('scirust-process/src/psychrometry.rs')
+          s = p.read_text()
+          replacements = {
+              '[Pa]': '(Pa)',
+              '[sans dimension, ∈ 0..1]': '(sans dimension, ∈ 0..1)',
+              '[°C]': '(°C)',
+              '[kJ · kg air sec⁻¹]': '(kJ · kg air sec⁻¹)',
+              '[K]': '(K)',
+              '[J · kg⁻¹ · K⁻¹]': '(J · kg⁻¹ · K⁻¹)',
+              '[m³ · kg air sec⁻¹]': '(m³ · kg air sec⁻¹)',
+              "[kg d'eau · kg air sec⁻¹, sans dimension]": "(kg d'eau · kg air sec⁻¹, sans dimension)",
+              '[kg eau · kg air sec⁻¹]': '(kg eau · kg air sec⁻¹)',
+          }
+          changed = 0
+          lines = s.splitlines(keepends=True)
+          out = []
+          in_fence = False
+          for line in lines:
+              stripped = line.lstrip()
+              is_doc = stripped.startswith('//!') or stripped.startswith('///')
+              if is_doc and '```' in line:
+                  in_fence = not in_fence
+                  out.append(line)
+                  continue
+              if is_doc and not in_fence:
+                  for old, new in replacements.items():
+                      if old in line:
+                          line = line.replace(old, new)
+                          changed += 1
+              out.append(line)
+          if changed == 0:
+              raise SystemExit('no psychrometry unit replacements applied')
+          p.write_text(''.join(out))
+          print(f'applied {changed} psychrometry rustdoc replacements')
+          PY
+
+          git diff --check
+          set +e
+          RUSTDOCFLAGS="-D warnings" cargo +stable doc -p scirust-process --no-deps --locked
+          status=$?
+          set -e
+
+          git rm .github/workflows/rustdoc-fix-process-psychrometry.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scirust-process/src/psychrometry.rs
+          git commit -m "docs(process): make psychrometry units rustdoc-safe"
+          git push origin HEAD:codex/gate-workspace-rustdoc
+          exit "$status"
