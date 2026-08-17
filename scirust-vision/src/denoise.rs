@@ -103,7 +103,7 @@ fn mad(values: &[f64]) -> f64 {
 /// Borders are handled by clamping coordinates to the image (replicate
 /// padding), so edge pixels see a full-size window and the output never
 /// shrinks. Windows are sorted with the NaN-safe [`f64::total_cmp`] total order
-/// (see [`median`] for why `partial_cmp` would panic on a NaN pixel).
+/// (see `median` for why `partial_cmp` would panic on a NaN pixel).
 ///
 /// An impulse — a pixel arbitrarily far from its neighbours — is an order
 /// statistic outlier and is annihilated outright, while straight edges pass
@@ -526,7 +526,7 @@ fn patch_dist_reference(
 /// locally-constant signal, so on mostly smooth images the differences are
 /// noise-dominated and the robust MAD ignores the minority straddling edges.
 /// `h <= 0` selects the filtering strength automatically as
-/// [`NLM_AUTO_H_FACTOR`]`·σ` (see its calibration note).
+/// `NLM_AUTO_H_FACTOR·σ` (see its calibration note).
 ///
 /// Complexity is `O(n · (2·search_half+1)² · (2·patch_half+1)²)` — quadratic
 /// in both radii — so keep the search window moderate on large frames
@@ -536,10 +536,10 @@ fn patch_dist_reference(
 ///
 /// The patch-distance kernel is layout-optimized so LLVM auto-vectorizes it on
 /// stable Rust: the image is replicate-padded **once** by
-/// `patch_half + search_half` pixels per side ([`pad_replicate`]) so every
+/// `patch_half + search_half` pixels per side (`pad_replicate`) so every
 /// patch row any candidate can touch is a contiguous slice, and the distance
 /// is a sum over patch rows of straight-line squared-difference kernels with
-/// four independent accumulators ([`patch_dist_padded`] / [`sum_sq_diff`]) —
+/// four independent accumulators (`patch_dist_padded` / `sum_sq_diff`) —
 /// no clamps, no bounds checks, no branches inside the loop. Reassociating the
 /// sum moves a distance by rounding only (≤ 1e-12 relative, pinned by unit
 /// test against the retained scalar reference); the weight rule, the σ / `h`
