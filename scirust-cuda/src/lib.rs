@@ -24,7 +24,7 @@
 //! CUDA dependency and compiles anywhere (CI included); the public surface is just
 //! [`available`]. With it on, cudarc dynamically loads the driver, cuBLASLt and
 //! NVRTC libraries. The crate therefore still compiles without a local toolkit;
-//! [`CudaChain::new`] returns `None` and the device tests skip when the required
+//! `CudaChain::new` returns `None` and the device tests skip when the required
 //! runtime or a CUDA device is unavailable.
 
 #[cfg(feature = "cuda")]
