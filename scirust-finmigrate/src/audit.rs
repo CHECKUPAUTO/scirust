@@ -13,7 +13,7 @@
 //!
 //! The SHA-256 check above proves a baseline is *unmodified* — it says nothing
 //! about whether the numbers inside are actually well-formed. Every unit except
-//! CURRCVT stores its money fields through [`crate::store_money_rounded`] /
+//! CURRCVT stores its money fields through `crate::store_money_rounded` /
 //! `store_money_trunc`, i.e. onto the same `PIC S9(9)V99` grid
 //! [`crate::certified::money_field`] certifies (a proven ½-ULP / <1-ULP
 //! round-trip bound — see that module). [`audit_units`] now also parses each

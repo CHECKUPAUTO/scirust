@@ -19,19 +19,22 @@ real invocations; most are exercised by the test suite of `scirust-cli`
 
 ## 1. Quality gates (identical locally and in CI)
 
-These are the exact commands run by `.github/workflows/ci.yml`. A change is
-releasable only when all six pass:
+These are the exact commands run by the main workspace CI workflows. A change is
+releasable only when all seven pass:
 
 | Gate | Command | Checks |
 |---|---|---|
 | Format | `cargo fmt --all -- --check` | workspace rustfmt style |
 | Lints | `cargo clippy --workspace --all-targets -- -D warnings` | zero lints, code + tests + benches |
 | Build | `cargo build --workspace --all-targets` | full compilation |
-| Tests | `cargo test --workspace` | the entire suite |
+| Tests | `cargo test --workspace` | the entire suite, including doctests |
+| Rustdoc | `RUSTDOCFLAGS="-D warnings" cargo +stable doc --workspace --no-deps --locked` | authoritative public API docs; broken intra-doc links and rustdoc warnings fail |
 | Multi-arch | `cargo +nightly-2026-07-02 check --workspace --all-targets --features scirust-simd/nightly-simd --locked --target aarch64-unknown-linux-gnu` | type-checks stable NEON and nightly SVE/SME/dotprod/i8mm paths (without executing them; run `rustup +nightly-2026-07-02 target add aarch64-unknown-linux-gnu` once) |
 | Licenses/Security | `cargo deny check` | advisories, licenses, sources (`cargo install cargo-deny`) |
 
-CI exports `RUSTFLAGS="-D warnings"`: every warning is an error.
+CI exports `RUSTFLAGS="-D warnings"`: every compiler warning is an error.
+The workspace rustdoc gate additionally sets `RUSTDOCFLAGS="-D warnings"`, so
+broken intra-doc links and other rustdoc warnings are release-blocking.
 `--all-features` is deliberately forbidden: `blas-openblas` and `blas-mkl` are
 mutually exclusive `blas-src` backends.
 

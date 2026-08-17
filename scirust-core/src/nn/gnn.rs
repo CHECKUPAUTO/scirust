@@ -40,7 +40,7 @@ impl GCNLayer {
 
     /// Forward pass with adjacency matrix A (sparse or dense).
     /// H' = ReLU(A @ H @ W). For a hidden layer; the output layer should use
-    /// [`forward_with_adj_act`] with `apply_activation = false`.
+    /// [`Self::forward_with_adj_act`] with `apply_activation = false`.
     pub fn forward_with_adj<'t>(&mut self, tape: &'t Tape, h: Var<'t>, adj: Var<'t>) -> Var<'t> {
         self.forward_with_adj_act(tape, h, adj, true)
     }

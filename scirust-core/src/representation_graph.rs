@@ -17,7 +17,7 @@
 //!
 //! A realistic "compress, store, later aggregate" pipeline for positive
 //! sensor-style readings: encode each reading via a certified representation
-//! `R`, quantize/dequantize it (fixed at 64 levels, matching [CANR]'s own
+//! `R`, quantize/dequantize it (fixed at 64 levels, matching `CANR`'s own
 //! convention — the quantization *level count* is deliberately **not** a
 //! searched axis here, to keep this prototype narrow per the report's own
 //! recommendation), decode back to `f64`, narrow to `f32` (the
@@ -35,7 +35,7 @@
 //! ## Pre-registered kill criterion
 //!
 //! Written into this module *before* the benchmark below was run, per this
-//! research program's own established discipline ([TSA]/[ATRA]/[CANR]):
+//! research program's own established discipline (`TSA`/`ATRA`/`CANR`):
 //!
 //! > On held-out data, joint `(R, A)` search must reduce the relative error
 //! > versus the sequential baseline ([`sequential_baseline`]: certificate-
@@ -45,7 +45,7 @@
 //! > stagnation-prone — see `examples/anee_phase_c_prototype.rs`). If this
 //! > is not met, "distribution-aware joint (R,A) search beats sequential
 //! > per-axis selection" is **falsified for this task**, and this line is
-//! > closed exactly as [TSA]'s Γ-transform and [ATRA]'s
+//! > closed exactly as `TSA`'s Γ-transform and `ATRA`'s
 //! > hypercomplex-transform directions were closed.
 //!
 //! Results are reported honestly regardless of outcome — see the ANEE
@@ -264,7 +264,7 @@ pub fn two_hop_dictionary() -> Vec<RepresentationChoice> {
 /// prototype's plan cache stores, and the smallest useful instance of ANEE's
 /// general `(R,O,A,T,Q,M,H)` execution plan (ANEE §1.2): `O` (the aggregate
 /// operator is always "sum"), `T` (no separate transform stage), `Q` (fixed
-/// at [`QUANT_LEVELS`]), and `M` are held fixed by the task; `H` is a
+/// at `QUANT_LEVELS`), and `M` are held fixed by the task; `H` is a
 /// component of the cache key below, not a per-plan field.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Plan {
