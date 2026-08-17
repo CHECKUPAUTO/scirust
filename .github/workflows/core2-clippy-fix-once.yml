@@ -1,0 +1,72 @@
+name: Core2 Clippy fix once
+
+on:
+  pull_request:
+    branches: [master, main, develop]
+    types: [synchronize, opened, reopened]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  fix:
+    if: github.head_ref == 'core2-foundation-a-e' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: core2-foundation-a-e
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt, clippy
+      - name: Apply proven Clippy repairs
+        shell: python
+        run: |
+          from pathlib import Path
+
+          p = Path("scirust-tensor-core/src/general.rs")
+          text = p.read_text()
+
+          def replace_exact(old, new, expected=1):
+              global text
+              actual = text.count(old)
+              if actual != expected:
+                  raise SystemExit(f"expected {expected} occurrence(s) of {old!r}, found {actual}")
+              text = text.replace(old, new)
+
+          replace_exact(
+              "#[derive(Debug, Clone, PartialEq, Eq, Hash)]\npub enum TensorDevice {\n    Host,",
+              "#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]\npub enum TensorDevice {\n    #[default]\n    Host,",
+          )
+          replace_exact(
+              "\nimpl Default for TensorDevice {\n    fn default() -> Self {\n        Self::Host\n    }\n}\n",
+              "\n",
+          )
+          replace_exact(".chunks_exact(4)", ".chunks(4)")
+          replace_exact(
+              "if storage.len() % width != 0",
+              "if storage.len().checked_rem(width) != Some(0)",
+          )
+          p.write_text(text)
+      - name: Format and verify Clippy
+        run: |
+          set -euo pipefail
+          cargo +nightly-2026-07-02 fmt --all
+          cargo +nightly-2026-07-02 fmt --all -- --check
+          cargo +nightly-2026-07-02 clippy --workspace --all-targets --locked -- -D warnings
+      - name: Commit verified repairs and remove one-shot workflow
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/core2-clippy-fix-once.yml
+          git add scirust-tensor-core/src/general.rs
+          git diff --cached --check
+          git commit -m "fix(core2): satisfy strict Clippy"
+          git push origin HEAD:core2-foundation-a-e
