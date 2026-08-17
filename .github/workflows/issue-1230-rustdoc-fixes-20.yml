@@ -1,0 +1,44 @@
+name: Issue 1230 rustdoc fixes 20
+
+on:
+  push:
+    branches: [fix/issue-1230-workspace-rustdoc]
+    paths:
+      - ".github/workflows/issue-1230-rustdoc-fixes-20.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch-rustdoc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+      - name: Disambiguate FAB SVD rustdoc link
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('scirust-fab/src/pca.rs')
+          text = path.read_text()
+          old = '//! Repose sur [`scirust_solvers::linalg::svd`] (SVD de Jacobi à un côté,'
+          new = '//! Repose sur [`scirust_solvers::linalg::svd()`] (SVD de Jacobi à un côté,'
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one target line, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1))
+          PY
+      - name: Commit rustdoc fix
+        shell: bash
+        env:
+          HEAD_REF: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add scirust-fab/src/pca.rs
+          git diff --cached --check
+          git commit -m "docs(fab): disambiguate SVD rustdoc link"
+          git push origin "HEAD:${HEAD_REF}"
