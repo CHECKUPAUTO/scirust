@@ -88,6 +88,26 @@ jobs:
               "at [`QUANT_LEVELS`]),",
               "at `QUANT_LEVELS`),",
           )
+          replace_exact(
+              "scirust-srcc-bench/src/certified_pipeline.rs",
+              "[`SplitConformal`](crate::SplitConformal)",
+              "[`SplitConformal`]",
+          )
+          replace_exact(
+              "scirust-srcc-bench/src/certified_pipeline.rs",
+              "[`MondrianConformal`](crate::MondrianConformal)",
+              "[`MondrianConformal`]",
+          )
+          replace_exact(
+              "scirust-srcc-bench/src/tournament.rs",
+              "[`paired_bootstrap`](crate::paired::paired_bootstrap)",
+              "[`paired_bootstrap`]",
+          )
+          replace_exact(
+              "scirust-sciagent/src/generate.rs",
+              "[`sample_next`] so any decoder",
+              "`sample_next` so any decoder",
+          )
       - name: Verify strict workspace rustdoc
         run: cargo +stable doc --workspace --no-deps --locked
       - name: Commit verified repairs and remove one-shot workflow
@@ -101,7 +121,10 @@ jobs:
                   scirust-core/src/tensor/parity.rs \
                   scirust-core/src/formal_proof.rs \
                   scirust-core/src/lowprec.rs \
-                  scirust-core/src/representation_graph.rs
+                  scirust-core/src/representation_graph.rs \
+                  scirust-srcc-bench/src/certified_pipeline.rs \
+                  scirust-srcc-bench/src/tournament.rs \
+                  scirust-sciagent/src/generate.rs
           git diff --cached --check
           git commit -m "docs: repair strict workspace rustdoc links"
           git push origin HEAD:codex/gate-workspace-rustdoc
