@@ -46,7 +46,8 @@ struct DecodeWorkspace {
 pub enum CudaDecodeFfnMode {
     /// Existing cuBLASLt projection followed by the standalone SwiGLU kernel.
     CublasLt,
-    /// Decode-native gate/up GEMV with SwiGLU fused into the projection kernel.
+    /// Experimental decode-native gate/up GEMV with SwiGLU fused into the projection kernel.
+    /// This mode is not canonical unless it passes strict token/logit parity gates.
     FusedGemv,
 }
 
@@ -79,7 +80,7 @@ pub struct CudaDecodeModes {
 impl Default for CudaDecodeModes {
     fn default() -> Self {
         Self {
-            ffn: CudaDecodeFfnMode::FusedGemv,
+            ffn: CudaDecodeFfnMode::CublasLt,
             down: CudaDecodeDownMode::CublasLt,
             lm_head: CudaDecodeLmHeadMode::FusedArgmax,
         }
@@ -351,7 +352,7 @@ impl CudaDecodeModel {
                 pos,
                 &mut caches,
                 &mut workspace,
-                CudaDecodeFfnMode::FusedGemv,
+                CudaDecodeFfnMode::CublasLt,
                 CudaDecodeDownMode::CublasLt,
             );
         }
@@ -374,7 +375,7 @@ impl CudaDecodeModel {
                 pos,
                 &mut caches,
                 &mut workspace,
-                CudaDecodeFfnMode::FusedGemv,
+                CudaDecodeFfnMode::CublasLt,
                 CudaDecodeDownMode::CublasLt,
             );
             self.project_logits_resident(&mut workspace);
@@ -620,6 +621,14 @@ fn fuse_columns(parts: &[&Tensor]) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_modes_use_parity_canonical_cublas_ffn() {
+        let modes = CudaDecodeModes::default();
+        assert_eq!(modes.ffn, CudaDecodeFfnMode::CublasLt);
+        assert_eq!(modes.down, CudaDecodeDownMode::CublasLt);
+        assert_eq!(modes.lm_head, CudaDecodeLmHeadMode::FusedArgmax);
+    }
 
     #[test]
     fn fused_columns_preserve_row_major_order() {

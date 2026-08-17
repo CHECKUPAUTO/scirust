@@ -243,6 +243,34 @@ impl CudaModel {
         self.chain.concat_cols(&refs)
     }
 
+    /// Cached-prefill GQA with shape-invariant raw-score semantics.
+    ///
+    /// Projection, RoPE, GQA grouping, scale/mask, softmax and context are
+    /// unchanged from `attention`; only Q·K reduction uses the same strict
+    /// left-to-right fp32 order as cached one-token decode.
+    fn cached_attention_ltr(&self, q: &CudaMatrix, k: &CudaMatrix, v: &CudaMatrix) -> CudaMatrix {
+        let dh = self.d_model / self.n_heads;
+        let seq = q.rows();
+        let qr = self.rope_heads(q, self.n_heads, seq, 0);
+        let kr = self.rope_heads(k, self.n_kv_heads, seq, 0);
+        let repeat = self.n_heads / self.n_kv_heads;
+        let scale = 1.0 / (dh as f32).sqrt();
+        let mut heads = Vec::with_capacity(self.n_heads);
+        for head in 0..self.n_heads
+        {
+            let kv = head / repeat;
+            let qs = self.chain.slice_cols(&qr, head * dh, dh);
+            let ks = self.chain.slice_cols(&kr, kv * dh, dh);
+            let vs = self.chain.slice_cols(v, kv * dh, dh);
+            let scores = self.chain.attention_scores_ltr(&qs, &ks);
+            let scaled = self.chain.scale_causal_mask(&scores, scale, self.causal);
+            let weights = self.chain.softmax(&scaled);
+            heads.push(self.chain.attention_context(&weights, &vs));
+        }
+        let refs: Vec<&CudaMatrix> = heads.iter().collect();
+        self.chain.concat_cols(&refs)
+    }
+
     /// One GQA transformer block (pre-norm + residual, attention then SwiGLU MLP).
     fn block(&self, x: &CudaMatrix, b: &CudaBlock) -> CudaMatrix {
         let xn = self.chain.rms_norm(x, &b.norm1, self.eps);
@@ -401,7 +429,7 @@ impl CudaModel {
             let qs = ch.slice_cols(qr, head * dh, dh);
             let ks = ch.slice_cols(kcache, kv * dh, dh);
             let vs = ch.slice_cols(vcache, kv * dh, dh);
-            let scores = ch.matmul_bt(&qs, &ks);
+            let scores = ch.attention_scores_ltr(&qs, &ks);
             let scaled = ch.scale_causal_mask(&scores, scale, false);
             let weights = ch.softmax(&scaled);
             heads.push(ch.attention_context(&weights, &vs));
@@ -432,8 +460,8 @@ impl CudaModel {
             let q = ch.matmul(&xn, &b.wq);
             let k = ch.matmul(&xn, &b.wk);
             let v = ch.matmul(&xn, &b.wv);
-            let ctx = self.attention(&q, &k, &v);
-            // `attention` computes the same K RoPE internally; retain an identical
+            let ctx = self.cached_attention_ltr(&q, &k, &v);
+            // `cached_attention_ltr` computes the same K RoPE internally; retain an identical
             // resident copy here so future queries can attend without re-prefill.
             kcache[layer] = Some(self.rope_heads(&k, self.n_kv_heads, p, 0));
             vcache[layer] = Some(v);

@@ -136,12 +136,12 @@ fn main() {
 
     let fastest = CudaDecodeModes::default();
     let ffn_baseline = CudaDecodeModes {
-        ffn: CudaDecodeFfnMode::CublasLt,
+        ffn: CudaDecodeFfnMode::FusedGemv,
         down: CudaDecodeDownMode::CublasLt,
         lm_head: CudaDecodeLmHeadMode::FusedArgmax,
     };
     let lm_baseline = CudaDecodeModes {
-        ffn: CudaDecodeFfnMode::FusedGemv,
+        ffn: CudaDecodeFfnMode::CublasLt,
         down: CudaDecodeDownMode::CublasLt,
         lm_head: CudaDecodeLmHeadMode::FullLogits,
     };
@@ -151,7 +151,7 @@ fn main() {
         lm_head: CudaDecodeLmHeadMode::FullLogits,
     };
     let down_candidate = CudaDecodeModes {
-        ffn: CudaDecodeFfnMode::FusedGemv,
+        ffn: CudaDecodeFfnMode::CublasLt,
         down: CudaDecodeDownMode::TiledGemv,
         lm_head: CudaDecodeLmHeadMode::FusedArgmax,
     };
@@ -190,9 +190,25 @@ fn main() {
     let speedup = fast_tps / oracle_tps.max(1e-9);
     let target_met = fast_tps >= target_tps;
     let stretch_met = fast_tps >= stretch_tps;
+    let ffn_candidate_status = if ffn_parity
+    {
+        "parity-preserving"
+    }
+    else
+    {
+        "rejected-nonparity"
+    };
+    let down_candidate_status = if down_parity
+    {
+        "parity-preserving"
+    }
+    else
+    {
+        "rejected-nonparity"
+    };
 
     println!(
-        "SCIAGENT_I250_DECODE params={} prompt={} requested_new={} fast_mode=ffn_fused_gemv+lm_fused_argmax fast_seconds={:.6} fast_tok_s={:.3} ffn_baseline=cublaslt+lm_fused_argmax ffn_seconds={:.6} ffn_tok_s={:.3} ffn_gain={:.3} lm_baseline=ffn_fused_gemv+full_logits lm_seconds={:.6} lm_tok_s={:.3} lm_gain={:.3} dense_i250=cublaslt+full_logits dense_seconds={:.6} dense_tok_s={:.3} stack_gain={:.3} b49_seconds={:.6} b49_tok_s={:.3} speedup={:.3} generated_h2d_bytes_per_token=0 generated_d2h_bytes_per_token=0 final_readback_bytes={} target_tok_s={:.3} target_met={} stretch_tok_s={:.3} stretch_met={} parity={} ffn_parity={} lm_parity={} dense_parity={}",
+        "SCIAGENT_I250_DECODE params={} prompt={} requested_new={} fast_mode=ffn_cublaslt+lm_fused_argmax fast_seconds={:.6} fast_tok_s={:.3} ffn_candidate=fused_gemv+lm_fused_argmax ffn_seconds={:.6} ffn_tok_s={:.3} ffn_gain={:.3} lm_baseline=ffn_cublaslt+full_logits lm_seconds={:.6} lm_tok_s={:.3} lm_gain={:.3} dense_i250=cublaslt+full_logits dense_seconds={:.6} dense_tok_s={:.3} stack_gain={:.3} b49_seconds={:.6} b49_tok_s={:.3} speedup={:.3} generated_h2d_bytes_per_token=0 generated_d2h_bytes_per_token=0 final_readback_bytes={} target_tok_s={:.3} target_met={} stretch_tok_s={:.3} stretch_met={} parity={} ffn_candidate_parity={} lm_parity={} dense_parity={}",
         config.total_parameters(),
         prompt_len,
         max_new,
@@ -222,13 +238,19 @@ fn main() {
     );
 
     println!(
-        "SCIAGENT_I250_DOWN baseline_tok_s={:.3} tiled_tok_s={:.3} gain={:.3} seconds={:.6} parity={}",
-        fast_tps, down_tps, down_gain, down_seconds, down_parity
+        "SCIAGENT_I250_DOWN baseline_tok_s={:.3} tiled_tok_s={:.3} gain={:.3} seconds={:.6} parity={} status={}",
+        fast_tps, down_tps, down_gain, down_seconds, down_parity, down_candidate_status
+    );
+    println!(
+        "SCIAGENT_I250_CANDIDATES fused_ffn_parity={} fused_ffn_status={} tiled_down_parity={} tiled_down_status={}",
+        ffn_parity, ffn_candidate_status, down_parity, down_candidate_status
     );
 
-    if !parity || !ffn_parity || !lm_parity || !dense_parity || !down_parity
+    if !parity || !lm_parity || !dense_parity
     {
-        eprintln!("ERROR: an I250 A/B mode diverged from the B49 cached oracle");
+        eprintln!(
+            "ERROR: canonical I250 decode or canonical full-logits baseline diverged from the B49 cached oracle"
+        );
         std::process::exit(3);
     }
     if require_target && !target_met

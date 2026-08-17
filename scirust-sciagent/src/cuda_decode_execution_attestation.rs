@@ -232,7 +232,7 @@ mod tests {
     fn default_i250_modes_have_stable_semantic_identity() {
         assert_eq!(
             cuda_decode_kernel_semantic_version(CudaDecodeModes::default()),
-            KERNEL_FUSED_CUBLAS_FUSED
+            KERNEL_CUBLAS_CUBLAS_FUSED
         );
     }
 
