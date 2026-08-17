@@ -1,0 +1,53 @@
+name: Temporary exact rustdoc patch
+
+on:
+  push:
+    branches:
+      - codex/gate-workspace-rustdoc
+    paths:
+      - .github/workflows/_tmp_patch_rustdoc_grad.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: codex/gate-workspace-rustdoc
+          fetch-depth: 0
+      - name: Apply exact documentation-only replacements
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("scirust-simd/src/grad.rs")
+          text = path.read_text()
+          replacements = [
+              ("[`crate::fixed::conv2d::conv2d_transpose`]", "`crate::fixed::conv2d::conv2d_transpose`", 2),
+              ("[`crate::fixed::pool::max_pool1d`]", "`crate::fixed::pool::max_pool1d`", 1),
+              ("[`crate::fixed::pool::avg_pool1d`]", "`crate::fixed::pool::avg_pool1d`", 1),
+              ("[`crate::fixed::norm::batch_norm`]", "`crate::fixed::norm::batch_norm`", 2),
+              ("[`crate::fixed::norm::batch_norm_batched`]", "`crate::fixed::norm::batch_norm_batched`", 1),
+              ("[`crate::fixed::conv2d::conv2d`]", "`crate::fixed::conv2d::conv2d`", 1),
+              ("[`attention_backward`]", "`attention_backward`", 2),
+          ]
+          for old, new, expected in replacements:
+              count = text.count(old)
+              if count != expected:
+                  raise SystemExit(f"expected {expected} occurrence(s) of {old!r}, found {count}")
+              text = text.replace(old, new)
+          path.write_text(text)
+          PY
+          git diff --check
+          git diff -- scirust-simd/src/grad.rs
+      - name: Commit patch and remove temporary workflow
+        run: |
+          git rm .github/workflows/_tmp_patch_rustdoc_grad.yml
+          git add scirust-simd/src/grad.rs
+          git config user.name "scirust-rustdoc-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git commit -m "docs(simd): fix feature-gated gradient rustdoc links"
+          git push origin HEAD:codex/gate-workspace-rustdoc
