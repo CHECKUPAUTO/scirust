@@ -30,6 +30,7 @@ pub mod generative;
 pub mod gnn;
 pub mod guard;
 pub mod ibp;
+pub mod ibp_checked;
 pub mod im2col_hpc;
 pub mod init;
 pub mod intervals;
