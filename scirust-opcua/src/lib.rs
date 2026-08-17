@@ -276,7 +276,7 @@ impl SimulatedSensorState {
 const DEFAULT_SIM_SEED: u64 = 0x5C1A_0C4A_DEAD_BEEF_u64;
 
 impl SimulatedOpcuaClient {
-    /// Create a simulator seeded with [`DEFAULT_SIM_SEED`].
+    /// Create a simulator seeded with `DEFAULT_SIM_SEED`.
     pub fn new() -> Self {
         Self::with_seed(DEFAULT_SIM_SEED)
     }

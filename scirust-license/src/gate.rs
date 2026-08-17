@@ -1,4 +1,4 @@
-//! The [`module_gate!`] macro for defining a per-crate entitlement gate.
+//! The `module_gate!` macro for defining a per-crate entitlement gate.
 //!
 //! Every licensed crate gates access the same way: a zero-sized capability token
 //! whose only constructor requires verified [`Entitlements`](crate::Entitlements)

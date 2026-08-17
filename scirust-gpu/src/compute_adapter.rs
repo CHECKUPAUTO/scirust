@@ -260,7 +260,7 @@ impl ComputeBackend for CpuComputeAdapter {
     /// Executes a compiled Reference kernel synchronously.
     ///
     /// The binding ABI, access rules, byte layout and transactional ordering are
-    /// documented in [`crate::cpu_reference`]. Execution is fully serial and
+    /// documented in `crate::cpu_reference`. Execution is fully serial and
     /// completes before this returns, so the [`CpuEvent`] handed back is already
     /// finished — `wait` and `synchronize` therefore stay trivially correct. No
     /// thread and no asynchronous task is created.

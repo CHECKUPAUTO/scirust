@@ -505,7 +505,7 @@ const HARMONIC_TOL: f64 = 0.02;
 
 /// The harmonic index `k` of a line at `freq` relative to fundamental `f0`, or
 /// `None` when the line is not a bounded (`1 ≤ k ≤ `[`HARMONIC_MAX_INDEX`]) integer
-/// multiple within [`HARMONIC_TOL`]. Shared by [`harmonic_stack`] and the notch
+/// multiple within `HARMONIC_TOL`. Shared by [`harmonic_stack`] and the notch
 /// router so both agree on exactly which lines belong to a family.
 pub(crate) fn harmonic_index_of(freq: f64, f0: f64) -> Option<usize> {
     if !f0.is_finite() || f0 <= 0.0 || !freq.is_finite() || freq <= 0.0
@@ -546,8 +546,8 @@ pub(crate) fn harmonic_span(lines: &[SpectralLine], f0: f64) -> usize {
 /// Every line's frequency is tried as a candidate fundamental `f0`, and so is its
 /// half (`f0/2` recovers a stack whose fundamental was notched out or buried — the
 /// "missing fundamental": lines at 100 and 150 Hz share `f0 = 50`). For each
-/// candidate the lines matching an integer multiple within [`HARMONIC_TOL`] are
-/// grouped by their harmonic index ([`harmonic_index_of`]); the returned count is
+/// candidate the lines matching an integer multiple within `HARMONIC_TOL` are
+/// grouped by their harmonic index (`harmonic_index_of`); the returned count is
 /// the number of **distinct** harmonic indices hit.
 ///
 /// A candidate is only accepted when it clears three guards that keep unrelated
@@ -557,7 +557,7 @@ pub(crate) fn harmonic_span(lines: &[SpectralLine], f0: f64) -> usize {
 ///   at `k = 1` around one peak are one line, not a stack;
 /// * **a low harmonic present** (`min k ≤ 2`) — a real family includes its
 ///   fundamental or its octave, not only high harmonics that any small `f0` can fit;
-/// * **bounded `k`** ([`harmonic_index_of`]) — so a far-off line cannot be declared
+/// * **bounded `k`** (`harmonic_index_of`) — so a far-off line cannot be declared
 ///   the 39th harmonic of a signal remnant.
 ///
 /// Among the survivors the largest distinct-index count wins; ties prefer the

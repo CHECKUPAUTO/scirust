@@ -1,6 +1,6 @@
 //! Item 1 — monotone RUL: realizing the lever-1 C-MAPSS ceiling.
 //!
-//! Lever 1 ([`industrial-reframed-rul`]) lowered the C-MAPSS RUL *task ceiling*
+//! Lever 1 (`industrial-reframed-rul`) lowered the C-MAPSS RUL *task ceiling*
 //! by making the target piecewise-linear (capped at the `R_early = 125` knee),
 //! but the linear/robust regressors left that ceiling **unrealized** — a
 //! piecewise target that a purely affine model cannot bend to. This binary adds

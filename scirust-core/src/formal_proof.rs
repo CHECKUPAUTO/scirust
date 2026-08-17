@@ -91,7 +91,7 @@
 //! l'exécute). Les constantes f64 réellement utilisées par le code
 //! (`LN2_HI`/`LN2_LO`, `SQRT_2`) sont converties en leur valeur rationnelle
 //! **exacte** (tout f64 fini est un rationnel dyadique exact) via
-//! [`f64_to_exact_rational`] — zéro approximation sur ces constantes.
+//! `f64_to_exact_rational` — zéro approximation sur ces constantes.
 
 use num_bigint::BigInt;
 use num_rational::BigRational;
@@ -482,7 +482,7 @@ impl LnBoundProof {
 
 /// Preuve pour `ln_f64_core` (noyau de `ln_f32`), en deux cas couvrant
 /// ensemble tout `m ∈ (S/2, S]` (`S` = constante f64 `SQRT_2` réellement
-/// utilisée par le code, convertie EXACTEMENT via [`f64_to_exact_rational`]
+/// utilisée par le code, convertie EXACTEMENT via `f64_to_exact_rational`
 /// — pas une approximation citable de `√2`) :
 ///
 /// - **`e = 0`** (x proche de 1, m proche de 1) : `ln(x) = ln_m = 2·atanh(s)`

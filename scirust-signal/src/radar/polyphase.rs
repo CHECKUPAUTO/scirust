@@ -15,7 +15,7 @@
 //! - **Zadoff-Chu** — a constant-amplitude zero-autocorrelation (CAZAC) sequence,
 //!   perfect at *any* length for a root coprime to it (also used in LTE/5G).
 //!
-//! Built on the crate's [`Complex`](crate::complex::Complex); dependency-free.
+//! Built on the crate's [`Complex`]; dependency-free.
 
 use crate::complex::Complex;
 use std::f64::consts::PI;

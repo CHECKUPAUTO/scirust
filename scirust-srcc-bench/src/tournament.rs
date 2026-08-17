@@ -19,7 +19,7 @@
 //! # The five outcomes
 //!
 //! Every comparison is a seeded paired bootstrap (reusing
-//! [`paired_bootstrap`](crate::paired::paired_bootstrap)) over the per-unit score
+//! [`paired_bootstrap`]) over the per-unit score
 //! differences, so each verdict rests on an interval, not a point estimate.
 //!
 //! - [`TournamentDecision::Select`] — exactly one candidate defensibly beats the
