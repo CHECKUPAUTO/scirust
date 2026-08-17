@@ -120,7 +120,7 @@ impl std::error::Error for EnvelopeError {}
 /// Per-axis calibration statistics for envelope gating.
 ///
 /// `scale` is the per-axis *population* standard deviation (denominator `n`,
-/// matching the reference) with the [`SCALE_FLOOR`] substitution for
+/// matching the reference) with the `SCALE_FLOOR` substitution for
 /// effectively constant axes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TrainingEnvelope {
