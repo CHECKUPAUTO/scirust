@@ -21,7 +21,7 @@
 //! « par défaut » matériau/procédé n'est inventée. La température et la vitesse de
 //! déformation ne sont pas modélisées : la contrainte d'écoulement passée doit déjà
 //! correspondre aux conditions réelles (à chaud ou à froid). Distinct de
-//! [`crate::blanking_force`] (découpage) et de [`crate::broaching`] (usinage).
+//! [`crate::blanking_force()`] (découpage) et de [`crate::broaching`] (usinage).
 
 /// Contrainte d'écoulement selon la loi de Hollomon `σf = K · ε^n`.
 ///
