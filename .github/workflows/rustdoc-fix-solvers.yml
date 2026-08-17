@@ -1,0 +1,61 @@
+name: Rustdoc fix scirust-solvers
+
+on:
+  push:
+    branches:
+      - codex/gate-workspace-rustdoc
+    paths:
+      - .github/workflows/rustdoc-fix-solvers.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: codex/gate-workspace-rustdoc
+          fetch-depth: 0
+      - name: Fix scirust-solvers strict rustdoc links
+        shell: python
+        run: |
+          from pathlib import Path
+
+          edits = {
+              Path('scirust-solvers/src/polynomial/roots.rs'): [
+                  ('[`tests::degree_5`]', '`tests::degree_5`'),
+              ],
+              Path('scirust-solvers/src/linalg/bicgstab.rs'): [
+                  ('[`crate::linalg::gmres`]', '[`crate::linalg::gmres()`]'),
+              ],
+              Path('scirust-solvers/src/linalg/randomized_svd.rs'): [
+                  ('[`crate::linalg::svd`]', '[`crate::linalg::svd()`]'),
+              ],
+              Path('scirust-solvers/src/linalg/rng.rs'): [
+                  ('[`super::randomized_svd`]', '[`super::randomized_svd()`]'),
+              ],
+          }
+
+          for path, replacements in edits.items():
+              text = path.read_text()
+              for old, new in replacements:
+                  count = text.count(old)
+                  if count != 1:
+                      raise SystemExit(f'{path}: expected one {old!r}, found {count}')
+                  text = text.replace(old, new)
+              path.write_text(text)
+      - name: Commit fixes and remove temporary workflow
+        shell: bash
+        run: |
+          rm .github/workflows/rustdoc-fix-solvers.yml
+          git config user.name "CHECKUPAUTO"
+          git config user.email "194770978+CHECKUPAUTO@users.noreply.github.com"
+          git add scirust-solvers/src/polynomial/roots.rs \
+                  scirust-solvers/src/linalg/bicgstab.rs \
+                  scirust-solvers/src/linalg/randomized_svd.rs \
+                  scirust-solvers/src/linalg/rng.rs \
+                  .github/workflows/rustdoc-fix-solvers.yml
+          git commit -m "docs: fix scirust-solvers strict rustdoc links"
+          git push origin HEAD:codex/gate-workspace-rustdoc
