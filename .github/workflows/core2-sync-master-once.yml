@@ -1,0 +1,40 @@
+name: Core2 sync master once
+
+on:
+  pull_request:
+    branches: [master, main, develop]
+    types: [synchronize, opened, reopened]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  sync:
+    if: github.head_ref == 'core2-foundation-a-e' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: core2-foundation-a-e
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt
+      - name: Merge current master into Core2
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git fetch origin master
+          git merge --no-edit origin/master
+          cargo +nightly-2026-07-02 fmt --all -- --check
+      - name: Remove one-shot workflow and push synchronized branch
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/core2-sync-master-once.yml
+          git commit -m "ci: remove Core2 master-sync helper"
+          git push origin HEAD:core2-foundation-a-e
