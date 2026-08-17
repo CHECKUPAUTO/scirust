@@ -7,7 +7,7 @@ on:
       - "scirust-sciagent/src/optimization_agent/**"
       - "scirust-sciagent/src/bin/sciagent-optimize.rs"
       - "scirust-sciagent/examples/optimization_tasks/**"
-      - "scripts/sciagent-opt-smoke.sh"
+      - "scripts/sciagent-opt-*.sh"
       - "docs/SCIAGENT_OPTIMIZATION_LOOP.md"
       - ".github/workflows/sciagent-optimization-loop.yml"
   workflow_dispatch:
