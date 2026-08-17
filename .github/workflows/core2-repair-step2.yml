@@ -1,0 +1,68 @@
+name: Core2 repair step 2
+
+on:
+  pull_request:
+    branches: [master, main, develop]
+    types: [synchronize, opened, reopened]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  fix:
+    if: github.head_ref == 'core2-foundation-a-e' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: core2-foundation-a-e
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt, clippy
+      - name: Reapply validated repairs and remove accidental JIT Debug bound
+        shell: python
+        run: |
+          import base64
+          import re
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/core2-clippy-fix-once.yml').read_text()
+          match = re.search(r"printf '%s' '([A-Za-z0-9+/=]+)' \| base64 -d > /tmp/core2_fix\.py", workflow)
+          if not match:
+              raise SystemExit('cannot recover validated Core2 repair payload')
+          exec(compile(base64.b64decode(match.group(1)), '/tmp/core2_fix.py', 'exec'))
+
+          jit = Path('scirust-tensor-runtime/src/jit.rs')
+          text = jit.read_text()
+          old = "#[derive(Debug)]\npub struct ReferenceJitSession<B: ComputeBackend> {"
+          new = "pub struct ReferenceJitSession<B: ComputeBackend> {"
+          if text.count(old) != 1:
+              raise SystemExit('unexpected ReferenceJitSession declaration')
+          jit.write_text(text.replace(old, new))
+      - name: Verify formatting and strict Clippy
+        run: |
+          set -euo pipefail
+          cargo +nightly-2026-07-02 fmt --all
+          cargo +nightly-2026-07-02 fmt --all -- --check
+          cargo +nightly-2026-07-02 clippy --workspace --all-targets --locked -- -D warnings
+      - name: Verify stable workspace build
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal
+          cargo +stable build --workspace --all-targets --locked
+      - name: Commit verified repairs and remove temporary workflows
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/core2-clippy-fix-once.yml .github/workflows/core2-repair-step2.yml
+          git add -A
+          git diff --cached --check
+          git commit -m "fix(core2): satisfy strict CI through JIT runtime"
+          git push origin HEAD:core2-foundation-a-e
