@@ -1,0 +1,102 @@
+name: Rustdoc debt fix step 7
+
+on:
+  pull_request:
+    branches: [master, main, develop]
+    types: [synchronize, opened, reopened]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUSTDOCFLAGS: "-D warnings"
+
+jobs:
+  fix:
+    if: github.head_ref == 'codex/gate-workspace-rustdoc' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: codex/gate-workspace-rustdoc
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: stable
+      - name: Reapply validated repairs and fix signal documentation
+        shell: python
+        run: |
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/rustdoc-fix-step6.yml').read_text()
+          marker = '      - name: Reapply all validated repairs and multivariate fix\n        shell: python\n        run: |\n'
+          start = workflow.index(marker) + len(marker)
+          end = workflow.index('      - name: Verify strict workspace rustdoc\n', start)
+          lines = workflow[start:end].splitlines()
+          script = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines)
+          exec(compile(script, '<validated-rustdoc-repairs-step6>', 'exec'))
+
+          def replace_exact(path, old, new, expected=1):
+              p = Path(path)
+              text = p.read_text()
+              actual = text.count(old)
+              if actual != expected:
+                  raise SystemExit(f'{path}: expected {expected} occurrence(s) of {old!r}, found {actual}')
+              p.write_text(text.replace(old, new))
+
+          replace_exact(
+              'scirust-events-core/src/episodic.rs',
+              '[`crate::EventRuntime`](scirust_events_runtime::EventRuntime)',
+              '`scirust_events_runtime::EventRuntime`',
+          )
+
+          replace_exact('scirust-signal/src/denoise/block.rs', '[`LAMBDA`]', '`LAMBDA`')
+          replace_exact('scirust-signal/src/denoise/collab.rs', '[`super::mirror_index`]', '`super::mirror_index`')
+          replace_exact('scirust-signal/src/denoise/collab.rs', '[`HARD_THRESHOLD_FACTOR`]', '`HARD_THRESHOLD_FACTOR`')
+          replace_exact('scirust-signal/src/denoise/collab.rs', '[`super::estimate_noise_std_helper`]', '`super::estimate_noise_std_helper`', expected=2)
+          replace_exact('scirust-signal/src/denoise/detect.rs', '[`HARMONIC_TOL`]', '`HARMONIC_TOL`')
+          replace_exact('scirust-signal/src/denoise/detect.rs', '[`harmonic_index_of`]', '`harmonic_index_of`', expected=2)
+          replace_exact('scirust-signal/src/denoise/multichannel.rs', '[`super::mirror_index`]', '`super::mirror_index`')
+          replace_exact('scirust-signal/src/denoise/multichannel.rs', '[`super::estimate_noise_std_helper`]', '`super::estimate_noise_std_helper`')
+          replace_exact('scirust-signal/src/denoise/nlm.rs', '[`super::estimate_noise_std_helper`]', '`super::estimate_noise_std_helper`')
+          replace_exact('scirust-signal/src/denoise/nlm.rs', '[`mirror_extend`]', '`mirror_extend`')
+          replace_exact('scirust-signal/src/denoise/nlm.rs', '[`sum_sq_diff`]', '`sum_sq_diff`')
+          replace_exact('scirust-signal/src/denoise/nlm.rs', '[`patch_dist_reference`]', '`patch_dist_reference`')
+          replace_exact('scirust-signal/src/denoise/streaming.rs', '[`super::estimate_noise_std_helper`]', '`super::estimate_noise_std_helper`')
+          replace_exact('scirust-signal/src/denoise/streaming.rs', '[`sum_sq_diff`]', '`sum_sq_diff`')
+          replace_exact('scirust-signal/src/radar/vi_cfar.rs', '[`MAX_PRACTICAL_REFERENCE_CELLS`]', '`MAX_PRACTICAL_REFERENCE_CELLS`')
+
+          for path in [
+              'scirust-signal/src/features/spectral.rs',
+              'scirust-signal/src/radar/interferometer.rs',
+              'scirust-signal/src/radar/polyphase.rs',
+              'scirust-signal/src/radar/sar.rs',
+              'scirust-signal/src/radar/stap.rs',
+          ]:
+              replace_exact(path, '[`Complex`](crate::complex::Complex)', '[`Complex`]')
+
+          replace_exact(
+              'scirust-signal/src/radar/micro_doppler.rs',
+              '[`fft`](crate::fft)',
+              '[`fft`](crate::fft())',
+          )
+      - name: Verify strict workspace rustdoc
+        run: cargo +stable doc --workspace --no-deps --locked
+      - name: Commit verified repairs and remove temporary workflows
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/rustdoc-fix-once.yml \
+                 .github/workflows/rustdoc-fix-step2.yml \
+                 .github/workflows/rustdoc-fix-step3.yml \
+                 .github/workflows/rustdoc-fix-step4.yml \
+                 .github/workflows/rustdoc-fix-step5.yml \
+                 .github/workflows/rustdoc-fix-step6.yml \
+                 .github/workflows/rustdoc-fix-step7.yml
+          git add -A
+          git diff --cached --check
+          git commit -m "docs: repair strict workspace rustdoc links"
+          git push origin HEAD:codex/gate-workspace-rustdoc
