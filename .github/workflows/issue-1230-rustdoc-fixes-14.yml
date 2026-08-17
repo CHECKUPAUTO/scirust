@@ -1,0 +1,101 @@
+name: Issue 1230 rustdoc fixes 14
+
+on:
+  push:
+    branches: [fix/issue-1230-workspace-rustdoc]
+    paths:
+      - ".github/workflows/issue-1230-rustdoc-fixes-14.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch-rustdoc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+      - name: Fix scirust-signal rustdoc debt batch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path('scirust-signal/src')
+          replacements = {
+              '[`LAMBDA`]': '`LAMBDA`',
+              '[`super::mirror_index`]': '`super::mirror_index`',
+              '[`HARD_THRESHOLD_FACTOR`]': '`HARD_THRESHOLD_FACTOR`',
+              '[`super::estimate_noise_std_helper`]': '`super::estimate_noise_std_helper`',
+              '[`HARMONIC_TOL`]': '`HARMONIC_TOL`',
+              '[`harmonic_index_of`]': '`harmonic_index_of`',
+              '[`mirror_extend`]': '`mirror_extend`',
+              '[`sum_sq_diff`]': '`sum_sq_diff`',
+              '[`patch_dist_reference`]': '`patch_dist_reference`',
+              '[`MAX_PRACTICAL_REFERENCE_CELLS`]': '`MAX_PRACTICAL_REFERENCE_CELLS`',
+              '[`Complex`](crate::complex::Complex)': '[`Complex`]',
+          }
+
+          changed = []
+          totals = {old: 0 for old in replacements}
+          for path in sorted(root.rglob('*.rs')):
+              text = path.read_text()
+              original = text
+              for old, new in replacements.items():
+                  count = text.count(old)
+                  if count:
+                      totals[old] += count
+                      text = text.replace(old, new)
+              if path.as_posix() == 'scirust-signal/src/radar/micro_doppler.rs':
+                  old = '[`fft`](crate::fft)'
+                  count = text.count(old)
+                  if count != 1:
+                      raise SystemExit(f'{path}: expected one ambiguous fft link, found {count}')
+                  text = text.replace(old, '[`fft`](crate::fft())', 1)
+              if text != original:
+                  path.write_text(text)
+                  changed.append(path.as_posix())
+
+          required = {
+              '[`LAMBDA`]': 1,
+              '[`super::mirror_index`]': 2,
+              '[`HARD_THRESHOLD_FACTOR`]': 1,
+              '[`super::estimate_noise_std_helper`]': 5,
+              '[`HARMONIC_TOL`]': 1,
+              '[`harmonic_index_of`]': 2,
+              '[`mirror_extend`]': 1,
+              '[`sum_sq_diff`]': 2,
+              '[`patch_dist_reference`]': 1,
+              '[`MAX_PRACTICAL_REFERENCE_CELLS`]': 1,
+          }
+          for token, minimum in required.items():
+              if totals[token] < minimum:
+                  raise SystemExit(f'{token}: expected at least {minimum}, found {totals[token]}')
+
+          if totals['[`Complex`](crate::complex::Complex)'] < 5:
+              raise SystemExit(
+                  'Complex explicit targets: expected at least 5, found '
+                  + str(totals['[`Complex`](crate::complex::Complex)'])
+              )
+
+          print('changed_files=', len(changed))
+          for path in changed:
+              print(path)
+          for token, count in totals.items():
+              if count:
+                  print(f'{token} => {count}')
+          PY
+      - name: Commit rustdoc fixes
+        shell: bash
+        env:
+          HEAD_REF: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add scirust-signal/src
+          git diff --cached --check
+          git commit -m "docs(signal): fix rustdoc links exposed by workspace gate"
+          git push origin "HEAD:${HEAD_REF}"
