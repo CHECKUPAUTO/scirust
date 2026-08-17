@@ -1,0 +1,72 @@
+name: Rustdoc debt fix step 10
+
+on:
+  pull_request:
+    branches: [master, main, develop]
+    types: [synchronize, opened, reopened]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUSTDOCFLAGS: "-D warnings"
+
+jobs:
+  fix:
+    if: github.head_ref == 'codex/gate-workspace-rustdoc' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: codex/gate-workspace-rustdoc
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: stable
+      - name: Reapply all validated repairs and nonlocal-relativity fixes
+        shell: python
+        run: |
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/rustdoc-fix-step9.yml').read_text()
+          marker = '      - name: Reapply all validated repairs and algogen fix\n        shell: python\n        run: |\n'
+          start = workflow.index(marker) + len(marker)
+          end = workflow.index('      - name: Verify strict workspace rustdoc\n', start)
+          lines = workflow[start:end].splitlines()
+          script = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines)
+          exec(compile(script, '<validated-rustdoc-repairs-step9>', 'exec'))
+
+          def replace_all(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              actual = text.count(old)
+              if actual == 0:
+                  raise SystemExit(f'{path}: expected at least one occurrence of {old!r}')
+              p.write_text(text.replace(old, new))
+
+          replace_all('scirust-nonlocal-relativity/src/geometric_error.rs', '[`map_tetrad_error`]', '`map_tetrad_error`')
+          replace_all('scirust-nonlocal-relativity/src/transport.rs', '[`HistoryBackend::push_velocity`]', '`HistoryBackend::push_velocity`')
+          replace_all('scirust-nonlocal-relativity/src/transport.rs', '[`HistoryBackend::push_entry`]', '`HistoryBackend::push_entry`')
+      - name: Verify strict workspace rustdoc
+        run: cargo +stable doc --workspace --no-deps --locked
+      - name: Commit verified repairs and remove temporary workflows
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/rustdoc-fix-once.yml \
+                 .github/workflows/rustdoc-fix-step2.yml \
+                 .github/workflows/rustdoc-fix-step3.yml \
+                 .github/workflows/rustdoc-fix-step4.yml \
+                 .github/workflows/rustdoc-fix-step5.yml \
+                 .github/workflows/rustdoc-fix-step6.yml \
+                 .github/workflows/rustdoc-fix-step7.yml \
+                 .github/workflows/rustdoc-fix-step8.yml \
+                 .github/workflows/rustdoc-fix-step9.yml \
+                 .github/workflows/rustdoc-fix-step10.yml
+          git add -A
+          git diff --cached --check
+          git commit -m "docs: repair strict workspace rustdoc links"
+          git push origin HEAD:codex/gate-workspace-rustdoc
