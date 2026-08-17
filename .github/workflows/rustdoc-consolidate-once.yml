@@ -1,0 +1,44 @@
+name: Consolidate verified rustdoc repairs
+
+on:
+  pull_request:
+    branches: [master, main, develop]
+    types: [synchronize, opened, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  consolidate:
+    if: github.head_ref == 'codex/gate-workspace-rustdoc' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: codex/gate-workspace-rustdoc
+          fetch-depth: 0
+      - name: Apply every verified rustdoc repair
+        shell: python
+        run: |
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/rustdoc-fix-step13.yml').read_text()
+          marker = '      - name: Reapply all validated repairs and relativity fixes\n        shell: python\n        run: |\n'
+          start = workflow.index(marker) + len(marker)
+          end = workflow.index('      - name: Verify strict workspace rustdoc\n', start)
+          lines = workflow[start:end].splitlines()
+          script = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines)
+          exec(compile(script, '<all-verified-rustdoc-repairs>', 'exec'))
+      - name: Commit repairs and remove temporary repair workflows
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          rm -f .github/workflows/rustdoc-fix-once.yml
+          rm -f .github/workflows/rustdoc-fix-step{2..13}.yml
+          rm -f .github/workflows/rustdoc-consolidate-once.yml
+          git add -A
+          git diff --cached --check
+          git commit -m "docs: repair strict workspace rustdoc links"
+          git push origin HEAD:codex/gate-workspace-rustdoc
