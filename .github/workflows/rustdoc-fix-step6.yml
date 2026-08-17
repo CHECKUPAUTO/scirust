@@ -1,0 +1,64 @@
+name: Rustdoc debt fix step 6
+
+on:
+  pull_request:
+    branches: [master, main, develop]
+    types: [synchronize, opened, reopened]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUSTDOCFLAGS: "-D warnings"
+
+jobs:
+  fix:
+    if: github.head_ref == 'codex/gate-workspace-rustdoc' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: codex/gate-workspace-rustdoc
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: stable
+      - name: Reapply all validated repairs and multivariate fix
+        shell: python
+        run: |
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/rustdoc-fix-step5.yml').read_text()
+          marker = '      - name: Reapply all validated repairs and multihost proof fix\n        shell: python\n        run: |\n'
+          start = workflow.index(marker) + len(marker)
+          end = workflow.index('      - name: Verify strict workspace rustdoc\n', start)
+          lines = workflow[start:end].splitlines()
+          script = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines)
+          exec(compile(script, '<validated-rustdoc-repairs-step5>', 'exec'))
+
+          path = Path('scirust-multivariate/src/envelope.rs')
+          text = path.read_text()
+          old = '[`SCALE_FLOOR`]'
+          new = '`SCALE_FLOOR`'
+          if text.count(old) != 1:
+              raise SystemExit(f'unexpected SCALE_FLOOR link count: {text.count(old)}')
+          path.write_text(text.replace(old, new))
+      - name: Verify strict workspace rustdoc
+        run: cargo +stable doc --workspace --no-deps --locked
+      - name: Commit verified repairs and remove temporary workflows
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/rustdoc-fix-once.yml \
+                 .github/workflows/rustdoc-fix-step2.yml \
+                 .github/workflows/rustdoc-fix-step3.yml \
+                 .github/workflows/rustdoc-fix-step4.yml \
+                 .github/workflows/rustdoc-fix-step5.yml \
+                 .github/workflows/rustdoc-fix-step6.yml
+          git add -A
+          git diff --cached --check
+          git commit -m "docs: repair strict workspace rustdoc links"
+          git push origin HEAD:codex/gate-workspace-rustdoc
