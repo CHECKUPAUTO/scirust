@@ -30,4 +30,20 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Build authoritative workspace rustdoc
-        run: cargo +stable doc --workspace --no-deps --locked
+        shell: bash
+        run: |
+          set +e
+          cargo +stable doc --workspace --no-deps --locked >rustdoc.log 2>&1
+          status=$?
+          cat rustdoc.log
+          if [ "$status" -ne 0 ]; then
+            {
+              echo "### Workspace rustdoc failure"
+              echo '```text'
+              tail -n 80 rustdoc.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            diagnostic=$(tail -n 60 rustdoc.log | tr '\n' ' ' | sed 's/%/%25/g; s/\r/%0D/g')
+            echo "::error title=Workspace rustdoc failed::$diagnostic"
+          fi
+          exit "$status"
