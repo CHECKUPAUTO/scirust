@@ -39,6 +39,7 @@ pub mod gpu;
 pub mod inference;
 pub mod model;
 pub mod norm;
+pub mod optimization_agent;
 pub mod planning;
 pub mod quantize;
 pub mod route_b_execution_attestation;
