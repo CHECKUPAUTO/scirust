@@ -1,0 +1,69 @@
+name: Issue 1230 solvers rustdoc fix
+
+on:
+  push:
+    branches: [fix/issue-1230-workspace-rustdoc]
+    paths:
+      - ".github/workflows/issue-1230-solvers-rustdoc-fix.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'ci: stage solvers rustdoc fix'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+      - name: Fix scirust-solvers rustdoc links
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          fixes = {
+              Path('scirust-solvers/src/polynomial/roots.rs'): [
+                  ('//! [`tests::degree_5`]).', '//! le test de régression `degree_5`).'),
+              ],
+              Path('scirust-solvers/src/linalg/bicgstab.rs'): [
+                  ('//! [`crate::linalg::gmres`] pour les grands systèmes creux où stocker la',
+                   '//! [`crate::linalg::gmres()`] pour les grands systèmes creux où stocker la'),
+              ],
+              Path('scirust-solvers/src/linalg/randomized_svd.rs'): [
+                  ('//!    [`crate::linalg::svd`] (Jacobi à un côté, déjà déterministe).',
+                   '//!    [`crate::linalg::svd()`] (Jacobi à un côté, déjà déterministe).'),
+              ],
+              Path('scirust-solvers/src/linalg/rng.rs'): [
+                  ('//! aléatoire ([`super::randomized_svd`]) sans dépendre de la crate `rand`',
+                   '//! aléatoire ([`super::randomized_svd()`]) sans dépendre de la crate `rand`'),
+              ],
+          }
+
+          for path, replacements in fixes.items():
+              text = path.read_text()
+              for old, new in replacements:
+                  count = text.count(old)
+                  if count != 1:
+                      raise SystemExit(f'{path}: expected exactly one {old!r}, found {count}')
+                  text = text.replace(old, new, 1)
+              path.write_text(text)
+          PY
+      - name: Commit fixes and remove helper
+        shell: bash
+        env:
+          HEAD_REF: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add scirust-solvers/src/polynomial/roots.rs \
+                  scirust-solvers/src/linalg/bicgstab.rs \
+                  scirust-solvers/src/linalg/randomized_svd.rs \
+                  scirust-solvers/src/linalg/rng.rs
+          git rm .github/workflows/issue-1230-solvers-rustdoc-fix.yml
+          git diff --cached --check
+          git commit -m "docs(solvers): fix stable rustdoc links"
+          git push origin "HEAD:${HEAD_REF}"
