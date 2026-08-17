@@ -4,6 +4,7 @@
 #![forbid(unsafe_code)]
 
 mod backend;
+mod backend_layers;
 mod binding;
 mod capabilities;
 mod device;
@@ -30,6 +31,9 @@ mod topology_provider;
 mod workspace;
 
 pub use backend::ComputeBackend;
+pub use backend_layers::{
+    BackendAllocator, BackendCompiler, BackendExecutor, BackendIntrospection, BackendRuntime,
+};
 pub use binding::{BufferAccess, BufferBinding};
 pub use capabilities::DeviceCapabilities;
 pub use device::{DeviceId, DeviceKind};

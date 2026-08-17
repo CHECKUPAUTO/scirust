@@ -43,29 +43,58 @@ impl Scalar {
 }
 
 /// One canonical tensor operation.
-///
-/// Constants are referenced externally through [`ConstantId`]; tensor payloads
-/// are deliberately not embedded in the graph.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Operation {
-    Input { name: String },
-    Constant { id: ConstantId },
+    Input {
+        name: String,
+    },
+    Constant {
+        id: ConstantId,
+    },
 
     Add,
     Sub,
     Mul,
     Div,
-    Scale { factor: Scalar },
+    Scale {
+        factor: Scalar,
+    },
 
     Relu,
     Exp,
     Log,
+    /// `cotangent * 1(primal > 0)`.
+    ReluGrad,
+    ZerosLike,
+    OnesLike,
 
+    /// Rank-2 matrix product.
     MatMul,
+    /// Matrix product over the last two dimensions, preserving an identical
+    /// batch prefix. This is the canonical lowering target of `vmap(MatMul)`.
+    BatchMatMul,
 
-    Reshape { shape: Shape },
-    Transpose { permutation: Vec<usize> },
+    Reshape {
+        shape: Shape,
+    },
+    Transpose {
+        permutation: Vec<usize>,
+    },
+    /// NumPy-style right-aligned zero-stride broadcast in the value model.
+    BroadcastTo {
+        shape: Shape,
+    },
+    /// Sum broadcasted axes so the result has exactly `shape`.
+    ReduceSumTo {
+        shape: Shape,
+    },
+
+    /// Identity in the primal program and a barrier to differentiation.
+    StopGradient,
+    /// Identity marker declaring that intermediates may be recomputed instead
+    /// of retained by a future execution planner.
+    Checkpoint,
 }
 
 impl Operation {
@@ -78,10 +107,22 @@ impl Operation {
             | Self::Exp
             | Self::Log
             | Self::Scale { .. }
+            | Self::ZerosLike
+            | Self::OnesLike
             | Self::Reshape { .. }
-            | Self::Transpose { .. } => 1,
+            | Self::Transpose { .. }
+            | Self::BroadcastTo { .. }
+            | Self::ReduceSumTo { .. }
+            | Self::StopGradient
+            | Self::Checkpoint => 1,
 
-            Self::Add | Self::Sub | Self::Mul | Self::Div | Self::MatMul => 2,
+            Self::Add
+            | Self::Sub
+            | Self::Mul
+            | Self::Div
+            | Self::MatMul
+            | Self::BatchMatMul
+            | Self::ReluGrad => 2,
         }
     }
 }
