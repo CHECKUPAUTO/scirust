@@ -15,7 +15,7 @@
 //!   extension à `stride > 1` suivrait le même schéma de dispersion pour
 //!   `dX`, limite documentée plutôt qu'une lacune silencieuse). `dX` est
 //!   dispersée exactement comme l'adjointe de la convolution
-//!   ([`crate::fixed::conv2d::conv2d_transpose`], son pendant virgule fixe
+//!   (`crate::fixed::conv2d::conv2d_transpose`, son pendant virgule fixe
 //!   déterministe) ; `dW` est une corrélation croisée entre `X` et `dY` ;
 //!   `db` somme `dY` sur les positions spatiales.
 //! * **`max_pool2d_backward`**, **`avg_pool2d_backward`** — `dY` est routée
@@ -29,11 +29,11 @@
 //!   qu'image. `conv1d_backward` partage la même limite **stride 1** que
 //!   `conv2d_backward` (même remarque de portée) ; les deux backward de
 //!   pooling 1D héritent en revanche du `stride` général de leurs `forward`
-//!   ([`crate::fixed::pool::max_pool1d`]/[`crate::fixed::pool::avg_pool1d`]),
+//!   (`crate::fixed::pool::max_pool1d`/`crate::fixed::pool::avg_pool1d`),
 //!   comme leurs pendants 2D.
 //! * **`batch_norm_backward`** — BatchNorm **entraînement** : la
 //!   moyenne/variance de chaque canal sont recalculées sur le lot courant,
-//!   à la différence de [`crate::fixed::norm::batch_norm`] (inférence,
+//!   à la différence de `crate::fixed::norm::batch_norm` (inférence,
 //!   statistiques figées `running_mean`/`running_var`). Même forme
 //!   fermée que `layernorm_backward` (réduction à travers une statistique
 //!   partagée), mais réduite sur les `batch·spatial` éléments **dispersés**
@@ -51,7 +51,7 @@
 //! d'entropie croisée fusionne softmax + log-vraisemblance négative en une
 //! seule passe stable (`log-sum-exp`, soustraction du maximum de ligne avant
 //! `exp`) plutôt que de chaîner [`softmax_backward`] (conservée telle quelle
-//! pour [`attention_backward`]) : le gradient combiné `softmax(x) − one_hot`
+//! pour `attention_backward`) : le gradient combiné `softmax(x) − one_hot`
 //! évite l'instabilité numérique d'une jacobienne softmax explicite.
 //!
 //! Tous les gradients sont **vérifiés par différences finies centrées**
@@ -393,7 +393,7 @@ pub fn attention_backward(
 /// 1** : `Y = conv2d(X, W) + b` (cf. en-tête de module pour la limite au
 /// stride 1). `X` : `in_channels×height×width` ; `W` :
 /// `out_channels×in_channels×kernel_h×kernel_w` (convention PyTorch
-/// `Conv2d`, comme [`crate::fixed::conv2d::conv2d`]) ; `b`/`db` :
+/// `Conv2d`, comme `crate::fixed::conv2d::conv2d`) ; `b`/`db` :
 /// `out_channels` ; `dY` : `out_channels×height_out×width_out`
 /// (`height_out = height − kernel_h + 1`, idem largeur).
 ///
@@ -772,12 +772,12 @@ pub fn avg_pool1d_backward(
 }
 
 /// Backward de BatchNorm **entraînement** (cf. en-tête de module pour la
-/// distinction avec [`crate::fixed::norm::batch_norm`], inférence) :
+/// distinction avec `crate::fixed::norm::batch_norm`, inférence) :
 /// `y[b,c,s] = (x[b,c,s] − μ_c)/√(σ²_c+eps)·γ_c + β_c`, où `μ_c`/`σ²_c`
 /// (variance **biaisée**) sont la moyenne/variance du canal `c` sur les
 /// `N = batch·spatial` éléments `x[:,c,:]`. `x`/`dy`/`dx` :
 /// `batch × channels × spatial` (même convention que
-/// [`crate::fixed::norm::batch_norm_batched`]) ; `gamma`/`dgamma`/`dbeta` :
+/// `crate::fixed::norm::batch_norm_batched`) ; `gamma`/`dgamma`/`dbeta` :
 /// `channels`. Produit `dx` et **accumule** `dgamma`, `dbeta` (mets-les à
 /// zéro avant si tu ne veux pas d'accumulation).
 ///
@@ -877,7 +877,7 @@ pub fn batch_norm_backward(
 
 /// Perte MSE (erreur quadratique moyenne) : `L = (1/N)·Σ_i (pred_i −
 /// target_i)²`, `N = pred.len()`. Régression/reconstruction (ex. autoencodeur
-/// bâti sur [`crate::fixed::conv2d::conv2d_transpose`] côté forward et
+/// bâti sur `crate::fixed::conv2d::conv2d_transpose` côté forward et
 /// [`conv2d_backward`] côté backward).
 pub fn mse_loss(pred: &[f32], target: &[f32]) -> f32 {
     assert_eq!(pred.len(), target.len(), "mse_loss: shape");
@@ -935,7 +935,7 @@ pub fn softmax_cross_entropy_loss(logits: &[f32], rows: usize, d: usize, targets
 /// (softmax(logits[r,:]) − one_hot(targets[r])) / rows` — le gradient
 /// **combiné** softmax + entropie croisée, sans jacobienne softmax explicite
 /// (cf. en-tête de module ; à la différence de [`softmax_backward`],
-/// réservée à [`attention_backward`]).
+/// réservée à `attention_backward`).
 ///
 /// Panique si `targets[r] ≥ d` pour une ligne.
 pub fn softmax_cross_entropy_backward(

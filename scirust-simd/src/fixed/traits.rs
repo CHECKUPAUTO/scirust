@@ -143,7 +143,7 @@ pub trait RealScalar: NumericScalar {
     fn bessel_i0(self) -> Self;
     /// Fonction d'erreur `erf(x) = (2/√π)·∫₀ˣ e^{-t²} dt`. Impaire, `erf(0) =
     /// 0`, `erf(x) → ±1` pour `x → ±∞` (saturé au-delà de `|x| ≈ 4` en
-    /// virgule fixe). Cœur de [`crate::fixed::activation::gelu`].
+    /// virgule fixe). Cœur de `crate::fixed::activation::gelu`.
     fn erf(self) -> Self;
     /// Fonction d'erreur complémentaire `erfc(x) = 1 − erf(x)`.
     fn erfc(self) -> Self;

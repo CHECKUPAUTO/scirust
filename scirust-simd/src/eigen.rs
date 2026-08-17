@@ -7,7 +7,7 @@
 // premier, propriété classique de la méthode) d'une matrice symétrique de
 // grande taille, en `O(steps·n²)` (seulement des produits matrice-vecteur)
 // plutôt que le `O(n³)` d'une diagonalisation complète
-// ([`crate::fixed::linalg::jacobi_eigen`]/[`crate::fixed::linalg::svd`]) —
+// (`crate::fixed::linalg::jacobi_eigen`/`crate::fixed::linalg::svd`) —
 // utile quand `n` est grand et que seuls quelques couples propres
 // intéressent (analyse spectrale, réduction de dimension, etc.).
 //
@@ -15,13 +15,13 @@
 //
 // Contrairement au reste de la pile de ce crate (`dsp`, `geometry`,
 // `hypercomplex`), ce module n'est **pas** générique sur
-// [`crate::fixed::RealScalar`] : il est délibérément restreint à `f32`/`f64`
+// `crate::fixed::RealScalar` : il est délibérément restreint à `f32`/`f64`
 // natifs via [`LanczosScalar`]. La méthode de Lanczos a besoin d'une
 // **réorthogonalisation complète** (Gram-Schmidt contre tous les vecteurs de
 // Lanczos précédents, à chaque pas) pour rester stable numériquement — une
 // question bien comprise depuis des décennies en arithmétique flottante IEEE
 // (Golub & Van Loan), mais dont l'analogue en virgule fixe (l'arrondi
-// enveloppant de [`crate::fixed`] compose-t-il correctement la perte
+// enveloppant de `crate::fixed` compose-t-il correctement la perte
 // d'orthogonalité accumulée sur de nombreuses itérations ?) reste une
 // question ouverte, non résolue ici. Le support virgule fixe est donc
 // **explicitement différé** (travail futur documenté), plutôt que
@@ -43,7 +43,7 @@
 //    matrice tridiagonale `T = tridiag(β, α, β)`.
 // 2. **Diagonalisation de `T`** (`m×m`, petite et dense) par rotations de
 //    Jacobi ([`jacobi_eigen_dense`], transcription directe de
-//    [`crate::fixed::linalg::jacobi_eigen`] en arithmétique flottante
+//    `crate::fixed::linalg::jacobi_eigen` en arithmétique flottante
 //    native — mêmes formules de rotation, `+`/`-`/`*`/`/`/`sqrt` au lieu de
 //    `wrapping_add`/`wrapping_mul`/`checked_div`).
 // 3. **Vecteurs de Ritz** : `yₗ = Σᵢ sᵢₗ·vᵢ` (combinaison des vecteurs de
@@ -163,7 +163,7 @@ fn axpy<T: LanczosScalar>(y: &mut [T], alpha: T, x: &[T]) {
 
 /// Diagonalise une matrice symétrique dense `m×m` (ici : la matrice
 /// tridiagonale de Lanczos) par rotations de Jacobi cycliques — transcription
-/// directe de [`crate::fixed::linalg::jacobi_eigen`] en arithmétique
+/// directe de `crate::fixed::linalg::jacobi_eigen` en arithmétique
 /// flottante native (mêmes formules de rotation) : mécanique, même algorithme
 /// déjà validé, faible risque. `eigenvectors` : `m×m` row-major, la colonne
 /// `j` est le vecteur propre associé à `eigenvalues[j]` (non triés, comme
@@ -269,7 +269,7 @@ fn jacobi_eigen_dense<T: LanczosScalar>(
 /// `steps` pas de Lanczos (`1 ≤ steps ≤ n`) construisent une matrice
 /// tridiagonale `m×m` (`m = steps`, moins en cas de rupture chanceuse —
 /// cf. en-tête de module), diagonalisée par rotations de Jacobi (`tol`/
-/// `max_sweeps`, mêmes paramètres que [`crate::fixed::linalg::jacobi_eigen`]).
+/// `max_sweeps`, mêmes paramètres que `crate::fixed::linalg::jacobi_eigen`).
 ///
 /// Renvoie les couples **triés par valeur propre décroissante** : les
 /// premiers/derniers éléments sont les approximations les plus fiables

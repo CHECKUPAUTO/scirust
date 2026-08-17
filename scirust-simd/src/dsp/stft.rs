@@ -6,7 +6,7 @@
 // d'apodisation ([`super::window`]) à chacune, puis calcule son spectre réel
 // ([`super::fft::rfft`]). Le résultat — un spectrogramme — est une matrice
 // `num_frames × bins` row-major : directement utilisable comme entrée 2D pour
-// [`crate::fixed::conv2d`] (temps × fréquence, comme une image).
+// `crate::fixed::conv2d` (temps × fréquence, comme une image).
 //
 // [`istft`] reconstruit le signal par recouvrement-addition (overlap-add) :
 // chaque trame est resynthétisée par [`super::fft::irfft`] puis additionnée à

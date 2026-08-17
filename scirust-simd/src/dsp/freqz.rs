@@ -25,7 +25,7 @@
 //
 // [`magnitude`]/[`magnitude_db`] et [`phase`] sont des fonctions libres sur
 // [`super::fft::Complex`] (pas spécifiques à un type de filtre). `phase`
-// utilise [`crate::fixed::RealScalar::atan2`], à valeurs dans `(−π, π]` —
+// utilise `crate::fixed::RealScalar::atan2`, à valeurs dans `(−π, π]` —
 // une courbe de phase présente donc des discontinuités artificielles de
 // `2π` à chaque franchissement de cette coupure, que [`unwrap_phase`]
 // élimine (technique standard, `numpy.unwrap`) : ajouter/soustraire le

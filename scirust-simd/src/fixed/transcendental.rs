@@ -537,7 +537,7 @@ fn erf_core(x_q32: i64) -> i64 {
 }
 
 /// Fonction d'erreur `erf(x) = (2/√π) ∫₀ˣ e^{-t²} dt`. Impaire, `erf(0) = 0`,
-/// `erf(x) → ±1` pour `x → ±∞` — au cœur de [`crate::fixed::activation::gelu`]
+/// `erf(x) → ±1` pour `x → ±∞` — au cœur de `crate::fixed::activation::gelu`
 /// (`Φ(x) = (1 + erf(x/√2))/2`, la fonction de répartition normale centrée
 /// réduite).
 ///
