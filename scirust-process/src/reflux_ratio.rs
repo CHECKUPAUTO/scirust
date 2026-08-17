@@ -11,19 +11,19 @@
 //! charge rebouilleur     Q_b = Q_c + ΔH_F     (bilan enthalpique global) [W]
 //! ```
 //!
-//! `α` volatilité relative du constituant léger sur le lourd [sans dimension],
-//! `x_D` fraction molaire du léger au distillat [sans dimension, 0 < x_D < 1],
-//! `x_F` fraction molaire du léger à l'alimentation [sans dimension, 0 < x_F < 1],
+//! `α` volatilité relative du constituant léger sur le lourd (sans dimension),
+//! `x_D` fraction molaire du léger au distillat (sans dimension, 0 < x_D < 1),
+//! `x_F` fraction molaire du léger à l'alimentation (sans dimension, 0 < x_F < 1),
 //! `q` fraction liquide de l'alimentation (rapport de la variation d'enthalpie de
-//! vaporisation) [sans dimension ; `q = 1` pour un liquide à sa température de
-//! bulle], `Rₘ` taux de reflux minimal `L/D` [sans dimension], `R` taux de reflux
-//! opératoire `L/D` [sans dimension], `f` facteur d'excès sur le reflux minimal
-//! [sans dimension, > 1], `s` pente de la droite opératoire de rectification
-//! [sans dimension], `Q_c` charge thermique du condenseur [W], `D` débit molaire
-//! de distillat [mol·s⁻¹], `λ` chaleur latente de vaporisation du distillat
-//! [J·mol⁻¹], `Q_b` charge thermique du rebouilleur [W], `ΔH_F` déficit
+//! vaporisation) (sans dimension ; `q = 1` pour un liquide à sa température de
+//! bulle), `Rₘ` taux de reflux minimal `L/D` (sans dimension), `R` taux de reflux
+//! opératoire `L/D` (sans dimension), `f` facteur d'excès sur le reflux minimal
+//! (sans dimension, > 1), `s` pente de la droite opératoire de rectification
+//! (sans dimension), `Q_c` charge thermique du condenseur (W), `D` débit molaire
+//! de distillat (mol·s⁻¹), `λ` chaleur latente de vaporisation du distillat
+//! (J·mol⁻¹), `Q_b` charge thermique du rebouilleur (W), `ΔH_F` déficit
 //! enthalpique global (chaleur nette apportée hors condenseur, alimentation et
-//! soutirages) refermant le bilan `Q_b + Q_c,retiré = ΔH_flux` [W].
+//! soutirages) refermant le bilan `Q_b + Q_c,retiré = ΔH_flux` (W).
 //!
 //! **Limite honnête** : ces relations valent pour une **colonne binaire** à
 //! **volatilité relative `α` constante FOURNIE par l'appelant** (jamais inventée ;
@@ -42,14 +42,14 @@
 
 /// Taux de reflux **minimal** `Rₘ` d'un binaire à alimentation liquide bouillante
 /// (`q = 1`), forme d'Underwood simplifiée :
-/// `Rₘ = 1/(α − 1)·(x_D/x_F − α·(1 − x_D)/(1 − x_F))` [sans dimension].
+/// `Rₘ = 1/(α − 1)·(x_D/x_F − α·(1 − x_D)/(1 − x_F))` (sans dimension).
 ///
 /// `relative_volatility` `α` volatilité relative du léger sur le lourd
-/// [sans dimension, > 1], `distillate_composition` `x_D` fraction molaire du léger
-/// au distillat [sans dimension, 0 < x_D < 1], `feed_composition` `x_F` fraction
-/// molaire du léger à l'alimentation [sans dimension, 0 < x_F < 1],
-/// `liquid_fraction_feed` `q` fraction liquide de l'alimentation [sans dimension ;
-/// cette forme n'est valable que pour `q = 1`, liquide à sa température de bulle].
+/// (sans dimension, > 1), `distillate_composition` `x_D` fraction molaire du léger
+/// au distillat (sans dimension, 0 < x_D < 1), `feed_composition` `x_F` fraction
+/// molaire du léger à l'alimentation (sans dimension, 0 < x_F < 1),
+/// `liquid_fraction_feed` `q` fraction liquide de l'alimentation (sans dimension ;
+/// cette forme n'est valable que pour `q = 1`, liquide à sa température de bulle).
 ///
 /// Panique si `relative_volatility` n'est pas fini ou n'est pas strictement
 /// supérieur à 1, si `distillate_composition` ou `feed_composition` n'est pas dans
@@ -85,11 +85,11 @@ pub fn reflux_minimum_underwood_binary(
 }
 
 /// Taux de reflux **opératoire** `R = f·Rₘ` obtenu en majorant le reflux minimal
-/// par un facteur d'excès [sans dimension].
+/// par un facteur d'excès (sans dimension).
 ///
-/// `minimum_reflux` `Rₘ` taux de reflux minimal [sans dimension, ≥ 0],
-/// `factor` `f` facteur d'excès sur le reflux minimal [sans dimension, > 1 ;
-/// usuellement 1,2 à 1,5].
+/// `minimum_reflux` `Rₘ` taux de reflux minimal (sans dimension, ≥ 0),
+/// `factor` `f` facteur d'excès sur le reflux minimal (sans dimension, > 1 ;
+/// usuellement 1,2 à 1,5).
 ///
 /// Panique si `minimum_reflux` n'est pas fini ou est négatif, ou si `factor`
 /// n'est pas fini ou n'est pas strictement supérieur à 1.
@@ -106,9 +106,9 @@ pub fn reflux_operating_from_ratio(minimum_reflux: f64, factor: f64) -> f64 {
 }
 
 /// Pente `s = R / (R + 1)` de la **droite opératoire de rectification**
-/// [sans dimension].
+/// (sans dimension).
 ///
-/// `reflux_ratio` `R` taux de reflux `L/D` [sans dimension, ≥ 0].
+/// `reflux_ratio` `R` taux de reflux `L/D` (sans dimension, ≥ 0).
 ///
 /// Panique si `reflux_ratio` n'est pas fini ou est négatif.
 pub fn reflux_rectifying_slope(reflux_ratio: f64) -> f64 {
@@ -119,12 +119,12 @@ pub fn reflux_rectifying_slope(reflux_ratio: f64) -> f64 {
     reflux_ratio / (reflux_ratio + 1.0)
 }
 
-/// Charge thermique du **condenseur total** `Q_c = (R + 1)·D·λ` [W] : toute la
+/// Charge thermique du **condenseur total** `Q_c = (R + 1)·D·λ` (W) : toute la
 /// vapeur de tête `V = (R + 1)·D` est condensée.
 ///
-/// `reflux_ratio` `R` taux de reflux `L/D` [sans dimension, ≥ 0],
-/// `distillate_flow` `D` débit molaire de distillat [mol·s⁻¹, ≥ 0],
-/// `latent_heat` `λ` chaleur latente de vaporisation du distillat [J·mol⁻¹, ≥ 0].
+/// `reflux_ratio` `R` taux de reflux `L/D` (sans dimension, ≥ 0),
+/// `distillate_flow` `D` débit molaire de distillat (mol·s⁻¹, ≥ 0),
+/// `latent_heat` `λ` chaleur latente de vaporisation du distillat (J·mol⁻¹, ≥ 0).
 ///
 /// Panique si l'un des arguments n'est pas fini ou est négatif.
 pub fn reflux_condenser_duty(reflux_ratio: f64, distillate_flow: f64, latent_heat: f64) -> f64 {
@@ -144,16 +144,16 @@ pub fn reflux_condenser_duty(reflux_ratio: f64, distillate_flow: f64, latent_hea
 }
 
 /// Charge thermique du **rebouilleur** `Q_b = Q_c + ΔH_F` par bilan enthalpique
-/// global sur la colonne [W].
+/// global sur la colonne (W).
 ///
 /// Convention de signe : `ΔH_F` regroupe l'ensemble des flux enthalpiques nets
 /// **hors condenseur** (enthalpies d'alimentation et de soutirages) refermant le
 /// bilan `Q_b = Q_c + ΔH_F` ; il est **positif** lorsque ces flux réclament un
 /// apport supplémentaire au rebouilleur et **négatif** dans le cas contraire.
 ///
-/// `condenser_duty` `Q_c` charge du condenseur [W ; ≥ 0, prise en valeur retirée],
-/// `feed_enthalpy_difference` `ΔH_F` terme enthalpique net du bilan global [W ;
-/// signé].
+/// `condenser_duty` `Q_c` charge du condenseur (W ; ≥ 0, prise en valeur retirée),
+/// `feed_enthalpy_difference` `ΔH_F` terme enthalpique net du bilan global (W ;
+/// signé).
 ///
 /// Panique si `condenser_duty` n'est pas fini ou est négatif, ou si
 /// `feed_enthalpy_difference` n'est pas fini.
