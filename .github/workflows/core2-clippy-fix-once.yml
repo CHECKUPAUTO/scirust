@@ -25,48 +25,314 @@ jobs:
         with:
           toolchain: nightly-2026-07-02
           components: rustfmt, clippy
-      - name: Apply proven Clippy repairs
+      - name: Apply proven Core2 repairs
         shell: python
         run: |
           from pathlib import Path
 
-          p = Path("scirust-tensor-core/src/general.rs")
-          text = p.read_text()
-
-          def replace_exact(old, new, expected=1):
-              global text
+          def replace_exact(path, old, new, expected=1):
+              p = Path(path)
+              text = p.read_text()
               actual = text.count(old)
               if actual != expected:
-                  raise SystemExit(f"expected {expected} occurrence(s) of {old!r}, found {actual}")
-              text = text.replace(old, new)
+                  raise SystemExit(f"{path}: expected {expected} occurrence(s) of {old!r}, found {actual}")
+              p.write_text(text.replace(old, new))
 
           replace_exact(
+              "scirust-tensor-core/src/general.rs",
               "#[derive(Debug, Clone, PartialEq, Eq, Hash)]\npub enum TensorDevice {\n    Host,",
               "#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]\npub enum TensorDevice {\n    #[default]\n    Host,",
           )
           replace_exact(
+              "scirust-tensor-core/src/general.rs",
               "\nimpl Default for TensorDevice {\n    fn default() -> Self {\n        Self::Host\n    }\n}\n",
               "\n",
           )
-          replace_exact(".chunks_exact(4)", ".chunks(4)")
           replace_exact(
+              "scirust-tensor-core/src/general.rs",
+              ".chunks_exact(4)",
+              ".chunks(4)",
+          )
+          replace_exact(
+              "scirust-tensor-core/src/general.rs",
               "if storage.len() % width != 0",
               "if storage.len().checked_rem(width) != Some(0)",
           )
-          p.write_text(text)
+
+          replace_exact(
+              "scirust-tensor-ir/src/shard.rs",
+              "if dimension % parts != 0",
+              "if dimension.checked_rem(parts) != Some(0)",
+              expected=2,
+          )
+          replace_exact(
+              "scirust-tensor-ir/src/shard.rs",
+              """        for tensor_axis in 0..local_dims.len()
+        {
+            let dimension = tensor_type.shape.dims()[tensor_axis];
+            if let Some(mesh_axis) = partition.axes[tensor_axis]
+            {
+                let parts = mesh.axes[mesh_axis].size;
+                let coordinate = coordinates[mesh_axis];
+                let range = partition_range(dimension, parts, coordinate, policy, tensor_axis)?;
+                local_dims[tensor_axis] = range.len();
+                ranges.push(range);
+            }
+            else
+            {
+                ranges.push(AxisShard {
+                    start: 0,
+                    end: dimension,
+                });
+            }
+        }
+""",
+              """        for (tensor_axis, local_dim) in local_dims.iter_mut().enumerate()
+        {
+            let dimension = tensor_type.shape.dims()[tensor_axis];
+            if let Some(mesh_axis) = partition.axes[tensor_axis]
+            {
+                let parts = mesh.axes[mesh_axis].size;
+                let coordinate = coordinates[mesh_axis];
+                let range = partition_range(dimension, parts, coordinate, policy, tensor_axis)?;
+                *local_dim = range.len();
+                ranges.push(range);
+            }
+            else
+            {
+                ranges.push(AxisShard {
+                    start: 0,
+                    end: dimension,
+                });
+            }
+        }
+""",
+          )
+
+          replace_exact(
+              "scirust-tensor-reference/src/codec.rs",
+              """        ReferenceOpcode::Relu
+        | ReferenceOpcode::Exp
+        | ReferenceOpcode::Log
+        | ReferenceOpcode::Scale =>
+""",
+              """        ReferenceOpcode::Relu
+        | ReferenceOpcode::Exp
+        | ReferenceOpcode::Log
+        | ReferenceOpcode::Scale
+        | ReferenceOpcode::ZerosLike
+        | ReferenceOpcode::OnesLike =>
+""",
+          )
+          replace_exact(
+              "scirust-tensor-reference/src/codec.rs",
+              """        ReferenceOpcode::Add
+        | ReferenceOpcode::Sub
+        | ReferenceOpcode::Mul
+        | ReferenceOpcode::Div =>
+""",
+              """        ReferenceOpcode::Add
+        | ReferenceOpcode::Sub
+        | ReferenceOpcode::Mul
+        | ReferenceOpcode::Div
+        | ReferenceOpcode::ReluGrad =>
+""",
+          )
+          replace_exact(
+              "scirust-tensor-reference/src/codec.rs",
+              """        ReferenceOpcode::ShapeCopy =>
+        {
+            if operands[0].elements() != result.elements()
+            {
+                return Err(ReferenceDecodeError::ElementCountMismatch);
+            }
+        },
+        ReferenceOpcode::Permute =>
+""",
+              """        ReferenceOpcode::ShapeCopy =>
+        {
+            if operands[0].elements() != result.elements()
+            {
+                return Err(ReferenceDecodeError::ElementCountMismatch);
+            }
+        },
+        ReferenceOpcode::BroadcastTo =>
+        {
+            let source = operands[0].dims();
+            let target = result.dims();
+            if source.len() > target.len()
+            {
+                return Err(ReferenceDecodeError::ShapeMismatch);
+            }
+            let offset = target.len() - source.len();
+            if !source
+                .iter()
+                .zip(&target[offset..])
+                .all(|(&source_dim, &target_dim)| source_dim == target_dim || source_dim == 1)
+            {
+                return Err(ReferenceDecodeError::ShapeMismatch);
+            }
+        },
+        ReferenceOpcode::ReduceSumTo =>
+        {
+            let source = operands[0].dims();
+            let target = result.dims();
+            if target.len() > source.len()
+            {
+                return Err(ReferenceDecodeError::ShapeMismatch);
+            }
+            let offset = source.len() - target.len();
+            if !target
+                .iter()
+                .zip(&source[offset..])
+                .all(|(&target_dim, &source_dim)| target_dim == source_dim || target_dim == 1)
+            {
+                return Err(ReferenceDecodeError::ShapeMismatch);
+            }
+        },
+        ReferenceOpcode::MatMul =>
+        {
+            let lhs = operands[0].dims();
+            let rhs = operands[1].dims();
+            let out = result.dims();
+            if lhs.len() != 2
+                || rhs.len() != 2
+                || out.len() != 2
+                || lhs[1] != rhs[0]
+                || out[0] != lhs[0]
+                || out[1] != rhs[1]
+            {
+                return Err(ReferenceDecodeError::ShapeMismatch);
+            }
+        },
+        ReferenceOpcode::BatchMatMul =>
+        {
+            let lhs = operands[0].dims();
+            let rhs = operands[1].dims();
+            let out = result.dims();
+            if lhs.len() < 3 || lhs.len() != rhs.len() || lhs.len() != out.len()
+            {
+                return Err(ReferenceDecodeError::ShapeMismatch);
+            }
+            let rank = lhs.len();
+            if lhs[..rank - 2] != rhs[..rank - 2]
+                || lhs[..rank - 2] != out[..rank - 2]
+                || lhs[rank - 1] != rhs[rank - 2]
+                || out[rank - 2] != lhs[rank - 2]
+                || out[rank - 1] != rhs[rank - 1]
+            {
+                return Err(ReferenceDecodeError::ShapeMismatch);
+            }
+        },
+        ReferenceOpcode::Permute =>
+""",
+          )
+
+          unsupported = """            ReferenceOpcode::ReluGrad
+            | ReferenceOpcode::ZerosLike
+            | ReferenceOpcode::OnesLike
+            | ReferenceOpcode::BroadcastTo
+            | ReferenceOpcode::ReduceSumTo
+            | ReferenceOpcode::MatMul
+            | ReferenceOpcode::BatchMatMul =>
+            {
+                return Err(ReferenceExecutionError::UnsupportedOpcode { opcode });
+            },
+"""
+          replace_exact(
+              "scirust-tensor-reference/src/interpreter.rs",
+              """            ReferenceOpcode::Exp | ReferenceOpcode::Log =>
+            {
+                return Err(ReferenceExecutionError::DeterministicMathUnavailable { opcode });
+            },
+            ReferenceOpcode::Relu
+""",
+              """            ReferenceOpcode::Exp | ReferenceOpcode::Log =>
+            {
+                return Err(ReferenceExecutionError::DeterministicMathUnavailable { opcode });
+            },
+""" + unsupported + """            ReferenceOpcode::Relu
+""",
+              expected=1,
+          )
+          replace_exact(
+              "scirust-tensor-reference/src/interpreter.rs",
+              """            ReferenceOpcode::Exp | ReferenceOpcode::Log =>
+            {
+                // Unreachable: preparation rejects both. Re-stated rather than
+                // reached, so no opcode is ever silently treated as a no-op.
+                return Err(ReferenceExecutionError::DeterministicMathUnavailable { opcode });
+            },
+""",
+              """            ReferenceOpcode::Exp | ReferenceOpcode::Log =>
+            {
+                // Unreachable: preparation rejects both. Re-stated rather than
+                // reached, so no opcode is ever silently treated as a no-op.
+                return Err(ReferenceExecutionError::DeterministicMathUnavailable { opcode });
+            },
+""" + unsupported,
+              expected=1,
+          )
+          replace_exact(
+              "scirust-tensor-reference/src/invocation.rs",
+              """        ReferenceOpcode::Exp | ReferenceOpcode::Log =>
+        {
+            return Err(ReferenceExecutionError::DeterministicMathUnavailable { opcode });
+        },
+""",
+              """        ReferenceOpcode::Exp | ReferenceOpcode::Log =>
+        {
+            return Err(ReferenceExecutionError::DeterministicMathUnavailable { opcode });
+        },
+        ReferenceOpcode::ReluGrad
+        | ReferenceOpcode::ZerosLike
+        | ReferenceOpcode::OnesLike
+        | ReferenceOpcode::BroadcastTo
+        | ReferenceOpcode::ReduceSumTo
+        | ReferenceOpcode::MatMul
+        | ReferenceOpcode::BatchMatMul =>
+        {
+            return Err(ReferenceExecutionError::UnsupportedOpcode { opcode });
+        },
+""",
+          )
+          replace_exact(
+              "scirust-tensor-reference/src/error.rs",
+              """    /// Reserved for a future opcode. Not constructed today: this crate matches
+    /// [`ReferenceOpcode`] exhaustively, so adding a variant to that enum
+    /// produces a **compile error** here rather than a runtime rejection —
+    /// a stronger guarantee than this variant provides, and the reason it stays
+    /// unreachable.
+""",
+              """    /// Reference v1.1 can encode operations that are validated by the wire
+    /// codec but intentionally remain outside this legacy scalar CPU interpreter.
+    /// Preparation rejects those operations explicitly instead of silently
+    /// treating them as no-ops; Core2 executes them through its dedicated
+    /// deterministic reference runtime.
+""",
+          )
       - name: Format and verify Clippy
         run: |
           set -euo pipefail
           cargo +nightly-2026-07-02 fmt --all
           cargo +nightly-2026-07-02 fmt --all -- --check
           cargo +nightly-2026-07-02 clippy --workspace --all-targets --locked -- -D warnings
+      - name: Verify stable workspace build
+        run: |
+          rustup toolchain install stable --profile minimal
+          cargo +stable build --workspace --all-targets --locked
       - name: Commit verified repairs and remove one-shot workflow
         run: |
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git rm .github/workflows/core2-clippy-fix-once.yml
-          git add scirust-tensor-core/src/general.rs
+          git add scirust-tensor-core/src/general.rs \
+                  scirust-tensor-ir/src/shard.rs \
+                  scirust-tensor-reference/src/codec.rs \
+                  scirust-tensor-reference/src/interpreter.rs \
+                  scirust-tensor-reference/src/invocation.rs \
+                  scirust-tensor-reference/src/error.rs
           git diff --cached --check
-          git commit -m "fix(core2): satisfy strict Clippy"
+          git commit -m "fix(core2): complete strict lint and Reference v1.1 coverage"
           git push origin HEAD:core2-foundation-a-e
