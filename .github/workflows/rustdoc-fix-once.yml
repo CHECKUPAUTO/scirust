@@ -60,6 +60,12 @@ jobs:
           replace_exact("scirust-retrieval/src/license.rs", "[`Encoder`](crate::Encoder)", "[`Encoder`]")
           replace_exact("scirust-integration/src/pipeline.rs", "[`StationConfig::default`]", "`StationConfig::default`")
           replace_exact("scirust-trader/src/scanner.rs", "(see [`Opportunity::seal`]).", "(see `Opportunity::seal`).")
+          replace_exact("scirust-vision/src/denoise.rs", "(see [`median`] for why", "(see `median` for why")
+          replace_exact("scirust-vision/src/denoise.rs", "[`NLM_AUTO_H_FACTOR`]`·σ`", "`NLM_AUTO_H_FACTOR·σ`")
+          replace_exact("scirust-vision/src/denoise.rs", "([`pad_replicate`])", "(`pad_replicate`)")
+          replace_exact("scirust-vision/src/denoise.rs", "([`patch_dist_padded`] / [`sum_sq_diff`])", "(`patch_dist_padded` / `sum_sq_diff`)")
+          replace_exact("scirust-vision/src/optics.rs", "[`Image`](crate::Image)", "[`Image`]")
+          replace_exact("scirust-vision/src/optics.rs", "[`convolve2d`](crate::convolve2d)", "[`convolve2d`]")
       - name: Verify strict workspace rustdoc
         run: cargo +stable doc --workspace --no-deps --locked
       - name: Commit verified repairs and remove one-shot workflow
@@ -84,7 +90,9 @@ jobs:
                   scirust-retrieval/src/forgetting.rs \
                   scirust-retrieval/src/license.rs \
                   scirust-integration/src/pipeline.rs \
-                  scirust-trader/src/scanner.rs
+                  scirust-trader/src/scanner.rs \
+                  scirust-vision/src/denoise.rs \
+                  scirust-vision/src/optics.rs
           git diff --cached --check
           git commit -m "docs: repair strict workspace rustdoc links"
           git push origin HEAD:codex/gate-workspace-rustdoc
