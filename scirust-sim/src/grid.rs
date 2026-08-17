@@ -3,7 +3,7 @@
 //! stability, which the `scirust-grid` vertical monitors (RoCoF, angle). Here
 //! it is a simulator.
 //!
-//! Rotor-angle `δ` (rad), a [`SecondOrderSystem`](crate::engine::SecondOrderSystem):
+//! Rotor-angle `δ` (rad), a [`SecondOrderSystem`]:
 //!
 //! `δ'' = (ω_s / 2H)·(P_m − P_max·sin δ) − (D / 2H)·δ'`
 //!
