@@ -1,0 +1,46 @@
+{
+  "id": "sciagent-i250-cuda-decode",
+  "goal": "Improve batch-one resident SCIAGENT CUDA decode latency on Jetson Thor while preserving exact B49 cached-oracle token parity and the canonical full-logits baselines",
+  "crate_name": "scirust-sciagent",
+  "backend": "cuda",
+  "allowed_paths": [
+    "scirust-sciagent/src/cuda_decode.rs"
+  ],
+  "budget": {
+    "max_iterations": 8,
+    "min_speedup": 1.05,
+    "max_abs_error": 0.0,
+    "max_rel_error": 0.0,
+    "command_timeout_secs": 7200
+  },
+  "commands": {
+    "baseline": {
+      "program": "bash",
+      "args": ["scripts/sciagent-opt-i250-stage.sh", "baseline"]
+    },
+    "generate": {
+      "program": "bash",
+      "args": ["scripts/sciagent-opt-i250-stage.sh", "generate"]
+    },
+    "compile": {
+      "program": "bash",
+      "args": ["scripts/sciagent-opt-i250-stage.sh", "compile"]
+    },
+    "verify": {
+      "program": "bash",
+      "args": ["scripts/sciagent-opt-i250-stage.sh", "verify"]
+    },
+    "benchmark": {
+      "program": "bash",
+      "args": ["scripts/sciagent-opt-i250-stage.sh", "benchmark"]
+    },
+    "profile": {
+      "program": "bash",
+      "args": ["scripts/sciagent-opt-i250-stage.sh", "profile"]
+    },
+    "rewrite": {
+      "program": "bash",
+      "args": ["scripts/sciagent-opt-i250-stage.sh", "rewrite"]
+    }
+  }
+}
