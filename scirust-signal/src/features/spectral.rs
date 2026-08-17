@@ -49,7 +49,7 @@ pub struct Spectrogram {
 /// # Why this exists next to `radar::micro_doppler::spectrogram`
 ///
 /// That one is built for radar slow-time returns and is right for them: it
-/// takes [`Complex`](crate::complex::Complex) samples, returns magnitudes in
+/// takes [`Complex`] samples, returns magnitudes in
 /// natural FFT bin order over the **full** `win_len` bins, and hard-codes a
 /// Hann window. A real-valued signal lifted into complex would pay twice: the
 /// full complex FFT costs about double a real-input one, and the upper half of
