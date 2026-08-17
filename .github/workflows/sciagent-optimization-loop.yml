@@ -1,0 +1,57 @@
+name: sciagent-optimization-loop
+
+on:
+  pull_request:
+    paths:
+      - "scirust-sciagent/SKILL_OPTIMIZATION.md"
+      - "scirust-sciagent/src/optimization_agent/**"
+      - "scirust-sciagent/src/bin/sciagent-optimize.rs"
+      - "scirust-sciagent/examples/optimization_tasks/**"
+      - "scripts/sciagent-opt-smoke.sh"
+      - "docs/SCIAGENT_OPTIMIZATION_LOOP.md"
+      - ".github/workflows/sciagent-optimization-loop.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  optimization-loop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.89.0"
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Build optimization CLI
+        run: cargo check -p scirust-sciagent --bin sciagent-optimize
+
+      - name: Run optimization-agent unit tests
+        run: cargo test -p scirust-sciagent optimization_agent
+
+      - name: Validate smoke manifest
+        run: |
+          cargo run -p scirust-sciagent --bin sciagent-optimize -- \
+            plan \
+            --manifest scirust-sciagent/examples/optimization_tasks/smoke.json \
+            --json > /tmp/sciagent-opt-plan.json
+          test -s /tmp/sciagent-opt-plan.json
+
+      - name: Run end-to-end optimization smoke test
+        run: |
+          cargo run -p scirust-sciagent --bin sciagent-optimize -- \
+            run \
+            --manifest scirust-sciagent/examples/optimization_tasks/smoke.json \
+            --workspace . \
+            --run-root target/sciagent-opt-smoke \
+            --json > /tmp/sciagent-opt-report.json
+          grep -q '"final_decision": "promote"' /tmp/sciagent-opt-report.json
+          grep -q '"speedup": 1.25' /tmp/sciagent-opt-report.json
