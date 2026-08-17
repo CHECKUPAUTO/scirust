@@ -1,6 +1,22 @@
-//! Core N-dimensional tensor type shared by the `scirust-tensor-*` crates.
+//! Core N-dimensional tensor types shared by the `scirust-tensor-*` crates.
+//!
+//! [`TensorND`] is the historical dense row-major `f32` value and remains
+//! source-compatible with the existing canonical runtime. [`Tensor`] is the
+//! Core2 value: dtype/device aware, invariant-preserving, and capable of
+//! zero-copy strided views. New code should prefer `Tensor` while runtime
+//! migration proceeds incrementally.
+
+mod general;
+mod promotion;
+
+pub use general::{Tensor, TensorDevice, TensorError};
+pub use promotion::{PromotionError, promote_types};
+pub use scirust_compute::{DType, Shape, Strides};
 
 /// A dense, row-major N-dimensional tensor of `f32`.
+///
+/// This legacy representation keeps public fields for workspace compatibility.
+/// Prefer [`Tensor`] for new APIs that need views, dtype or placement metadata.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TensorND {
     pub data: Vec<f32>,
@@ -121,7 +137,7 @@ impl TensorND {
         self.try_get(index).expect("TensorND::get")
     }
 
-    /// Reshape without copying data; errors if the element count changes.
+    /// Historical reshape: clones the legacy `Vec<f32>`.
     pub fn reshape(&self, new_shape: Vec<usize>) -> Result<TensorND, String> {
         let n = shape_product(&new_shape)
             .ok_or_else(|| format!("reshape: product of shape {new_shape:?} overflows usize"))?;
@@ -134,6 +150,30 @@ impl TensorND {
             ));
         }
         Ok(TensorND::new(self.data.clone(), new_shape))
+    }
+
+    /// Promote a legacy `f32` value into the invariant-preserving Core2 tensor.
+    pub fn to_core2(&self) -> Result<Tensor, TensorError> {
+        Tensor::from_f32(self.data.clone(), self.shape.clone())
+    }
+}
+
+impl TryFrom<TensorND> for Tensor {
+    type Error = TensorError;
+
+    fn try_from(value: TensorND) -> Result<Self, Self::Error> {
+        Tensor::from_f32(value.data, value.shape)
+    }
+}
+
+impl TryFrom<&Tensor> for TensorND {
+    type Error = TensorError;
+
+    fn try_from(value: &Tensor) -> Result<Self, Self::Error> {
+        Ok(Self::new(
+            value.to_f32_vec()?,
+            value.shape().dims().to_vec(),
+        ))
     }
 }
 
@@ -191,24 +231,25 @@ mod tests {
     }
 
     #[test]
+    fn legacy_round_trip_through_core2() {
+        let legacy = TensorND::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
+        let core2 = legacy.to_core2().unwrap();
+        let restored = TensorND::try_from(&core2).unwrap();
+        assert_eq!(restored, legacy);
+    }
+
+    #[test]
     fn shape_product_semantics() {
-        // Empty (scalar) shape has exactly one element.
         assert_eq!(shape_product(&[]), Some(1));
-        // A zero dimension yields an empty tensor.
         assert_eq!(shape_product(&[2, 0, 3]), Some(0));
         assert_eq!(shape_product(&[2, 3, 4]), Some(24));
-        // An overflowing product is reported rather than wrapped/panicked.
         assert_eq!(shape_product(&[usize::MAX, 2]), None);
     }
 
     #[test]
     fn try_new_rejects_overflowing_shape() {
-        // Previously this wrapped the product (release) or panicked on overflow
-        // (debug); now it returns a clean error instead of touching `data.len()`.
         let err = TensorND::try_new(vec![0.0], vec![usize::MAX, 2]);
         assert!(err.is_err());
-        // The total product is zero, but a row-major suffix stride still
-        // overflows and must not wrap.
         assert!(TensorND::try_new(vec![], vec![0, usize::MAX, 2]).is_err());
     }
 

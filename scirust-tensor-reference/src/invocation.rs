@@ -61,6 +61,16 @@ pub(crate) fn validate(
         {
             return Err(ReferenceExecutionError::DeterministicMathUnavailable { opcode });
         },
+        ReferenceOpcode::ReluGrad
+        | ReferenceOpcode::ZerosLike
+        | ReferenceOpcode::OnesLike
+        | ReferenceOpcode::BroadcastTo
+        | ReferenceOpcode::ReduceSumTo
+        | ReferenceOpcode::MatMul
+        | ReferenceOpcode::BatchMatMul =>
+        {
+            return Err(ReferenceExecutionError::UnsupportedOpcode { opcode });
+        },
     }
 
     // 2. Attribute payload coherent with the opcode.

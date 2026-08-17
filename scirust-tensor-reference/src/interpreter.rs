@@ -119,6 +119,16 @@ impl PreparedReferenceKernel {
             {
                 return Err(ReferenceExecutionError::DeterministicMathUnavailable { opcode });
             },
+            ReferenceOpcode::ReluGrad
+            | ReferenceOpcode::ZerosLike
+            | ReferenceOpcode::OnesLike
+            | ReferenceOpcode::BroadcastTo
+            | ReferenceOpcode::ReduceSumTo
+            | ReferenceOpcode::MatMul
+            | ReferenceOpcode::BatchMatMul =>
+            {
+                return Err(ReferenceExecutionError::UnsupportedOpcode { opcode });
+            },
             ReferenceOpcode::Relu
             | ReferenceOpcode::Scale
             | ReferenceOpcode::Add
@@ -419,6 +429,16 @@ impl ReferenceInterpreter {
                 // Unreachable: preparation rejects both. Re-stated rather than
                 // reached, so no opcode is ever silently treated as a no-op.
                 return Err(ReferenceExecutionError::DeterministicMathUnavailable { opcode });
+            },
+            ReferenceOpcode::ReluGrad
+            | ReferenceOpcode::ZerosLike
+            | ReferenceOpcode::OnesLike
+            | ReferenceOpcode::BroadcastTo
+            | ReferenceOpcode::ReduceSumTo
+            | ReferenceOpcode::MatMul
+            | ReferenceOpcode::BatchMatMul =>
+            {
+                return Err(ReferenceExecutionError::UnsupportedOpcode { opcode });
             },
         }
 
