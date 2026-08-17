@@ -92,8 +92,10 @@ impl TrainingLogger {
         value: f32,
         step: usize,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        match self.format {
-            LogFormat::Csv => {
+        match self.format
+        {
+            LogFormat::Csv =>
+            {
                 writeln!(
                     self.writer,
                     "{},{},{},{}",
@@ -102,11 +104,12 @@ impl TrainingLogger {
                     value,
                     unix_time_seconds()
                 )?;
-            }
-            LogFormat::TensorBoard => {
+            },
+            LogFormat::TensorBoard =>
+            {
                 let event = encode_scalar_event(unix_time_seconds(), step as u64, tag, value);
                 write_tfrecord(&mut self.writer, &event)?;
-            }
+            },
         }
         Ok(())
     }
@@ -117,7 +120,8 @@ impl TrainingLogger {
         metrics: &[(&str, f32)],
         step: usize,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        for (tag, value) in metrics {
+        for (tag, value) in metrics
+        {
             self.log_scalar(tag, *value, step)?;
         }
         Ok(())
@@ -145,9 +149,11 @@ fn unix_time_seconds() -> f64 {
 
 fn crc32c(bytes: &[u8]) -> u32 {
     let mut crc = !0u32;
-    for &byte in bytes {
+    for &byte in bytes
+    {
         crc ^= u32::from(byte);
-        for _ in 0..8 {
+        for _ in 0..8
+        {
             let mask = 0u32.wrapping_sub(crc & 1);
             crc = (crc >> 1) ^ (CRC32C_POLY & mask);
         }
@@ -170,7 +176,8 @@ fn write_tfrecord(writer: &mut impl Write, payload: &[u8]) -> std::io::Result<()
 }
 
 fn push_varint(out: &mut Vec<u8>, mut value: u64) {
-    while value >= 0x80 {
+    while value >= 0x80
+    {
         out.push((value as u8 & 0x7f) | 0x80);
         value >>= 7;
     }
@@ -233,7 +240,8 @@ mod tests {
         let payload_start = offset + 12;
         let payload_end = payload_start + length;
         let payload = &bytes[payload_start..payload_end];
-        let payload_crc = u32::from_le_bytes(bytes[payload_end..payload_end + 4].try_into().unwrap());
+        let payload_crc =
+            u32::from_le_bytes(bytes[payload_end..payload_end + 4].try_into().unwrap());
         assert_eq!(payload_crc, masked_crc32c(payload));
         (payload, payload_end + 4)
     }
@@ -294,17 +302,25 @@ mod tests {
 
         let bytes = std::fs::read(&path).unwrap();
         let (version_event, next) = read_record(&bytes, 0);
-        assert!(version_event
-            .windows(TENSORBOARD_FILE_VERSION.len())
-            .any(|window| window == TENSORBOARD_FILE_VERSION.as_bytes()));
+        assert!(
+            version_event
+                .windows(TENSORBOARD_FILE_VERSION.len())
+                .any(|window| window == TENSORBOARD_FILE_VERSION.as_bytes())
+        );
 
         let (scalar_event, end) = read_record(&bytes, next);
         assert_eq!(end, bytes.len());
-        assert!(scalar_event.windows(10).any(|window| window == b"train/loss"));
+        assert!(
+            scalar_event
+                .windows(10)
+                .any(|window| window == b"train/loss")
+        );
         assert!(scalar_event.contains(&0x2a)); // Event.summary, field 5 / wire type 2.
-        assert!(scalar_event
-            .windows(4)
-            .any(|window| window == 0.25f32.to_bits().to_le_bytes()));
+        assert!(
+            scalar_event
+                .windows(4)
+                .any(|window| window == 0.25f32.to_bits().to_le_bytes())
+        );
 
         let _ = std::fs::remove_file(&path);
     }
