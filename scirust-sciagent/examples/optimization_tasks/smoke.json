@@ -1,0 +1,47 @@
+{
+  "id": "sciagent-opt-smoke",
+  "goal": "Validate the optimization-loop orchestration and promotion gates",
+  "crate_name": "scirust-sciagent",
+  "backend": "cpu",
+  "allowed_paths": [
+    "scirust-sciagent/src/optimization_agent",
+    "scirust-sciagent/src/bin/sciagent-optimize.rs"
+  ],
+  "budget": {
+    "max_iterations": 2,
+    "min_speedup": 1.05,
+    "max_abs_error": 0.000001,
+    "max_rel_error": 0.000001,
+    "command_timeout_secs": 30
+  },
+  "commands": {
+    "baseline": {
+      "program": "bash",
+      "args": ["scripts/sciagent-opt-smoke.sh", "baseline"]
+    },
+    "generate": {
+      "program": "bash",
+      "args": ["scripts/sciagent-opt-smoke.sh", "generate"]
+    },
+    "compile": {
+      "program": "bash",
+      "args": ["scripts/sciagent-opt-smoke.sh", "compile"]
+    },
+    "verify": {
+      "program": "bash",
+      "args": ["scripts/sciagent-opt-smoke.sh", "verify"]
+    },
+    "benchmark": {
+      "program": "bash",
+      "args": ["scripts/sciagent-opt-smoke.sh", "benchmark"]
+    },
+    "profile": {
+      "program": "bash",
+      "args": ["scripts/sciagent-opt-smoke.sh", "profile"]
+    },
+    "rewrite": {
+      "program": "bash",
+      "args": ["scripts/sciagent-opt-smoke.sh", "rewrite"]
+    }
+  }
+}
