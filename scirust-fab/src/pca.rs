@@ -15,7 +15,7 @@
 //! des deux seuls ne détecte — voir les tests pour un exemple explicite
 //! des deux cas.
 //!
-//! Repose sur [`scirust_solvers::linalg::svd`] (SVD de Jacobi à un côté,
+//! Repose sur [`scirust_solvers::linalg::svd()`] (SVD de Jacobi à un côté,
 //! déterministe) pour l'extraction des composantes : la PCA sur des
 //! données centrées `X` équivaut à la SVD `X = UΣVᵀ`, les colonnes de `V`
 //! étant les chargements (loadings) et `UΣ` les scores.

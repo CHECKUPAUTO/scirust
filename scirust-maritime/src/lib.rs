@@ -6,7 +6,7 @@
 //!
 //! - [`colregs`] — COLREG encounter-type classification (head-on /
 //!   crossing / overtaking) from relative bearing.
-//! - [`cpa_tcpa`] — closest point of approach / time to CPA, the standard
+//! - [`cpa_tcpa()`] — closest point of approach / time to CPA, the standard
 //!   collision-risk assessment for constant-velocity tracks.
 //! - [`thrust_allocation`] — weighted-pseudo-inverse thrust allocation for
 //!   dynamic positioning (DP), the static optimization layer that turns a

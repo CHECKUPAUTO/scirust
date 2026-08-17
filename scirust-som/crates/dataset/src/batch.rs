@@ -33,7 +33,7 @@ const INVALID_PAD: f32 = 0.0;
 ///
 /// - If the sample is shorter, the four parallel vectors are extended with
 ///   the neutral pad ids: token [`SomVocab::PAD`], ownership [`OWNERSHIP_NA`],
-///   borrow [`BORROW_NA`], invalid [`INVALID_PAD`].
+///   borrow [`BORROW_NA`], invalid `INVALID_PAD`.
 /// - If the sample is longer, every vector is truncated to `target_len`.
 /// - The returned `pad_mask` is `1.0` for an original (real) token and `0.0`
 ///   for a padded one; for a truncated sample it is all `1.0`.
@@ -253,7 +253,7 @@ fn shuffle_in_place<T>(items: &mut [T], rng: &mut PcgEngine) {
 ///
 /// The validation count is `round(n * val_ratio)`, clamped to `[0, n]`; the
 /// remainder is training. Indices `0..n` are shuffled with a seeded
-/// Fisher–Yates ([`shuffle_in_place`]); the first `n_train` shuffled indices
+/// Fisher–Yates (`shuffle_in_place`); the first `n_train` shuffled indices
 /// form the training set and the rest the validation set, so the two are a
 /// disjoint cover of the input. Cloning is used so the input slice is left
 /// untouched and the operation is referentially transparent in `(seed,

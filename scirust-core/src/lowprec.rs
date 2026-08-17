@@ -318,7 +318,7 @@ pub fn fp8_to_f32(c: u8, fmt: Fp8Format) -> f32 {
 /// f32 → bf16 par **arrondi stochastique** : monte avec probabilité
 /// (reste/ulp), tirée du flux Philox au rang `index` — reproductible et
 /// indépendante du découpage (contrairement à un RNG séquentiel).
-/// Non biaisé : E[valeur] = x.
+/// Non biaisé : `E[valeur] = x`.
 pub fn f32_to_bf16_stochastic(x: f32, rng: &Philox4x32, stream: u32, index: u64) -> u16 {
     let bits = x.to_bits();
     if x.is_nan()
@@ -346,7 +346,7 @@ pub fn f32_to_bf16_stochastic(x: f32, rng: &Philox4x32, stream: u32, index: u64)
 /// f32 → FP8 par **arrondi stochastique** (Philox contre-basé) : monte avec
 /// probabilité (reste/2^shift), non biaisé, reproductible et indépendant du
 /// découpage — le pendant FP8 de [`f32_to_bf16_stochastic`], sur la
-/// décomposition partagée [`fp8_pre_round`].
+/// décomposition partagée `fp8_pre_round`.
 pub fn f32_to_fp8_stochastic(
     x: f32,
     fmt: Fp8Format,

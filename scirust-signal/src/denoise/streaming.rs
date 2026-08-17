@@ -727,7 +727,7 @@ fn gather_patch(buf: &VecDeque<f64>, center: usize, patch_half: usize, out: &mut
 /// # The noise scale is a calibration input
 ///
 /// The batch filter estimates the robust noise scale `σ` from the *whole* record
-/// (a global [`super::estimate_noise_std_helper`]); a stream has no such global
+/// (a global `super::estimate_noise_std_helper`); a stream has no such global
 /// view, so `σ` is supplied to [`StreamingNlm::new`] — measure it once, offline, on
 /// a representative calibration capture (exactly the [`StreamingVst`] philosophy).
 /// The bandwidth follows the same rule as the batch filter: an explicit `h > 0` is
@@ -740,7 +740,7 @@ fn gather_patch(buf: &VecDeque<f64>, center: usize, patch_half: usize, out: &mut
 /// Given the *same* `σ` the batch filter computed, once the ring buffer is full the
 /// output is **bit-for-bit** `nlm1d(signal, patch_half, search_half, h)[i − delay]`
 /// on the batch filter's interior (where its patches did not touch a mirrored
-/// border): the interior patch distances reuse the batch [`sum_sq_diff`] kernel over
+/// border): the interior patch distances reuse the batch `sum_sq_diff` kernel over
 /// the identical contiguous windows, and the weight rule, its `2σ²` noise-floor
 /// compensation, the `j = i` full-weight term, and the NaN-distance→weight-0
 /// quarantine are byte-for-byte the batch's. During warm-up the same rule runs over

@@ -9,7 +9,7 @@
 //! `θ = arcsin(Δφ·λ/(2π·d))`. A wide baseline steepens `Δφ` (finer angle
 //! accuracy) but wraps the phase past `±π` sooner, so the **unambiguous field of
 //! view** `arcsin(λ/2d)` shrinks — the interferometer's resolution/ambiguity
-//! trade-off. Built on the crate's [`Complex`](crate::complex::Complex);
+//! trade-off. Built on the crate's [`Complex`];
 //! dependency-free.
 
 use crate::complex::Complex;

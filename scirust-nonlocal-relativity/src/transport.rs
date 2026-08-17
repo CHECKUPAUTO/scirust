@@ -23,7 +23,7 @@ use crate::{
 /// tangent space at a later worldline state. Nothing in this crate transports
 /// a vector between distinct tangent spaces using components alone; when only
 /// components are available (for example through the legacy
-/// [`HistoryBackend::push_velocity`] path), transport is limited to the
+/// `HistoryBackend::push_velocity` path), transport is limited to the
 /// coordinate-identity contract.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HistoryEntry<const D: usize> {
@@ -69,7 +69,7 @@ impl<const D: usize> HistoryEntry<D> {
 /// ready for the caller to push `destination` itself.
 ///
 /// This is called once per accepted (or provisional) segment by
-/// [`HistoryBackend::push_entry`] implementations. It performs `O(len)`
+/// `HistoryBackend::push_entry` implementations. It performs `O(len)`
 /// transport evaluations per call; combined with `N` accepted steps this
 /// gives `O(N^2)` transport evaluations over a trajectory, each costing
 /// `O(D^3)` for a Christoffel contraction, i.e. `O(D^3 * N^2)` overall for the
@@ -117,7 +117,7 @@ where
 /// discrete segment at a time via `transport`. Returns the vector expressed
 /// at `waypoints.last()`'s point.
 ///
-/// This is the same per-segment mechanism [`HistoryBackend::push_entry`]
+/// This is the same per-segment mechanism `HistoryBackend::push_entry`
 /// applies internally, exposed directly over an explicit path for research
 /// and validation use: it lets a caller measure how a [`HistoryTransport`]'s
 /// accumulated numerical error behaves under path refinement, independent of
@@ -178,7 +178,7 @@ where
 /// 3. evaluate the connection and velocity at the segment end;
 /// 4. correct with the average of the two derivatives.
 ///
-/// [`HistoryBackend::push_entry`] calls this once per accepted segment for
+/// `HistoryBackend::push_entry` calls this once per accepted segment for
 /// every currently retained vector, so transport accumulates along the
 /// actual accepted worldline polyline rather than jumping directly between a
 /// sample's original recorded point and the current point.
