@@ -11,6 +11,8 @@
 use std::io::IsTerminal;
 use std::sync::OnceLock;
 
+const LIBRARY_ONLY_HEADINGS: [&str; 2] = ["PATTERN DETECTION CRATES", "ALGORITHM CREATION CRATES"];
+
 /// Whether colour output is enabled for this process. Decided once, cheaply.
 ///
 /// Disabled when: `NO_COLOR` is set (to anything, per the spec), `CLICOLOR=0`,
@@ -63,8 +65,18 @@ pub fn dim(s: &str) -> String {
     paint("2", s)
 }
 /// Bold cyan — headings.
+///
+/// Library-capability groups are labelled explicitly so `scirust help` cannot
+/// imply that their crate names are runnable subcommands.
 pub fn heading(s: &str) -> String {
-    paint("1;36", s)
+    if LIBRARY_ONLY_HEADINGS.contains(&s)
+    {
+        paint("1;36", &format!("{s} — LIBRARY CRATES (NOT SUBCOMMANDS)"))
+    }
+    else
+    {
+        paint("1;36", s)
+    }
 }
 /// Green — success / commands.
 pub fn green(s: &str) -> String {
@@ -166,5 +178,15 @@ mod tests {
         // unset; either way `paint` must never corrupt the string content.
         let s = bold("hello");
         assert!(s.contains("hello"));
+    }
+
+    #[test]
+    fn library_capability_headings_are_explicitly_not_subcommands() {
+        for heading_name in LIBRARY_ONLY_HEADINGS
+        {
+            let rendered = heading(heading_name);
+            assert!(rendered.contains("LIBRARY CRATES (NOT SUBCOMMANDS)"));
+        }
+        assert!(!heading("NUMERICAL SOLVERS").contains("NOT SUBCOMMANDS"));
     }
 }
