@@ -436,11 +436,11 @@ pub enum ReferenceExecutionError {
     EntryPointMismatch { expected: String, found: String },
     /// The opcode has no CPU implementation in this interpreter.
     ///
-    /// Reserved for a future opcode. Not constructed today: this crate matches
-    /// [`ReferenceOpcode`] exhaustively, so adding a variant to that enum
-    /// produces a **compile error** here rather than a runtime rejection —
-    /// a stronger guarantee than this variant provides, and the reason it stays
-    /// unreachable.
+    /// Reference v1.1 can encode operations that are validated by the wire
+    /// codec but intentionally remain outside this legacy scalar CPU interpreter.
+    /// Preparation rejects those operations explicitly instead of silently
+    /// treating them as no-ops; Core2 executes them through its dedicated
+    /// deterministic reference runtime.
     UnsupportedOpcode { opcode: ReferenceOpcode },
     /// The opcode needs a transcendental function this crate cannot evaluate
     /// with a cross-platform bit-identical result.
