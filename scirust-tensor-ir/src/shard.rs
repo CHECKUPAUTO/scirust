@@ -347,7 +347,7 @@ pub fn plan_sharding(
             {
                 let dimension = tensor_type.shape.dims()[tensor_axis];
                 let parts = mesh.axes[*mesh_axis].size;
-                if dimension % parts != 0
+                if dimension.checked_rem(parts) != Some(0)
                 {
                     return Err(ShardError::UnevenPartition {
                         tensor_axis,
@@ -365,7 +365,7 @@ pub fn plan_sharding(
         let coordinates = mesh.coordinates(rank)?;
         let mut local_dims = tensor_type.shape.dims().to_vec();
         let mut ranges = Vec::with_capacity(local_dims.len());
-        for tensor_axis in 0..local_dims.len()
+        for (tensor_axis, local_dim) in local_dims.iter_mut().enumerate()
         {
             let dimension = tensor_type.shape.dims()[tensor_axis];
             if let Some(mesh_axis) = partition.axes[tensor_axis]
@@ -373,7 +373,7 @@ pub fn plan_sharding(
                 let parts = mesh.axes[mesh_axis].size;
                 let coordinate = coordinates[mesh_axis];
                 let range = partition_range(dimension, parts, coordinate, policy, tensor_axis)?;
-                local_dims[tensor_axis] = range.len();
+                *local_dim = range.len();
                 ranges.push(range);
             }
             else
@@ -412,7 +412,7 @@ fn partition_range(
     {
         ShardPolicy::Even =>
         {
-            if dimension % parts != 0
+            if dimension.checked_rem(parts) != Some(0)
             {
                 return Err(ShardError::UnevenPartition {
                     tensor_axis,
