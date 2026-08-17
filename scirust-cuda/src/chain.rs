@@ -160,6 +160,30 @@ extern "C" __global__ void softmax_kernel(
     }
 }
 
+// Shape-invariant raw attention scores: out = q · keys^T.
+// One thread owns one (query-row, key-row) score and accumulates the head
+// dimension strictly left-to-right in fp32 before the single BF16 output
+// boundary. This gives cached prefill and one-token decode the same numerical
+// contract for identical BF16 Q/K values, independent of GEMM geometry.
+extern "C" __global__ void attention_scores_ltr_kernel(
+    unsigned short* out,
+    const unsigned short* q,
+    const unsigned short* keys,
+    const size_t rows,
+    const size_t seq,
+    const size_t dim)
+{
+    const size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < rows * seq) {
+        const size_t r = idx / seq;
+        const size_t j = idx % seq;
+        float acc = 0.0f;
+        for (size_t c = 0; c < dim; ++c)
+            acc += b2f(q[r * dim + c]) * b2f(keys[j * dim + c]);
+        out[idx] = f2b(acc);
+    }
+}
+
 // Deterministic attention context: out = weights · values.
 // One thread owns one output element and accumulates positions strictly left-to-right
 // in fp32. Therefore a causal row is invariant to unrelated output rows and to later
@@ -805,6 +829,7 @@ struct Kernels {
     slice_rows: CudaFunction,
     place_rows: CudaFunction,
     softmax: CudaFunction,
+    attention_scores_ltr: CudaFunction,
     attention_context: CudaFunction,
     scale_mask: CudaFunction,
     rope: CudaFunction,
@@ -889,6 +914,7 @@ impl CudaChain {
             slice_rows: f("slice_rows_kernel"),
             place_rows: f("place_rows_kernel"),
             softmax: f("softmax_fast_kernel"),
+            attention_scores_ltr: f("attention_scores_ltr_kernel"),
             attention_context: f("attention_context_kernel"),
             scale_mask: f("scale_mask_kernel"),
             rope: f("rope_kernel"),
@@ -1442,6 +1468,47 @@ impl CudaChain {
             buf: out,
             rows,
             cols,
+        }
+    }
+
+    /// Shape-invariant raw attention scores `q · keysᵀ`.
+    ///
+    /// Each score accumulates the shared head dimension strictly left-to-right
+    /// in fp32 and rounds once to bf16. Cached wide-prefill and single-query
+    /// decode therefore share one numerical contract instead of inheriting
+    /// shape-dependent cuBLASLt reduction order.
+    pub fn attention_scores_ltr(&self, q: &CudaMatrix, keys: &CudaMatrix) -> CudaMatrix {
+        assert_eq!(
+            q.cols, keys.cols,
+            "attention_scores_ltr: Q/K dimensions disagree"
+        );
+        let rows = q.rows;
+        let seq = keys.rows;
+        let dim = q.cols;
+        let total = rows * seq;
+        let mut out = self
+            .stream
+            .alloc_zeros::<bf16>(total)
+            .expect("cuda alloc deterministic attention scores");
+        let (rows_a, seq_a, dim_a) = (rows, seq, dim);
+        let mut builder = self
+            .stream
+            .launch_builder(&self.kernels().attention_scores_ltr);
+        builder.arg(&mut out);
+        builder.arg(&q.buf);
+        builder.arg(&keys.buf);
+        builder.arg(&rows_a);
+        builder.arg(&seq_a);
+        builder.arg(&dim_a);
+        unsafe {
+            builder
+                .launch(LaunchConfig::for_num_elems(total as u32))
+                .expect("launch attention_scores_ltr_kernel");
+        }
+        CudaMatrix {
+            buf: out,
+            rows,
+            cols: seq,
         }
     }
 
