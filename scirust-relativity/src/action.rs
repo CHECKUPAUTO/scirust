@@ -38,7 +38,7 @@ const MIN_GRID: usize = 5;
 /// A typed failure of the action-variation extractor. It never panics.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ActionError {
-    /// The grid resolution is even or below [`MIN_GRID`] (Simpson needs an odd
+    /// The grid resolution is even or below `MIN_GRID` (Simpson needs an odd
     /// node count `>= 5`).
     InvalidGridResolution(usize),
     /// The radial range is not `0 < lower < upper` with finite bounds.
