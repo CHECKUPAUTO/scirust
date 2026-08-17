@@ -1,0 +1,71 @@
+name: Rustdoc fix scirust-electrotech once
+
+on:
+  push:
+    branches:
+      - codex/gate-workspace-rustdoc
+    paths:
+      - .github/workflows/rustdoc-fix-electrotech-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-24.04
+    env:
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: codex/gate-workspace-rustdoc
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: stable
+      - name: Apply exact electrotech rustdoc fixes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          files = [
+              Path('scirust-electrotech/src/synchronous_generator.rs'),
+              Path('scirust-electrotech/src/induction_machine_circuit.rs'),
+          ]
+          replacements = {
+              '[Hz]': '`Hz`',
+              '[Wb]': '`Wb`',
+              '[V]': '`V`',
+              '[Ω]': '`Ω`',
+              '[rad]': '`rad`',
+              '[W]': '`W`',
+          }
+          for path in files:
+              text = path.read_text()
+              before = text
+              for old, new in replacements.items():
+                  text = text.replace(old, new)
+              if text == before:
+                  print(f'no unit-link changes needed in {path}')
+              path.write_text(text)
+
+          lib = Path('scirust-electrotech/src/lib.rs')
+          text = lib.read_text()
+          old = '[`line_voltage_regulation`]'
+          if text.count(old) != 1:
+              raise SystemExit(f'expected exactly one ambiguous line_voltage_regulation link, found {text.count(old)}')
+          lib.write_text(text.replace(old, '[`line_voltage_regulation()`]'))
+          PY
+          git diff --check
+      - name: Validate strict electrotech rustdoc
+        shell: bash
+        run: cargo +stable doc -p scirust-electrotech --no-deps --locked
+      - name: Commit fixes and remove temporary workflow
+        shell: bash
+        run: |
+          rm .github/workflows/rustdoc-fix-electrotech-once.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scirust-electrotech/src .github/workflows/rustdoc-fix-electrotech-once.yml
+          git commit -m 'docs: fix scirust-electrotech rustdoc links'
+          git push origin HEAD:codex/gate-workspace-rustdoc
