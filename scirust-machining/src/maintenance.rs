@@ -16,7 +16,7 @@
 //! **intrinsèque** (n'inclut ni les délais logistiques, ni la maintenance
 //! préventive) ; la maintenabilité suppose des durées de réparation
 //! **exponentielles**. Se combine avec [`crate::reliability`]. Pour le TRS d'un
-//! équipement de production, voir [`crate::oee`].
+//! équipement de production, voir [`crate::oee()`].
 
 /// MTBF `= temps de fonctionnement / n_défaillances`.
 ///

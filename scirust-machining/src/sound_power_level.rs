@@ -9,9 +9,9 @@
 //! pression → puissance    Lw   = Lp + 10·log10(4·π·r²) − 10·log10(Q)
 //! ```
 //!
-//! `W` puissance acoustique rayonnée [W], `W_ref` puissance de référence [W]
-//! (1 pW = 1e-12 W dans l'air), `Lw` niveau de puissance sonore [dB], `Lp`
-//! niveau de pression sonore [dB], `r` distance source→point [m], `Q` facteur
+//! `W` puissance acoustique rayonnée (W), `W_ref` puissance de référence (W)
+//! (1 pW = 1e-12 W dans l'air), `Lw` niveau de puissance sonore (dB), `Lp`
+//! niveau de pression sonore (dB), `r` distance source→point (m), `Q` facteur
 //! de directivité [sans dimension] (Q = 1 rayonnement sphérique, Q = 2
 //! hémisphérique sur plan réfléchissant, etc.).
 //!
@@ -24,7 +24,7 @@
 
 use core::f64::consts::PI;
 
-/// Niveau de puissance sonore `Lw = 10·log10(W / W_ref)` [dB].
+/// Niveau de puissance sonore `Lw = 10·log10(W / W_ref)` (dB).
 ///
 /// `sound_power` et `reference_power` en watts (W) ; le niveau est en dB.
 ///
@@ -41,7 +41,7 @@ pub fn swl_from_power(sound_power: f64, reference_power: f64) -> f64 {
     10.0 * (sound_power / reference_power).log10()
 }
 
-/// Puissance acoustique `W = W_ref · 10^(Lw / 10)` [W] (inverse de
+/// Puissance acoustique `W = W_ref · 10^(Lw / 10)` (W) (inverse de
 /// [`swl_from_power`]).
 ///
 /// `swl` en dB, `reference_power` en W ; la puissance rendue est en W.
@@ -57,7 +57,7 @@ pub fn swl_to_power(swl: f64, reference_power: f64) -> f64 {
 }
 
 /// Niveau de pression sonore en champ libre pour une source ponctuelle
-/// `Lp = Lw − 10·log10(4·π·r²) + 10·log10(Q)` [dB].
+/// `Lp = Lw − 10·log10(4·π·r²) + 10·log10(Q)` (dB).
 ///
 /// `swl` niveau de puissance en dB, `distance` en mètres, `directivity_factor`
 /// facteur de directivité `Q` (sans dimension) ; le résultat est en dB.
@@ -80,7 +80,7 @@ pub fn swl_to_spl(swl: f64, distance: f64, directivity_factor: f64) -> f64 {
 }
 
 /// Niveau de puissance sonore reconstitué depuis une pression mesurée en champ
-/// libre `Lw = Lp + 10·log10(4·π·r²) − 10·log10(Q)` [dB] (inverse de
+/// libre `Lw = Lp + 10·log10(4·π·r²) − 10·log10(Q)` (dB) (inverse de
 /// [`swl_to_spl`]).
 ///
 /// `spl` niveau de pression en dB, `distance` en mètres, `directivity_factor`

@@ -7,10 +7,10 @@
 //! masse volumique  ρ    = p·M/(R·T)
 //! ```
 //!
-//! `h` altitude au-dessus du niveau de la mer [m], `T0`/`p0` température [K] et
-//! pression [Pa] au sol, `lapse` gradient thermique vertical [K/m], `T`/`p`
-//! température [K] et pression [Pa] locales, `g` accélération de la pesanteur
-//! [m/s²], `M` masse molaire de l'air [kg/mol], `R` constante des gaz parfaits
+//! `h` altitude au-dessus du niveau de la mer (m), `T0`/`p0` température (K) et
+//! pression (Pa) au sol, `lapse` gradient thermique vertical (K/m), `T`/`p`
+//! température (K) et pression (Pa) locales, `g` accélération de la pesanteur
+//! (m/s²), `M` masse molaire de l'air (kg/mol), `R` constante des gaz parfaits
 //! [J/(mol·K)], `ρ` masse volumique [kg/m³]. Toutes les grandeurs sont en
 //! **unités SI**.
 //!
@@ -21,24 +21,24 @@
 //! l'appelant** : les constantes `ISA_*` exposées ci-dessous ne sont qu'un jeu
 //! de référence **documenté** (atmosphère type de l'OACI), jamais imposé.
 
-/// Pression standard au niveau de la mer (référence ISA) [Pa].
+/// Pression standard au niveau de la mer (référence ISA) (Pa).
 pub const ISA_SEA_LEVEL_PRESSURE: f64 = 101325.0;
-/// Température standard au niveau de la mer (référence ISA) [K] (15 °C).
+/// Température standard au niveau de la mer (référence ISA) (K) (15 °C).
 pub const ISA_SEA_LEVEL_TEMPERATURE: f64 = 288.15;
-/// Gradient thermique vertical de la troposphère (référence ISA) [K/m].
+/// Gradient thermique vertical de la troposphère (référence ISA) (K/m).
 pub const ISA_LAPSE_RATE: f64 = 0.0065;
-/// Accélération de la pesanteur standard [m/s²].
+/// Accélération de la pesanteur standard (m/s²).
 pub const ISA_GRAVITY: f64 = 9.80665;
-/// Masse molaire de l'air sec (référence ISA) [kg/mol].
+/// Masse molaire de l'air sec (référence ISA) (kg/mol).
 pub const ISA_MOLAR_MASS_AIR: f64 = 0.0289644;
 /// Constante universelle des gaz parfaits [J/(mol·K)].
 pub const ISA_GAS_CONSTANT: f64 = 8.314462618;
-/// Altitude de la tropopause, limite de validité du modèle [m].
+/// Altitude de la tropopause, limite de validité du modèle (m).
 pub const ISA_TROPOPAUSE_ALTITUDE: f64 = 11000.0;
 
-/// Température locale `T(h) = T0 − lapse·h` [K].
+/// Température locale `T(h) = T0 − lapse·h` (K).
 ///
-/// `sea_level_temperature` [K], `lapse_rate` [K/m], `altitude` [m].
+/// `sea_level_temperature` (K), `lapse_rate` (K/m), `altitude` (m).
 ///
 /// Panique si `sea_level_temperature <= 0`, ou si `lapse_rate` ou `altitude`
 /// n'est pas fini.
@@ -52,10 +52,10 @@ pub fn isa_temperature(sea_level_temperature: f64, lapse_rate: f64, altitude: f6
     sea_level_temperature - lapse_rate * altitude
 }
 
-/// Pression locale `p(h) = p0·(1 − lapse·h/T0)^(g·M/(R·lapse))` [Pa].
+/// Pression locale `p(h) = p0·(1 − lapse·h/T0)^(g·M/(R·lapse))` (Pa).
 ///
-/// `sea_level_pressure` [Pa], `altitude` [m], `lapse_rate` [K/m],
-/// `sea_level_temperature` [K], `gravity` [m/s²], `molar_mass` [kg/mol],
+/// `sea_level_pressure` (Pa), `altitude` (m), `lapse_rate` (K/m),
+/// `sea_level_temperature` (K), `gravity` (m/s²), `molar_mass` (kg/mol),
 /// `gas_constant` [J/(mol·K)].
 ///
 /// Panique si l'un des paramètres physiques (`sea_level_pressure`,
@@ -107,7 +107,7 @@ pub fn isa_pressure(
 
 /// Masse volumique de l'air parfait `ρ = p·M/(R·T)` [kg/m³].
 ///
-/// `pressure` [Pa], `temperature` [K], `molar_mass` [kg/mol],
+/// `pressure` (Pa), `temperature` (K), `molar_mass` (kg/mol),
 /// `gas_constant` [J/(mol·K)].
 ///
 /// Panique si `pressure < 0`, `temperature <= 0`, `molar_mass <= 0` ou
