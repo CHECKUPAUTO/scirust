@@ -36,7 +36,7 @@ fn greedy() -> SamplingParams {
 }
 
 #[test]
-fn fused_cuda_decode_and_device_feedback_match_b49_greedy() {
+fn canonical_cuda_decode_and_device_feedback_match_b49_greedy() {
     let config = tiny_tied();
     let model = SciAgentModel::new(&config);
     let Some(oracle) = CudaModel::from_model(&model)
@@ -75,7 +75,7 @@ fn fused_cuda_decode_and_device_feedback_match_b49_greedy() {
             &prompt,
             max_new,
             CudaDecodeModes {
-                ffn: CudaDecodeFfnMode::FusedGemv,
+                ffn: CudaDecodeFfnMode::CublasLt,
                 down: CudaDecodeDownMode::CublasLt,
                 lm_head: CudaDecodeLmHeadMode::FullLogits,
             },
@@ -97,7 +97,7 @@ fn fused_cuda_decode_and_device_feedback_match_b49_greedy() {
             &prompt,
             max_new,
             CudaDecodeModes {
-                ffn: CudaDecodeFfnMode::FusedGemv,
+                ffn: CudaDecodeFfnMode::CublasLt,
                 down: CudaDecodeDownMode::TiledGemv,
                 lm_head: CudaDecodeLmHeadMode::FusedArgmax,
             },
