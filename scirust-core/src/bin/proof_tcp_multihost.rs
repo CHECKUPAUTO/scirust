@@ -7,7 +7,7 @@
 //! Chaque rang génère sa contribution **localement** (Philox, `seed`+rang :
 //! reproductible sur toute machine), participe au protocole TCP réel, puis
 //! le rang 0 **recalcule la référence en-process** (mêmes entrées régénérées
-//! localement, [`tree_allreduce::tree_all_reduce`]) et compare bit à bit —
+//! localement, `tree_allreduce::tree_all_reduce`) et compare bit à bit —
 //! auto-vérifiant, AUCUNE empreinte à récolter à l'avance. Si les rangs
 //! tournent sur des architectures différentes (ex. un rang sur Jetson
 //! aarch64, le rang 0 sur Debian x86_64), un `verdict=PASS` prouve le
