@@ -126,9 +126,8 @@ impl IbpMlp {
     /// Fallible zonotope certification boundary.
     pub fn try_certify_zonotope(&self, input: &Interval) -> Result<Interval> {
         input.validate()?;
-        let output = map_dimension_panic("IbpMlp::certify_zonotope", || {
-            self.certify_zonotope(input)
-        })?;
+        let output =
+            map_dimension_panic("IbpMlp::certify_zonotope", || self.certify_zonotope(input))?;
         output.validate()?;
         Ok(output)
     }
@@ -136,9 +135,8 @@ impl IbpMlp {
     /// Fallible DeepPoly certification boundary.
     pub fn try_certify_deeppoly(&self, input: &Interval) -> Result<Interval> {
         input.validate()?;
-        let output = map_dimension_panic("IbpMlp::certify_deeppoly", || {
-            self.certify_deeppoly(input)
-        })?;
+        let output =
+            map_dimension_panic("IbpMlp::certify_deeppoly", || self.certify_deeppoly(input))?;
         output.validate()?;
         Ok(output)
     }
@@ -203,7 +201,7 @@ mod tests {
     #[test]
     fn checked_verdict_rejects_bad_target() {
         let out = Interval::try_new(vec![2.0, 0.0], vec![3.0, 1.0]).unwrap();
-        assert_eq!(try_certified_robust(&out, 0).unwrap(), true);
+        assert!(try_certified_robust(&out, 0).unwrap());
         assert!(try_certified_robust(&out, 2).is_err());
     }
 }
