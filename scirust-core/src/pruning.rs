@@ -33,7 +33,8 @@ pub enum PruningMethod {
 }
 
 fn validate_sparsity(op: &'static str, sparsity: f32) -> Result<()> {
-    if !sparsity.is_finite() || !(0.0..=1.0).contains(&sparsity) {
+    if !sparsity.is_finite() || !(0.0..=1.0).contains(&sparsity)
+    {
         return Err(SciRustError::InvalidConfig(format!(
             "{op}: sparsity must be finite and in [0, 1], got {sparsity}"
         )));
@@ -42,7 +43,11 @@ fn validate_sparsity(op: &'static str, sparsity: f32) -> Result<()> {
 }
 
 fn validate_finite_weights(op: &'static str, weights: &[f32]) -> Result<()> {
-    if let Some((index, value)) = weights.iter().enumerate().find(|(_, value)| !value.is_finite()) {
+    if let Some((index, value)) = weights
+        .iter()
+        .enumerate()
+        .find(|(_, value)| !value.is_finite())
+    {
         return Err(SciRustError::InvalidConfig(format!(
             "{op}: weight at index {index} must be finite, got {value}"
         )));
@@ -56,10 +61,11 @@ fn validate_matrix_shape(
     rows: usize,
     cols: usize,
 ) -> Result<()> {
-    let expected = rows.checked_mul(cols).ok_or_else(|| {
-        SciRustError::InvalidConfig(format!("{op}: rows * cols overflows usize"))
-    })?;
-    if weights_len != expected {
+    let expected = rows
+        .checked_mul(cols)
+        .ok_or_else(|| SciRustError::InvalidConfig(format!("{op}: rows * cols overflows usize")))?;
+    if weights_len != expected
+    {
         return Err(SciRustError::InvalidConfig(format!(
             "{op}: expected {expected} weights for shape ({rows}, {cols}), got {weights_len}"
         )));
@@ -78,12 +84,14 @@ fn prune_count(len: usize, sparsity: f32) -> usize {
 pub fn try_prune_magnitude(weights: &mut [f32], sparsity: f32) -> Result<()> {
     validate_sparsity("prune_magnitude", sparsity)?;
     validate_finite_weights("prune_magnitude", weights)?;
-    if sparsity == 0.0 || weights.is_empty() {
+    if sparsity == 0.0 || weights.is_empty()
+    {
         return Ok(());
     }
 
     let n_prune = prune_count(weights.len(), sparsity);
-    if n_prune == 0 {
+    if n_prune == 0
+    {
         return Ok(());
     }
 
@@ -94,7 +102,8 @@ pub fn try_prune_magnitude(weights: &mut [f32], sparsity: f32) -> Result<()> {
         .collect();
     indexed.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
 
-    for (idx, _) in indexed.iter().take(n_prune) {
+    for (idx, _) in indexed.iter().take(n_prune)
+    {
         weights[*idx] = 0.0;
     }
     Ok(())
@@ -120,12 +129,14 @@ fn prune_active_magnitude(weights: &mut [f32], fraction: f32) {
         .collect();
 
     let n_prune = prune_count(active.len(), fraction);
-    if n_prune == 0 {
+    if n_prune == 0
+    {
         return;
     }
 
     active.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
-    for (idx, _) in active.iter().take(n_prune) {
+    for (idx, _) in active.iter().take(n_prune)
+    {
         weights[*idx] = 0.0;
     }
 }
@@ -143,12 +154,14 @@ pub fn try_prune_structured_columns(
     validate_sparsity("prune_structured_columns", sparsity)?;
     validate_matrix_shape("prune_structured_columns", weights.len(), rows, cols)?;
     validate_finite_weights("prune_structured_columns", weights)?;
-    if sparsity == 0.0 || cols == 0 {
+    if sparsity == 0.0 || cols == 0
+    {
         return Ok(());
     }
 
     let n_prune = prune_count(cols, sparsity);
-    if n_prune == 0 {
+    if n_prune == 0
+    {
         return Ok(());
     }
 
@@ -162,8 +175,10 @@ pub fn try_prune_structured_columns(
         .collect();
     col_norms.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
 
-    for (col, _) in col_norms.iter().take(n_prune) {
-        for r in 0..rows {
+    for (col, _) in col_norms.iter().take(n_prune)
+    {
+        for r in 0..rows
+        {
             weights[r * cols + *col] = 0.0;
         }
     }
@@ -194,12 +209,14 @@ pub fn try_prune_structured_rows(
     validate_sparsity("prune_structured_rows", sparsity)?;
     validate_matrix_shape("prune_structured_rows", weights.len(), rows, cols)?;
     validate_finite_weights("prune_structured_rows", weights)?;
-    if sparsity == 0.0 || rows == 0 {
+    if sparsity == 0.0 || rows == 0
+    {
         return Ok(());
     }
 
     let n_prune = prune_count(rows, sparsity);
-    if n_prune == 0 {
+    if n_prune == 0
+    {
         return Ok(());
     }
 
@@ -214,7 +231,8 @@ pub fn try_prune_structured_rows(
         .collect();
     row_norms.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
 
-    for (row, _) in row_norms.iter().take(n_prune) {
+    for (row, _) in row_norms.iter().take(n_prune)
+    {
         weights[*row * cols..(*row + 1) * cols].fill(0.0);
     }
     Ok(())
@@ -242,7 +260,8 @@ pub fn try_prune_wanda(
     validate_sparsity("prune_wanda", sparsity)?;
     validate_matrix_shape("prune_wanda", weights.len(), out, in_features)?;
     validate_finite_weights("prune_wanda", weights)?;
-    if input_norms.len() != in_features {
+    if input_norms.len() != in_features
+    {
         return Err(SciRustError::InvalidConfig(format!(
             "prune_wanda: expected {in_features} input norms, got {}",
             input_norms.len()
@@ -257,15 +276,18 @@ pub fn try_prune_wanda(
             "prune_wanda: input norm at index {index} must be finite and non-negative, got {value}"
         )));
     }
-    if sparsity == 0.0 || in_features == 0 {
+    if sparsity == 0.0 || in_features == 0
+    {
         return Ok(());
     }
 
     let n_prune = prune_count(in_features, sparsity);
-    if n_prune == 0 {
+    if n_prune == 0
+    {
         return Ok(());
     }
-    for r in 0..out {
+    for r in 0..out
+    {
         let row = &mut weights[r * in_features..(r + 1) * in_features];
         let mut scored: Vec<(usize, f32)> = row
             .iter()
@@ -274,7 +296,8 @@ pub fn try_prune_wanda(
             .map(|(j, (&w, &xn))| (j, w.abs() * xn))
             .collect();
         scored.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
-        for (j, _) in scored.iter().take(n_prune) {
+        for (j, _) in scored.iter().take(n_prune)
+        {
             row[*j] = 0.0;
         }
     }
@@ -301,7 +324,8 @@ pub fn prune_wanda(
 
 /// Compute current sparsity ratio (fraction of exactly zero weights).
 pub fn sparsity_ratio(weights: &[f32]) -> f32 {
-    if weights.is_empty() {
+    if weights.is_empty()
+    {
         return 0.0;
     }
     let zeros = weights.iter().filter(|&&w| w == 0.0).count();
@@ -357,7 +381,8 @@ impl LotteryTicketPruner {
                 "LotteryTicketPruner::prune_and_rewind: initial weights were not saved".into(),
             )
         })?;
-        if initial.len() != weights.len() {
+        if initial.len() != weights.len()
+        {
             return Err(SciRustError::InvalidConfig(format!(
                 "LotteryTicketPruner::prune_and_rewind: initial length {} does not match current length {}",
                 initial.len(),
@@ -367,13 +392,16 @@ impl LotteryTicketPruner {
         validate_finite_weights("LotteryTicketPruner::initial_weights", initial)?;
 
         let target = 1.0 - (1.0 - self.prune_fraction).powi(self.iterations as i32);
-        if sparsity_ratio(weights) >= target {
+        if sparsity_ratio(weights) >= target
+        {
             return Ok(());
         }
 
         prune_active_magnitude(weights, self.prune_fraction);
-        for (w, &init) in weights.iter_mut().zip(initial.iter()) {
-            if *w != 0.0 {
+        for (w, &init) in weights.iter_mut().zip(initial.iter())
+        {
+            if *w != 0.0
+            {
                 *w = init;
             }
         }
@@ -432,7 +460,6 @@ mod tests {
 
     #[test]
     fn structured_row_pruning_is_implemented() {
-        // Row norms: 5, sqrt(2), 10. The middle row must be removed.
         let mut weights = vec![3.0, 4.0, 1.0, 1.0, 6.0, 8.0];
         try_prune_structured_rows(&mut weights, 3, 2, 0.34).unwrap();
         assert_eq!(weights, vec![3.0, 4.0, 0.0, 0.0, 6.0, 8.0]);
@@ -525,11 +552,9 @@ mod tests {
         let input_norms = [1.0f32, 1.0, 1.0, 1.0];
         let mut w: Vec<f32> = (0..8).map(|i| i as f32 + 1.0).collect();
         prune_wanda(&mut w, 2, 4, &input_norms, 0.5);
-        for r in 0..2 {
-            let zeros = w[r * 4..(r + 1) * 4]
-                .iter()
-                .filter(|&&v| v == 0.0)
-                .count();
+        for r in 0..2
+        {
+            let zeros = w[r * 4..(r + 1) * 4].iter().filter(|&&v| v == 0.0).count();
             assert_eq!(zeros, 2, "row {r} should have 2 zeros");
         }
     }
