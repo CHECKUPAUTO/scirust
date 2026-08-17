@@ -1,0 +1,44 @@
+name: Issue 1230 rustdoc fixes 18
+
+on:
+  push:
+    branches: [fix/issue-1230-workspace-rustdoc]
+    paths:
+      - ".github/workflows/issue-1230-rustdoc-fixes-18.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch-rustdoc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+      - name: Fix GPU private rustdoc link
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('scirust-gpu/src/compute_adapter.rs')
+          text = path.read_text()
+          old = '    /// documented in [`crate::cpu_reference`]. Execution is fully serial and'
+          new = '    /// documented in `crate::cpu_reference`. Execution is fully serial and'
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one target line, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1))
+          PY
+      - name: Commit rustdoc fix
+        shell: bash
+        env:
+          HEAD_REF: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add scirust-gpu/src/compute_adapter.rs
+          git diff --cached --check
+          git commit -m "docs(gpu): avoid private CPU reference rustdoc link"
+          git push origin "HEAD:${HEAD_REF}"
