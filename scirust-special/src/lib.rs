@@ -864,7 +864,7 @@ fn bessel_y1(x: f64) -> f64 {
 /// Bessel function of the second kind (Neumann function), integer order `n`,
 /// `Yₙ(x)`, for `x > 0`.
 ///
-/// `Y₀`/`Y₁` come from [`bessel_y0`]/[`bessel_y1`] (log series or asymptotic
+/// `Y₀`/`Y₁` come from `bessel_y0`/`bessel_y1` (log series or asymptotic
 /// expansion, whichever is accurate at that `x`); higher orders follow via
 /// the three-term recurrence `Y_{k+1}(x) = (2k/x)·Yₖ(x) − Y_{k−1}(x)`, which
 /// — unlike `Jₙ`'s — is numerically *stable* run upward, so no Miller-style
