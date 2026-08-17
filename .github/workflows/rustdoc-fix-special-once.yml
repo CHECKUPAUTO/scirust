@@ -1,0 +1,50 @@
+name: Rustdoc fix scirust-special once
+
+on:
+  push:
+    branches:
+      - codex/gate-workspace-rustdoc
+    paths:
+      - .github/workflows/rustdoc-fix-special-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-24.04
+    env:
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: codex/gate-workspace-rustdoc
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: stable
+      - name: Apply exact scirust-special rustdoc fix
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('scirust-special/src/lib.rs')
+          text = path.read_text()
+          old = '`Y₀`/`Y₁` come from [`bessel_y0`]/[`bessel_y1`]'
+          new = '`Y₀`/`Y₁` come from `bessel_y0`/`bessel_y1`'
+          if text.count(old) != 1:
+              raise SystemExit(f'expected exactly one private bessel_y0/bessel_y1 doc link pair, found {text.count(old)}')
+          path.write_text(text.replace(old, new))
+          PY
+          git diff --check
+      - name: Validate strict scirust-special rustdoc
+        shell: bash
+        run: cargo +stable doc -p scirust-special --no-deps --locked
+      - name: Commit fix and remove temporary workflow
+        shell: bash
+        run: |
+          rm .github/workflows/rustdoc-fix-special-once.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scirust-special/src/lib.rs .github/workflows/rustdoc-fix-special-once.yml
+          git commit -m 'docs: fix private Bessel rustdoc links'
+          git push origin HEAD:codex/gate-workspace-rustdoc
