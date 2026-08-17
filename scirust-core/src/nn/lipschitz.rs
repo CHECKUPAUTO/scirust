@@ -29,6 +29,7 @@
 //! [`GloroClassifier`] (a linear classifier with a sound certified radius). Pure
 //! `f32`, fixed order ⇒ **bit-for-bit deterministic**.
 
+use crate::error::{Result, SciRustError};
 use std::f32::consts::SQRT_2;
 
 /// Largest singular value `‖W‖₂` of a `rows×cols` row-major matrix by **power
@@ -155,42 +156,131 @@ pub struct GloroClassifier {
 }
 
 impl GloroClassifier {
-    /// Build from the weight matrix. The certified `lip = √2·upper_bound(‖W‖₂)`
-    /// uses the guaranteed [`spectral_norm_upper_bound`] so the radius is sound;
-    /// `iters` steps of power iteration give the tighter non-certified estimate
-    /// available via [`Self::lipschitz_estimate`].
-    pub fn new_linear(w: Vec<f32>, num_classes: usize, in_features: usize, iters: usize) -> Self {
-        assert_eq!(w.len(), num_classes * in_features, "GloRo: size mismatch");
+    /// Fallible constructor for a certifiable linear classifier.
+    ///
+    /// Certification requires at least two classes, a positive input dimension,
+    /// an exactly matching row-major weight matrix, and finite weights. It also
+    /// rejects a model whose derived Lipschitz values cannot be represented as
+    /// finite `f32` values.
+    pub fn try_new_linear(
+        w: Vec<f32>,
+        num_classes: usize,
+        in_features: usize,
+        iters: usize,
+    ) -> Result<Self> {
+        if num_classes < 2
+        {
+            return Err(SciRustError::InvalidConfig(
+                "GloRo certification requires at least two classes".to_string(),
+            ));
+        }
+        if in_features == 0
+        {
+            return Err(SciRustError::InvalidConfig(
+                "GloRo in_features must be > 0".to_string(),
+            ));
+        }
+        let expected = num_classes.checked_mul(in_features).ok_or_else(|| {
+            SciRustError::InvalidConfig("GloRo weight dimensions overflow usize".to_string())
+        })?;
+        if w.len() != expected
+        {
+            return Err(SciRustError::InvalidConfig(format!(
+                "GloRo weight size mismatch: expected {expected}, got {}",
+                w.len()
+            )));
+        }
+        if !w.iter().all(|value| value.is_finite())
+        {
+            return Err(SciRustError::InvalidConfig(
+                "GloRo weights must be finite".to_string(),
+            ));
+        }
+
         let ub = spectral_norm_upper_bound(&w, num_classes, in_features);
         let est = spectral_norm(&w, num_classes, in_features, iters);
+        let lip = SQRT_2 * ub;
+        let lip_estimate = SQRT_2 * est;
+        if !lip.is_finite() || !lip_estimate.is_finite()
+        {
+            return Err(SciRustError::InvalidConfig(
+                "GloRo Lipschitz bound/estimate is non-finite".to_string(),
+            ));
+        }
         // A valid upper bound never lies below a from-below estimate.
         debug_assert!(
             ub + 1e-4 >= est,
             "upper bound {ub} below power-iteration estimate {est}"
         );
-        Self {
+        Ok(Self {
             w,
             num_classes,
             in_features,
-            lip: SQRT_2 * ub,
-            lip_estimate: SQRT_2 * est,
-        }
+            lip,
+            lip_estimate,
+        })
     }
 
-    /// Logits `W·x`.
-    pub fn logits(&self, x: &[f32]) -> Vec<f32> {
-        (0..self.num_classes)
+    /// Build from the weight matrix. The certified `lip = √2·upper_bound(‖W‖₂)`
+    /// uses the guaranteed [`spectral_norm_upper_bound`] so the radius is sound;
+    /// `iters` steps of power iteration give the tighter non-certified estimate
+    /// available via [`Self::lipschitz_estimate`].
+    ///
+    /// # Panics
+    ///
+    /// Panics when the model cannot satisfy the certification preconditions.
+    /// Prefer [`Self::try_new_linear`] for caller-controlled model data.
+    pub fn new_linear(w: Vec<f32>, num_classes: usize, in_features: usize, iters: usize) -> Self {
+        Self::try_new_linear(w, num_classes, in_features, iters)
+            .unwrap_or_else(|error| panic!("GloroClassifier::new_linear: {error}"))
+    }
+
+    /// Fallible logits `W·x` with exact dimension and finiteness validation.
+    pub fn try_logits(&self, x: &[f32]) -> Result<Vec<f32>> {
+        if x.len() != self.in_features
+        {
+            return Err(SciRustError::InvalidConfig(format!(
+                "GloRo input size mismatch: expected {}, got {}",
+                self.in_features,
+                x.len()
+            )));
+        }
+        if !x.iter().all(|value| value.is_finite())
+        {
+            return Err(SciRustError::InvalidConfig(
+                "GloRo input must contain only finite values".to_string(),
+            ));
+        }
+        let logits: Vec<f32> = (0..self.num_classes)
             .map(|c| {
                 let row = &self.w[c * self.in_features..(c + 1) * self.in_features];
                 row.iter().zip(x).map(|(&wij, &xj)| wij * xj).sum()
             })
-            .collect()
+            .collect();
+        if !logits.iter().all(|value| value.is_finite())
+        {
+            return Err(SciRustError::InvalidConfig(
+                "GloRo logits became non-finite".to_string(),
+            ));
+        }
+        Ok(logits)
     }
 
-    /// `(top class, certified L2 radius)` where the radius is
-    /// `(f_top − max_{B≠top} f_B) / (√2·‖W‖₂)` (0 if the top two logits tie).
-    pub fn certify(&self, x: &[f32]) -> (usize, f32) {
-        let logits = self.logits(x);
+    /// Logits `W·x`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `x` has the wrong length, contains a non-finite value, or the
+    /// dot products overflow to a non-finite logit. Prefer [`Self::try_logits`]
+    /// for caller-controlled inputs.
+    pub fn logits(&self, x: &[f32]) -> Vec<f32> {
+        self.try_logits(x)
+            .unwrap_or_else(|error| panic!("GloroClassifier::logits: {error}"))
+    }
+
+    /// Fallible `(top class, certified L2 radius)`.
+    pub fn try_certify(&self, x: &[f32]) -> Result<(usize, f32)> {
+        let logits = self.try_logits(x)?;
         let mut top = 0usize;
         for c in 1..self.num_classes
         {
@@ -208,6 +298,12 @@ impl GloroClassifier {
             }
         }
         let margin = logits[top] - runner;
+        if !margin.is_finite()
+        {
+            return Err(SciRustError::InvalidConfig(
+                "GloRo top-vs-runner-up margin is non-finite".to_string(),
+            ));
+        }
         let radius = if self.lip > 0.0
         {
             margin / self.lip
@@ -216,7 +312,25 @@ impl GloroClassifier {
         {
             0.0
         };
-        (top, radius.max(0.0))
+        if !radius.is_finite()
+        {
+            return Err(SciRustError::InvalidConfig(
+                "GloRo certified radius is non-finite".to_string(),
+            ));
+        }
+        Ok((top, radius.max(0.0)))
+    }
+
+    /// `(top class, certified L2 radius)` where the radius is
+    /// `(f_top − max_{B≠top} f_B) / (√2·‖W‖₂)` (0 if the top two logits tie).
+    ///
+    /// # Panics
+    ///
+    /// Panics when the input cannot satisfy the certification preconditions.
+    /// Prefer [`Self::try_certify`] for caller-controlled inputs.
+    pub fn certify(&self, x: &[f32]) -> (usize, f32) {
+        self.try_certify(x)
+            .unwrap_or_else(|error| panic!("GloroClassifier::certify: {error}"))
     }
 
     /// The **certified** global Lipschitz bound `√2·upper_bound(‖W‖₂)` used in the
@@ -295,6 +409,28 @@ mod tests {
             "normalized spectral norm = {}",
             spectral_norm(&wn, rows, cols, 100)
         );
+    }
+
+    #[test]
+    fn fallible_gloro_boundary_rejects_invalid_model_or_input() {
+        assert!(GloroClassifier::try_new_linear(vec![], 0, 2, 20).is_err());
+        assert!(GloroClassifier::try_new_linear(vec![1.0, 2.0], 1, 2, 20).is_err());
+        assert!(GloroClassifier::try_new_linear(vec![], 2, 0, 20).is_err());
+        assert!(GloroClassifier::try_new_linear(vec![1.0, f32::NAN, 0.0, 1.0], 2, 2, 20).is_err());
+
+        let clf = GloroClassifier::try_new_linear(vec![1.0, 0.0, 0.0, 1.0], 2, 2, 20).unwrap();
+        assert!(clf.try_logits(&[1.0]).is_err());
+        assert!(clf.try_logits(&[1.0, 2.0, 3.0]).is_err());
+        assert!(clf.try_certify(&[1.0, f32::INFINITY]).is_err());
+    }
+
+    #[test]
+    fn fallible_gloro_boundary_accepts_valid_input() {
+        let clf = GloroClassifier::try_new_linear(vec![1.0, 0.0, 0.0, 1.0], 2, 2, 20).unwrap();
+        assert_eq!(clf.try_logits(&[2.0, 1.0]).unwrap(), vec![2.0, 1.0]);
+        let (class, radius) = clf.try_certify(&[2.0, 1.0]).unwrap();
+        assert_eq!(class, 0);
+        assert!(radius > 0.0 && radius.is_finite());
     }
 
     /// **The GloRo certificate, tested for soundness and conservativeness.** For a
