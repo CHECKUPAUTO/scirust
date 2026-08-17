@@ -3,7 +3,7 @@
 //! Pulse-compression waveforms ([`waveform`]), matched filtering
 //! ([`matched_filter`]) and constant-false-alarm-rate detection ([`cfar`]) —
 //! the range-processing and detection core of a pulse-Doppler radar, built
-//! directly on this crate's [`Complex`] primitive. A
+//! directly on this crate's [`Complex`](crate::complex::Complex) primitive. A
 //! long coded pulse is transmitted for energy, compressed on receive into a
 //! sharp peak at the echo delay (resolution set by the bandwidth, not the pulse
 //! length), then thresholded adaptively so the false-alarm rate stays fixed as
