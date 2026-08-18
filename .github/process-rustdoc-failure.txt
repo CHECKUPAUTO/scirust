@@ -3,32 +3,6 @@ Temporary strict rustdoc diagnostic for scirust-process.
 [1m[92m    Updating[0m crates.io index
 [1m[92m    Updating[0m git repository `https://github.com/Memorithm/FLAT-ATTENTION`
 [1m[92m Documenting[0m scirust-process v0.1.0 (/home/runner/work/scirust/scirust/scirust-process)
-[1m[91merror[0m[1m: unresolved link to `an`[0m
-  [1m[94m--> [0mscirust-process/src/process_economics.rs:19:46
-   [1m[94m|[0m
-[1m[94m19[0m [1m[94m|[0m //! [$·an⁻¹], `t_pb` temps de retour simple [an] ; `i` taux d'intérêt annuel
-   [1m[94m|[0m                                              [1m[91m^^[0m [1m[91mno item named `an` in scope[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-   [1m[94m= [0m[1mnote[0m: `-D rustdoc::broken-intra-doc-links` implied by `-D warnings`
-   [1m[94m= [0m[1mhelp[0m: to override `-D warnings` add `#[allow(rustdoc::broken_intra_doc_links)]`
-
-[1m[91merror[0m[1m: unresolved link to `an`[0m
-  [1m[94m--> [0mscirust-process/src/process_economics.rs:20:67
-   [1m[94m|[0m
-[1m[94m20[0m [1m[94m|[0m //! `sans dimension, par an`, `N` durée de vie de l'installation [an], `A`
-   [1m[94m|[0m                                                                   [1m[91m^^[0m [1m[91mno item named `an` in scope[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-
-[1m[91merror[0m[1m: unresolved link to `an`[0m
-   [1m[94m--> [0mscirust-process/src/process_economics.rs:126:42
-    [1m[94m|[0m
-[1m[94m126[0m [1m[94m|[0m /// `plant_life_years` (N) durée de vie [an].
-    [1m[94m|[0m                                          [1m[91m^^[0m [1m[91mno item named `an` in scope[0m
-    [1m[94m|[0m
-    [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-
 [1m[91merror[0m[1m: unresolved link to `gpm`[0m
   [1m[94m--> [0mscirust-process/src/control_valve_cv.rs:24:6
    [1m[94m|[0m
@@ -36,6 +10,8 @@ Temporary strict rustdoc diagnostic for scirust-process.
    [1m[94m|[0m      [1m[91m^^^[0m [1m[91mno item named `gpm` in scope[0m
    [1m[94m|[0m
    [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+   [1m[94m= [0m[1mnote[0m: `-D rustdoc::broken-intra-doc-links` implied by `-D warnings`
+   [1m[94m= [0m[1mhelp[0m: to override `-D warnings` add `#[allow(rustdoc::broken_intra_doc_links)]`
 
 [1m[91merror[0m[1m: unresolved link to `psi`[0m
   [1m[94m--> [0mscirust-process/src/control_valve_cv.rs:24:44

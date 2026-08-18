@@ -6,7 +6,7 @@
 //! règle des six dixièmes   C₂ = C₁ · (Q₂ / Q₁)^0.6                    [$]
 //! extrapolation générale   C₂ = C₁ · (Q₂ / Q₁)^n                      [$]
 //! facteur de Lang          C_TIC = C_PEC · f_L                        [$]
-//! temps de retour simple   t_pb  = I / A_cf                           [an]
+//! temps de retour simple   t_pb  = I / A_cf                           `an`
 //! annuité de capital       A = I · i · (1+i)^N / ((1+i)^N − 1)        [$·an⁻¹]
 //! ```
 //!
@@ -16,8 +16,8 @@
 //! `C_PEC` coût des équipements achetés [$], `f_L` facteur de Lang `sans dimension`,
 //! ≥1, `C_TIC` investissement total immobilisé [$] ; `I`
 //! investissement en capital [$], `A_cf` flux de trésorerie net annuel
-//! [$·an⁻¹], `t_pb` temps de retour simple [an] ; `i` taux d'intérêt annuel
-//! `sans dimension, par an`, `N` durée de vie de l'installation [an], `A`
+//! [$·an⁻¹], `t_pb` temps de retour simple `an` ; `i` taux d'intérêt annuel
+//! `sans dimension, par an`, `N` durée de vie de l'installation `an`, `A`
 //! annuité de récupération du capital [$·an⁻¹].
 //!
 //! **Limite honnête** : ce sont des **estimations d'ordre de grandeur**.
@@ -123,7 +123,7 @@ pub fn econ_payback_period(capital_investment: f64, annual_net_cash_flow: f64) -
 ///
 /// `capital_investment` (I) investissement en capital [$], `interest_rate` (i)
 /// taux d'intérêt annuel `sans dimension, par an`, **FOURNI** par l'appelant,
-/// `plant_life_years` (N) durée de vie [an].
+/// `plant_life_years` (N) durée de vie `an`.
 ///
 /// Panique si `capital_investment < 0`, si `interest_rate <= 0` ou si
 /// `plant_life_years <= 0`.
