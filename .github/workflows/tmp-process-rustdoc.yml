@@ -42,7 +42,8 @@ jobs:
 
           def unit_like(text: str) -> bool:
               t = text.strip()
-              if t in simple_units or t.lower() in prose_labels:
+              low = t.lower()
+              if t in simple_units or low in prose_labels or low.startswith('sans dimension,'):
                   return True
               if re.fullmatch(r'[+−-]?\d+(?:[.,]\d+)?\s*(?:[,;:]\s*[+−-]?\d+(?:[.,]\d+)?)?', t):
                   return True
