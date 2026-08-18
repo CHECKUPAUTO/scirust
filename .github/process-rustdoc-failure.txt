@@ -3,32 +3,6 @@ Temporary strict rustdoc diagnostic for scirust-process.
 [1m[92m    Updating[0m crates.io index
 [1m[92m    Updating[0m git repository `https://github.com/Memorithm/FLAT-ATTENTION`
 [1m[92m Documenting[0m scirust-process v0.1.0 (/home/runner/work/scirust/scirust/scirust-process)
-[1m[91merror[0m[1m: unresolved link to `plateaux`[0m
-  [1m[94m--> [0mscirust-process/src/distillation_efficiency.rs:18:42
-   [1m[94m|[0m
-[1m[94m18[0m [1m[94m|[0m //! **théoriques** (étages d'équilibre) [plateaux], `N_r` nombre de plateaux
-   [1m[94m|[0m                                          [1m[91m^^^^^^^^[0m [1m[91mno item named `plateaux` in scope[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-   [1m[94m= [0m[1mnote[0m: `-D rustdoc::broken-intra-doc-links` implied by `-D warnings`
-   [1m[94m= [0m[1mhelp[0m: to override `-D warnings` add `#[allow(rustdoc::broken_intra_doc_links)]`
-
-[1m[91merror[0m[1m: unresolved link to `plateaux`[0m
-  [1m[94m--> [0mscirust-process/src/distillation_efficiency.rs:19:16
-   [1m[94m|[0m
-[1m[94m19[0m [1m[94m|[0m //! **réels** [plateaux], `λ` facteur d'entraînement (stripping factor) `m·V̇/L̇`
-   [1m[94m|[0m                [1m[91m^^^^^^^^[0m [1m[91mno item named `plateaux` in scope[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-
-[1m[91merror[0m[1m: unresolved link to `plateaux`[0m
-  [1m[94m--> [0mscirust-process/src/distillation_efficiency.rs:62:54
-   [1m[94m|[0m
-[1m[94m62[0m [1m[94m|[0m /// Nombre de plateaux **réels** `N_r = N_th / E_o` [plateaux].
-   [1m[94m|[0m                                                      [1m[91m^^^^^^^^[0m [1m[91mno item named `plateaux` in scope[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-
 [1m[91merror[0m[1m: unresolved link to `**K**`[0m
   [1m[94m--> [0mscirust-process/src/henry_solubility.rs:21:31
    [1m[94m|[0m
@@ -36,6 +10,8 @@ Temporary strict rustdoc diagnostic for scirust-process.
    [1m[94m|[0m                               [1m[91m^^^^^[0m [1m[91mno item named `**K**` in scope[0m
    [1m[94m|[0m
    [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+   [1m[94m= [0m[1mnote[0m: `-D rustdoc::broken-intra-doc-links` implied by `-D warnings`
+   [1m[94m= [0m[1mhelp[0m: to override `-D warnings` add `#[allow(rustdoc::broken_intra_doc_links)]`
 
 [1m[91merror[0m[1m: unresolved link to `**K**`[0m
   [1m[94m--> [0mscirust-process/src/henry_solubility.rs:88:66
