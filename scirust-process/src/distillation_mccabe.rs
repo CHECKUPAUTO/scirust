@@ -13,7 +13,7 @@
 //! `α` volatilité relative du constituant léger sur le lourd `sans dimension`,
 //! `K_L`, `K_H` constantes d'équilibre (coefficients de partage vapeur/liquide)
 //! des constituants léger et lourd `sans dimension`, `x` fraction molaire du léger
-//! en phase liquide [sans dimension, 0 ≤ x ≤ 1], `y` fraction molaire du léger en
+//! en phase liquide `sans dimension, 0 ≤ x ≤ 1`, `y` fraction molaire du léger en
 //! phase vapeur à l'équilibre `sans dimension`, `Nₘ` nombre minimal d'étages
 //! théoriques au reflux total `étages`, `d_L`, `d_H` débits molaires du léger et
 //! du lourd dans le distillat `mol·s⁻¹`, `b_L`, `b_H` débits molaires du léger et
@@ -60,7 +60,7 @@ pub fn dist_relative_volatility(k_light: f64, k_heavy: f64) -> f64 {
 /// constante : `y = α·x / (1 + (α − 1)·x)` `sans dimension`.
 ///
 /// `liquid_fraction` `x` fraction molaire du léger en phase liquide
-/// [sans dimension, 0 ≤ x ≤ 1], `relative_volatility` `α` volatilité relative
+/// `sans dimension, 0 ≤ x ≤ 1`, `relative_volatility` `α` volatilité relative
 /// du léger sur le lourd `sans dimension`.
 ///
 /// Panique si `liquid_fraction` n'est pas dans ``0, 1``, ou si
@@ -139,10 +139,10 @@ pub fn dist_rectifying_operating_slope(reflux_ratio: f64) -> f64 {
 /// liquide bouillante : `Rₘ = (x_D − y*) / (y* − z_F)` `sans dimension`.
 ///
 /// `distillate_fraction` `x_D` fraction molaire du léger au distillat
-/// [sans dimension, 0 ≤ x_D ≤ 1], `feed_vapor_fraction_equilibrium` `y*` fraction
+/// `sans dimension, 0 ≤ x_D ≤ 1`, `feed_vapor_fraction_equilibrium` `y*` fraction
 /// molaire vapeur d'équilibre à la composition d'alimentation [sans dimension,
 /// 0 ≤ y* ≤ 1], `feed_fraction` `z_F` fraction molaire du léger à l'alimentation
-/// [sans dimension, 0 ≤ z_F ≤ 1].
+/// `sans dimension, 0 ≤ z_F ≤ 1`.
 ///
 /// Panique si l'une des trois fractions n'est pas dans ``0, 1``, ou si
 /// `feed_vapor_fraction_equilibrium` n'est pas strictement supérieure à

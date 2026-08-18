@@ -17,10 +17,10 @@
 //! `d_p` diamètre de particule `m`, `ρ_p` masse volumique de la particule
 //! `kg·m⁻³`, `ρ_f` masse volumique du fluide `kg·m⁻³`, `g` accélération de la
 //! pesanteur `m·s⁻²`, `μ` viscosité dynamique du fluide `Pa·s`, `ε_mf` porosité
-//! (fraction de vide) au minimum de fluidisation [sans dimension, 0 < ε_mf < 1],
-//! `φ` sphéricité de la particule [sans dimension, 0 < φ ≤ 1] ; `U_mf` vitesse
+//! (fraction de vide) au minimum de fluidisation `sans dimension, 0 < ε_mf < 1`,
+//! `φ` sphéricité de la particule `sans dimension, 0 < φ ≤ 1` ; `U_mf` vitesse
 //! superficielle minimale de fluidisation `m·s⁻¹` ; `H` hauteur du lit `m`, `ε`
-//! porosité du lit [sans dimension, 0 ≤ ε < 1], `ΔP` perte de charge à travers le
+//! porosité du lit `sans dimension, 0 ≤ ε < 1`, `ΔP` perte de charge à travers le
 //! lit `Pa` ; `U_t` vitesse terminale de chute de la particule `m·s⁻¹` ; `R`
 //! rapport de fluidisation `sans dimension`, marge entre l'apparition de la
 //! fluidisation et l'entraînement des particules.

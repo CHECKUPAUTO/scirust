@@ -11,7 +11,7 @@
 //! ```
 //!
 //! `xᵢ` fraction molaire du constituant dans le liquide [sans dimension, dans
-//! ``0, 1``], `yᵢ` fraction molaire dans la vapeur [sans dimension, dans ``0, 1``],
+//! ``0, 1``], `yᵢ` fraction molaire dans la vapeur `sans dimension, dans ``0, 1```,
 //! `pᵢ` pression partielle du constituant `Pa`, `P_sat,ᵢ` pression de vapeur
 //! saturante du corps pur à la température considérée [Pa, strictement positive],
 //! `P` pression totale du système [Pa, strictement positive], `P_bulle` pression de
@@ -80,7 +80,7 @@ pub fn vle_equilibrium_ratio(vapor_pressure_pure: f64, total_pressure: f64) -> f
 /// pression totale à laquelle le liquide de composition `x₁` commence à bouillir.
 ///
 /// `liquid_fraction_1` `x₁` fraction molaire du constituant 1 dans le liquide
-/// [sans dimension, dans ``0, 1``], `vapor_pressure_1` `P_sat,1` et
+/// `sans dimension, dans ``0, 1```, `vapor_pressure_1` `P_sat,1` et
 /// `vapor_pressure_2` `P_sat,2` pressions de vapeur saturantes des corps purs
 /// **fournies** [Pa, strictement positives].
 ///
@@ -115,7 +115,7 @@ pub fn vle_bubble_pressure_binary(
 /// idéal cohérent (`P_bulle` issu de [`vle_bubble_pressure_binary`]).
 ///
 /// `liquid_fraction_1` `x₁` fraction molaire du constituant 1 dans le liquide
-/// [sans dimension, dans ``0, 1``], `vapor_pressure_1` `P_sat,1` pression de vapeur
+/// `sans dimension, dans ``0, 1```, `vapor_pressure_1` `P_sat,1` pression de vapeur
 /// saturante du corps pur 1 **fournie** [Pa, strictement positive],
 /// `bubble_pressure` `P_bulle` pression de bulle du mélange [Pa, strictement
 /// positive].

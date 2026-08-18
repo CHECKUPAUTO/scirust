@@ -15,9 +15,9 @@
 //! `n_D` quantité de **produit désiré formé** `mol`, `n_A,cons` quantité de
 //! **réactif limitant consommé** `mol`, `S` sélectivité **globale** désiré/indésiré
 //! `sans dimension`, `n_U` quantité de **produit indésiré formé** `mol`,
-//! `X` taux de **conversion** du réactif limitant [sans dimension, ``0, 1``],
+//! `X` taux de **conversion** du réactif limitant `sans dimension, ``0, 1```,
 //! `S_frac` sélectivité **fractionnelle** (fraction du réactif consommé orientée
-//! vers le produit désiré) [sans dimension, ``0, 1``], `s` sélectivité
+//! vers le produit désiré) `sans dimension, ``0, 1```, `s` sélectivité
 //! **instantanée** (rapport local des vitesses) `sans dimension`, `r_D`/`r_U`
 //! vitesses de formation des produits désiré/indésiré `mol·m⁻³·s⁻¹, même unité`.
 //!

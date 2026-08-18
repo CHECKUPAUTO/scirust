@@ -15,7 +15,7 @@
 //!
 //! `v_t` vitesse terminale de chute d'une particule **isolée** `m·s⁻¹`, `ε`
 //! porosité (fraction volumique de liquide, ou fraction de vide) de la suspension
-//! [sans dimension, 0 < ε ≤ 1], `n` indice de Richardson-Zaki `sans dimension` ;
+//! `sans dimension, 0 < ε ≤ 1`, `n` indice de Richardson-Zaki `sans dimension` ;
 //! `v` vitesse de chute **entravée** de la suspension `m·s⁻¹` ; `C` concentration
 //! en solides `kg·m⁻³`, `G_s` flux de solides (débit massique de solides par unité
 //! de section) `kg·m⁻²·s⁻¹` ; `M_s` débit massique de solides à l'alimentation

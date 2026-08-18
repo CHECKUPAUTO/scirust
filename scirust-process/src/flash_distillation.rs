@@ -14,7 +14,7 @@
 //! `xᵢ` fraction molaire dans le liquide sortant `sans dimension`, `yᵢ` fraction
 //! molaire dans la vapeur sortante `sans dimension`, `Kᵢ = yᵢ/xᵢ` coefficient de
 //! partage (constante d'équilibre) du constituant `sans dimension`, `V` fraction
-//! molaire vaporisée `V̇/F` [sans dimension, dans ``0, 1``], `gᵢ` terme d'un
+//! molaire vaporisée `V̇/F` `sans dimension, dans ``0, 1```, `gᵢ` terme d'un
 //! constituant dans l'équation de Rachford-Rice `sans dimension`, `F` débit
 //! d'alimentation `mol/s ou kg/s`, `V̇` débit de vapeur `mol/s ou kg/s`, `L̇`
 //! débit de liquide `mol/s ou kg/s`.
@@ -36,7 +36,7 @@
 ///
 /// `liquid_fraction` `xᵢ` fraction molaire dans le liquide [sans dimension, dans
 /// ``0, 1``], `equilibrium_ratio` `Kᵢ` coefficient de partage **fourni**
-/// [sans dimension, strictement positif].
+/// `sans dimension, strictement positif`.
 ///
 /// Panique si `liquid_fraction` sort de ``0, 1`` ou si `equilibrium_ratio` n'est
 /// pas strictement positif (ou est non fini).
@@ -60,8 +60,8 @@ pub fn flash_equilibrium_vapor(liquid_fraction: f64, equilibrium_ratio: f64) -> 
 ///
 /// `feed_fraction` `zᵢ` fraction molaire dans l'alimentation [sans dimension, dans
 /// ``0, 1``], `equilibrium_ratio` `Kᵢ` coefficient de partage **fourni**
-/// [sans dimension, strictement positif], `vapor_fraction` `V` fraction molaire
-/// vaporisée [sans dimension, dans ``0, 1``]. Le dénominateur `1 + V·(Kᵢ − 1)`
+/// `sans dimension, strictement positif`, `vapor_fraction` `V` fraction molaire
+/// vaporisée `sans dimension, dans ``0, 1```. Le dénominateur `1 + V·(Kᵢ − 1)`
 /// reste strictement positif pour `V ∈ `0, 1`` et `Kᵢ > 0`.
 ///
 /// Panique si `feed_fraction` sort de ``0, 1``, si `equilibrium_ratio` n'est pas
@@ -93,7 +93,7 @@ pub fn flash_rachford_rice_term(
 /// débit d'alimentation `F`.
 ///
 /// `feed_flow` `F` débit d'alimentation `mol/s ou kg/s, positif ou nul`,
-/// `vapor_fraction` `V` fraction molaire vaporisée [sans dimension, dans ``0, 1``].
+/// `vapor_fraction` `V` fraction molaire vaporisée `sans dimension, dans ``0, 1```.
 ///
 /// Panique si `feed_flow` est négatif ou non fini, ou si `vapor_fraction` sort de
 /// ``0, 1``.
@@ -117,8 +117,8 @@ pub fn flash_vapor_liquid_split(feed_flow: f64, vapor_fraction: f64) -> (f64, f6
 ///
 /// `feed_fraction` `zᵢ` fraction molaire dans l'alimentation [sans dimension, dans
 /// ``0, 1``], `equilibrium_ratio` `Kᵢ` coefficient de partage **fourni**
-/// [sans dimension, strictement positif], `vapor_fraction` `V` fraction molaire
-/// vaporisée [sans dimension, dans ``0, 1``]. La fraction vapeur correspondante
+/// `sans dimension, strictement positif`, `vapor_fraction` `V` fraction molaire
+/// vaporisée `sans dimension, dans ``0, 1```. La fraction vapeur correspondante
 /// s'obtient par `yᵢ = Kᵢ·xᵢ` ([`flash_equilibrium_vapor`]).
 ///
 /// Panique si `feed_fraction` sort de ``0, 1``, si `equilibrium_ratio` n'est pas

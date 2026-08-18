@@ -13,10 +13,10 @@
 //!
 //! `L₁` charge initiale du bouilleur `mol`, `L₂` charge restante en fin
 //! d'opération `mol`, `x₁` fraction molaire initiale du constituant léger dans le
-//! liquide [sans dimension, dans `]0, 1[`], `x₂` fraction molaire finale dans le
-//! liquide [sans dimension, dans `]0, 1[`], `y*(x)` fraction molaire du léger dans
+//! liquide `sans dimension, dans ``0, 1[`], `x₂` fraction molaire finale dans le
+//! liquide `sans dimension, dans ``0, 1[`], `y*(x)` fraction molaire du léger dans
 //! la vapeur à l'équilibre `sans dimension`, `α` volatilité relative léger/lourd
-//! [sans dimension, `> 0` et `≠ 1`], `D` quantité totale distillée `mol`, `x_D`
+//! `sans dimension, `> 0` et `≠ 1``, `D` quantité totale distillée `mol`, `x_D`
 //! composition molaire moyenne du distillat `sans dimension`, `R` taux de
 //! récupération d'un constituant `sans dimension`.
 //!
@@ -38,8 +38,8 @@
 /// `ln(L₂/L₁) = 1/(α−1)·[ln(x₂/x₁) − α·ln((1−x₂)/(1−x₁))]` `sans dimension`.
 ///
 /// `initial_fraction` `x₁` et `final_fraction` `x₂` fractions molaires du léger
-/// [sans dimension, dans `]0, 1[`], `relative_volatility` `α` volatilité relative
-/// **fournie** [sans dimension, strictement positive et différente de 1].
+/// `sans dimension, dans ``0, 1[`], `relative_volatility` `α` volatilité relative
+/// **fournie** `sans dimension, strictement positive et différente de 1`.
 ///
 /// Panique si `initial_fraction` ou `final_fraction` sort de `]0, 1[`, ou si
 /// `relative_volatility` n'est pas fini, n'est pas strictement positif, ou vaut 1.
@@ -78,8 +78,8 @@ pub fn bdist_rayleigh_constant_volatility(
 ///
 /// `initial_moles` `L₁` charge initiale [mol, strictement positive],
 /// `initial_fraction` `x₁` et `final_fraction` `x₂` fractions molaires du léger
-/// [sans dimension, dans `]0, 1[`], `relative_volatility` `α` volatilité relative
-/// **fournie** [sans dimension, strictement positive et différente de 1].
+/// `sans dimension, dans ``0, 1[`], `relative_volatility` `α` volatilité relative
+/// **fournie** `sans dimension, strictement positive et différente de 1`.
 ///
 /// Panique si `initial_moles` n'est pas fini ou n'est pas strictement positif, si
 /// une fraction sort de `]0, 1[`, ou si `relative_volatility` n'est pas fini, pas
@@ -144,9 +144,9 @@ pub fn bdist_distillate_moles(initial_moles: f64, remaining_moles: f64) -> f64 {
 /// `x_D = (L₁·x₁ − L₂·x₂) / (L₁ − L₂)` `sans dimension`.
 ///
 /// `initial_moles` `L₁` charge initiale `mol`, `initial_fraction` `x₁` fraction
-/// molaire initiale du léger [sans dimension, dans ``0, 1``], `remaining_moles`
+/// molaire initiale du léger `sans dimension, dans ``0, 1```, `remaining_moles`
 /// `L₂` charge restante `mol`, `remaining_fraction` `x₂` fraction molaire finale du
-/// léger [sans dimension, dans ``0, 1``]. Le dénominateur `L₁ − L₂` est le distillat
+/// léger `sans dimension, dans ``0, 1```. Le dénominateur `L₁ − L₂` est le distillat
 /// total `D`, qui doit être strictement positif.
 ///
 /// Panique si une charge n'est pas finie ou est négative, si une fraction sort de

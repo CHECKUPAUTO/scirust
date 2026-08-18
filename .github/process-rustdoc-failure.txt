@@ -3,15 +3,6 @@ Temporary strict rustdoc diagnostic for scirust-process.
 [1m[92m    Updating[0m crates.io index
 [1m[92m    Updating[0m git repository `https://github.com/Memorithm/FLAT-ATTENTION`
 [1m[92m Documenting[0m scirust-process v0.1.0 (/home/runner/work/scirust/scirust/scirust-process)
-[1m[91merror[0m[1m: unresolved link to `sans dimension, 0 < ε_mf < 1`[0m
-  [1m[94m--> [0mscirust-process/src/fluidization.rs:20:52
-   [1m[94m|[0m
-[1m[94m20[0m [1m[94m|[0m //! (fraction de vide) au minimum de fluidisation [sans dimension, 0 < ε_mf < 1],
-   [1m[94m|[0m                                                    [1m[91m^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m [1m[91munbalanced angle brackets[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mnote[0m: `-D rustdoc::broken-intra-doc-links` implied by `-D warnings`
-   [1m[94m= [0m[1mhelp[0m: to override `-D warnings` add `#[allow(rustdoc::broken_intra_doc_links)]`
-
 [1m[91merror[0m[1m: unresolved link to `cohérentes`[0m
   [1m[94m--> [0mscirust-process/src/liquid_extraction.rs:18:58
    [1m[94m|[0m
@@ -19,12 +10,8 @@ Temporary strict rustdoc diagnostic for scirust-process.
    [1m[94m|[0m                                                          [1m[91m^^^^^^^^^^[0m [1m[91mno item named `cohérentes` in scope[0m
    [1m[94m|[0m
    [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-
-[1m[91merror[0m[1m: unresolved link to `sans dimension, 0 < ε < 1`[0m
-  [1m[94m--> [0mscirust-process/src/packed_bed.rs:17:45
-   [1m[94m|[0m
-[1m[94m17[0m [1m[94m|[0m //! `ε` porosité (fraction de vide) du lit [sans dimension, 0 < ε < 1], `μ`
-   [1m[94m|[0m                                             [1m[91m^^^^^^^^^^^^^^^^^^^^^^^^^[0m [1m[91munbalanced angle brackets[0m
+   [1m[94m= [0m[1mnote[0m: `-D rustdoc::broken-intra-doc-links` implied by `-D warnings`
+   [1m[94m= [0m[1mhelp[0m: to override `-D warnings` add `#[allow(rustdoc::broken_intra_doc_links)]`
 
 [1m[91merror[0m[1m: unresolved link to `sans dimension, 0 < RL < 1 favorable`[0m
   [1m[94m--> [0mscirust-process/src/adsorption_isotherm.rs:18:73
@@ -33,12 +20,6 @@ Temporary strict rustdoc diagnostic for scirust-process.
    [1m[94m|[0m [1m[91m _________________________________________________________________________^[0m
 [1m[94m19[0m [1m[94m|[0m [1m[91m|[0m //! dimension, `0 < RL < 1` favorable].
    [1m[94m|[0m [1m[91m|_____________________________________^[0m [1m[91munbalanced angle brackets[0m
-
-[1m[91merror[0m[1m: unresolved link to `sans dimension, > 0 et ≠ 1`[0m
-  [1m[94m--> [0mscirust-process/src/batch_distillation.rs:19:6
-   [1m[94m|[0m
-[1m[94m19[0m [1m[94m|[0m //! [sans dimension, `> 0` et `≠ 1`], `D` quantité totale distillée `mol`, `x_D`
-   [1m[94m|[0m      [1m[91m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m [1m[91munbalanced angle brackets[0m
 
 [1m[91merror[0m[1m: unresolved link to `plateaux`[0m
   [1m[94m--> [0mscirust-process/src/distillation_efficiency.rs:18:42
@@ -103,7 +84,7 @@ Temporary strict rustdoc diagnostic for scirust-process.
 [1m[91merror[0m[1m: unresolved link to `an`[0m
   [1m[94m--> [0mscirust-process/src/process_economics.rs:20:67
    [1m[94m|[0m
-[1m[94m20[0m [1m[94m|[0m //! [sans dimension, par an], `N` durée de vie de l'installation [an], `A`
+[1m[94m20[0m [1m[94m|[0m //! `sans dimension, par an`, `N` durée de vie de l'installation [an], `A`
    [1m[94m|[0m                                                                   [1m[91m^^[0m [1m[91mno item named `an` in scope[0m
    [1m[94m|[0m
    [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
@@ -115,18 +96,6 @@ Temporary strict rustdoc diagnostic for scirust-process.
     [1m[94m|[0m                                          [1m[91m^^[0m [1m[91mno item named `an` in scope[0m
     [1m[94m|[0m
     [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-
-[1m[91merror[0m[1m: unresolved link to `sans dimension, > 1`[0m
-  [1m[94m--> [0mscirust-process/src/compressor_power.rs:22:37
-   [1m[94m|[0m
-[1m[94m22[0m [1m[94m|[0m //! des chaleurs massiques `cp/cv` [sans dimension, > 1], `n`
-   [1m[94m|[0m                                     [1m[91m^^^^^^^^^^^^^^^^^^^[0m [1m[91munbalanced angle brackets[0m
-
-[1m[91merror[0m[1m: unresolved link to `sans dimension, > 1`[0m
-  [1m[94m--> [0mscirust-process/src/compressor_power.rs:23:52
-   [1m[94m|[0m
-[1m[94m23[0m [1m[94m|[0m //! (`polytropic_exponent`) exposant polytropique [sans dimension, > 1] ; `w_s`
-   [1m[94m|[0m                                                    [1m[91m^^^^^^^^^^^^^^^^^^^[0m [1m[91munbalanced angle brackets[0m
 
 [1m[91merror[0m[1m: unresolved link to `gpm`[0m
   [1m[94m--> [0mscirust-process/src/control_valve_cv.rs:24:6
@@ -193,11 +162,5 @@ Temporary strict rustdoc diagnostic for scirust-process.
    [1m[94m|[0m
 [1m[94m69[0m [1m[94m|[0m /// [K, > 0], `wet_bulb_temperature` `T_wb` température humide de l'air ambiant
    [1m[94m|[0m      [1m[91m^^^^^^[0m [1m[91munbalanced angle brackets[0m
-
-[1m[91merror[0m[1m: unresolved link to `sans dimension, 0 < β < 1`[0m
-  [1m[94m--> [0mscirust-process/src/orifice_meter.rs:19:32
-   [1m[94m|[0m
-[1m[94m19[0m [1m[94m|[0m //! `β` rapport des diamètres [sans dimension, 0 < β < 1], `Cd` coefficient de
-   [1m[94m|[0m                                [1m[91m^^^^^^^^^^^^^^^^^^^^^^^^^[0m [1m[91munbalanced angle brackets[0m
 
 [1m[91merror[0m: could not document `scirust-process`

@@ -11,7 +11,7 @@
 //! `ΔT` élévation de température adiabatique `K`, `ΔHr` chaleur (enthalpie) de
 //! réaction **par mole de réactif limitant** `J/mol` (`ΔHr < 0` exothermique),
 //! `C_A0` concentration d'entrée du réactif limitant `mol/m³`, `X` taux de
-//! conversion [sans dimension, dans ``0, 1``], `ρ` masse volumique du mélange
+//! conversion `sans dimension, dans ``0, 1```, `ρ` masse volumique du mélange
 //! `kg/m³`, `cp` capacité thermique massique du mélange `J/(kg·K)`, `T_in`
 //! température d'entrée `K`, `T` température `K`, `ΔT_max` élévation à conversion
 //! totale `K`. La relation `X ↔ T` est **linéaire** (droite adiabatique du bilan
@@ -32,7 +32,7 @@
 /// `heat_of_reaction` `ΔHr` chaleur de réaction par mole de réactif limitant
 /// `J/mol` (négative pour une réaction exothermique, d'où `ΔT > 0`),
 /// `inlet_concentration` `C_A0` concentration d'entrée du réactif limitant
-/// `mol/m³`, `conversion` `X` taux de conversion [sans dimension, dans ``0, 1``],
+/// `mol/m³`, `conversion` `X` taux de conversion `sans dimension, dans ``0, 1```,
 /// `density` `ρ` masse volumique du mélange `kg/m³`, `specific_heat` `cp`
 /// capacité thermique massique du mélange `J/(kg·K)`.
 ///

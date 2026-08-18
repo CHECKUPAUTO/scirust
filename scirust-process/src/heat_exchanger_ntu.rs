@@ -19,8 +19,8 @@
 //! `U` coefficient global de transfert `W/(m²·K)`, `A` aire d'échange `m²`,
 //! `Cmin`/`Cmax` débits calorifiques (`ṁ·cp`) minimal et maximal des deux
 //! courants `W/K`, `NTU` nombre d'unités de transfert `sans dimension`, `Cr`
-//! rapport des capacités calorifiques [sans dimension, dans ``0, 1``], `ε`
-//! efficacité [sans dimension, dans ``0, 1``], `Th,in`/`Tc,in` températures
+//! rapport des capacités calorifiques `sans dimension, dans ``0, 1```, `ε`
+//! efficacité `sans dimension, dans ``0, 1```, `Th,in`/`Tc,in` températures
 //! d'entrée du fluide chaud et froid `K`, `Q` puissance thermique échangée `W`.
 //! `ΔTmax = Th,in − Tc,in` est l'écart de température maximal théorique `K`.
 //!
@@ -92,7 +92,7 @@ pub fn ntu_capacity_ratio(min_heat_capacity_rate: f64, max_heat_capacity_rate: f
 /// limite `ε = NTU/(1 + NTU)` lorsque `Cr = 1` `sans dimension`.
 ///
 /// `ntu` `NTU` nombre d'unités de transfert `sans dimension`, `capacity_ratio`
-/// `Cr` rapport des capacités calorifiques [sans dimension, dans ``0, 1``]. Le
+/// `Cr` rapport des capacités calorifiques `sans dimension, dans ``0, 1```. Le
 /// contre-courant est la configuration la plus efficace : `ε → 1` quand
 /// `NTU → ∞`.
 ///
@@ -122,7 +122,7 @@ pub fn ntu_effectiveness_counterflow(ntu: f64, capacity_ratio: f64) -> f64 {
 /// `ε = (1 − exp`−NTU·(1 + Cr)`) / (1 + Cr)` `sans dimension`.
 ///
 /// `ntu` `NTU` nombre d'unités de transfert `sans dimension`, `capacity_ratio`
-/// `Cr` rapport des capacités calorifiques [sans dimension, dans ``0, 1``]. Le
+/// `Cr` rapport des capacités calorifiques `sans dimension, dans ``0, 1```. Le
 /// co-courant est borné : `ε → 1/(1 + Cr)` quand `NTU → ∞`, toujours inférieur
 /// ou égal au contre-courant.
 ///
@@ -144,7 +144,7 @@ pub fn ntu_effectiveness_parallel(ntu: f64, capacity_ratio: f64) -> f64 {
 /// Flux thermique échangé `Q = ε·Cmin·(Th,in − Tc,in)` `W` — la puissance réelle
 /// vaut l'efficacité fois le maximum thermodynamique `Cmin·ΔTmax`.
 ///
-/// `effectiveness` `ε` efficacité de l'échangeur [sans dimension, dans ``0, 1``],
+/// `effectiveness` `ε` efficacité de l'échangeur `sans dimension, dans ``0, 1```,
 /// `min_heat_capacity_rate` `Cmin` débit calorifique minimal `W/K`, `hot_inlet`
 /// `Th,in` température d'entrée du fluide chaud `K`, `cold_inlet` `Tc,in`
 /// température d'entrée du fluide froid `K`. Un résultat positif suppose

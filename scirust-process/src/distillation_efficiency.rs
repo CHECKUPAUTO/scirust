@@ -14,10 +14,10 @@
 //! `n` `sans dimension`, `yₙ₊₁` fraction molaire dans la vapeur entrant sous le
 //! plateau `sans dimension`, `yₙ*` fraction molaire vapeur qui serait à l'équilibre
 //! avec le liquide du plateau `sans dimension`, `E_o` rendement global de la colonne
-//! [sans dimension, dans `]0, 1]` en pratique], `N_th` nombre de plateaux
+//! `sans dimension, dans ``0, 1]` en pratique], `N_th` nombre de plateaux
 //! **théoriques** (étages d'équilibre) [plateaux], `N_r` nombre de plateaux
 //! **réels** [plateaux], `λ` facteur d'entraînement (stripping factor) `m·V̇/L̇`
-//! [sans dimension, strictement positif], `H` hauteur de la partie à plateaux de la
+//! `sans dimension, strictement positif`, `H` hauteur de la partie à plateaux de la
 //! colonne `m`, `h_t` espacement entre plateaux (tray spacing) `m`.
 //!
 //! **Limite honnête** : le rendement de Murphree (**plateau**) et le rendement
@@ -42,8 +42,8 @@
 /// `equilibrium_vapor_change = yₙ* − yₙ₊₁`.
 ///
 /// `actual_vapor_change` variation réelle de fraction molaire vapeur sur le plateau
-/// [sans dimension, fini], `equilibrium_vapor_change` variation à l'équilibre
-/// [sans dimension, fini, non nul].
+/// `sans dimension, fini`, `equilibrium_vapor_change` variation à l'équilibre
+/// `sans dimension, fini, non nul`.
 ///
 /// Panique si l'un des arguments n'est pas fini ou si `equilibrium_vapor_change`
 /// est nul.
@@ -66,7 +66,7 @@ pub fn deff_murphree_vapor(actual_vapor_change: f64, equilibrium_vapor_change: f
 ///
 /// `theoretical_stages` `N_th` nombre de plateaux théoriques **fourni**
 /// [plateaux, positif ou nul, fini], `overall_efficiency` `E_o` rendement global
-/// [sans dimension, dans `]0, 1]`].
+/// `sans dimension, dans ``0, 1]`].
 ///
 /// Panique si `theoretical_stages` est négatif ou non fini, ou si
 /// `overall_efficiency` sort de `]0, 1]`.
@@ -91,8 +91,8 @@ pub fn deff_actual_stages(theoretical_stages: f64, overall_efficiency: f64) -> f
 /// `E_M = 1` on retrouve `E_o = 1` quel que soit `λ`.
 ///
 /// `murphree_efficiency` `E_M` rendement de Murphree du plateau
-/// [sans dimension, dans ``0, 1``], `stripping_factor` `λ` facteur d'entraînement
-/// **fourni** [sans dimension, strictement positif et différent de 1].
+/// `sans dimension, dans ``0, 1```, `stripping_factor` `λ` facteur d'entraînement
+/// **fourni** `sans dimension, strictement positif et différent de 1`.
 ///
 /// Panique si `murphree_efficiency` sort de ``0, 1``, ou si `stripping_factor`
 /// n'est pas fini, n'est pas strictement positif, ou vaut exactement 1 (le rapport

@@ -16,7 +16,7 @@
 //! de l'eau froide en sortie (bassin) `K`, `T_wb` température humide de l'air
 //! ambiant `K`, `range` plage de refroidissement `K`, `approach` approche par
 //! rapport à la température humide `K`, `ε` efficacité de la tour
-//! [sans dimension, 0 ≤ ε ≤ 1], `ṁ_w` débit massique d'eau en circulation
+//! `sans dimension, 0 ≤ ε ≤ 1`, `ṁ_w` débit massique d'eau en circulation
 //! `kg·s⁻¹`, `c_p` capacité thermique massique de l'eau `J·kg⁻¹·K⁻¹`, `λ` chaleur
 //! latente de vaporisation de l'eau `J·kg⁻¹`, `E` pertes par évaporation
 //! `kg·s⁻¹`, `D` pertes par entraînement (*drift*) `kg·s⁻¹`, `B` purge de
