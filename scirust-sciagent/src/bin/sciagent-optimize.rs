@@ -60,19 +60,25 @@ enum Command {
 
 fn main() {
     let cli = Cli::parse();
-    if let Err(error) = run(cli) {
+    if let Err(error) = run(cli)
+    {
         eprintln!("error: {error}");
         std::process::exit(1);
     }
 }
 
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
-    match cli.command {
-        Command::Plan { manifest, json } => {
+    match cli.command
+    {
+        Command::Plan { manifest, json } =>
+        {
             let task = load_task(&manifest)?;
-            if json {
+            if json
+            {
                 println!("{}", serde_json::to_string_pretty(&task)?);
-            } else {
+            }
+            else
+            {
                 println!("SCIAGENT optimization task: {}", task.id);
                 println!("crate: {}", task.crate_name);
                 println!("backend: {}", task.backend);
@@ -80,7 +86,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 println!("target speedup: {:.4}x", task.budget.min_speedup);
                 println!("iteration budget: {}", task.budget.max_iterations);
                 println!("allowed paths:");
-                for path in &task.allowed_paths {
+                for path in &task.allowed_paths
+                {
                     println!("  - {path}");
                 }
                 println!("stages:");
@@ -89,32 +96,41 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 println!("  2. compile");
                 println!("  3. verify");
                 println!("  4. benchmark");
-                if task.commands.profile.is_some() {
+                if task.commands.profile.is_some()
+                {
                     println!("  5. profile on correct-but-slow candidates");
                 }
-                if task.commands.rewrite.is_some() {
+                if task.commands.rewrite.is_some()
+                {
                     println!("  6. rewrite from accumulated evidence");
-                } else {
+                }
+                else
+                {
                     println!("  6. regenerate from accumulated evidence");
                 }
                 println!("  7. promote only when correctness + speed gates pass");
             }
-        }
+        },
         Command::Run {
             manifest,
             workspace,
             run_root,
             json,
-        } => {
+        } =>
+        {
             let task = load_task(&manifest)?;
             let runner = OptimizationRunner::new(workspace, run_root);
             let report = runner.run(&task)?;
-            if json {
+            if json
+            {
                 println!("{}", serde_json::to_string_pretty(&report)?);
-            } else {
+            }
+            else
+            {
                 println!("task: {}", report.task_id);
                 println!("baseline: {:.3} ns", report.baseline.median_ns);
-                for record in &report.iterations {
+                for record in &report.iterations
+                {
                     println!(
                         "iteration {}: {:.4}x, correctness={}, performance={}, decision={:?}",
                         record.iteration,
@@ -125,14 +141,16 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     );
                 }
                 println!("final decision: {:?}", report.final_decision);
-                if let Some(best) = report.best_verified_speedup {
+                if let Some(best) = report.best_verified_speedup
+                {
                     println!("best verified speedup: {best:.4}x");
                 }
-                if report.final_decision != OptimizationDecision::Promote {
+                if report.final_decision != OptimizationDecision::Promote
+                {
                     std::process::exit(2);
                 }
             }
-        }
+        },
         Command::Score {
             baseline_ns,
             candidate_ns,
@@ -143,7 +161,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             abs_tolerance,
             rel_tolerance,
             json,
-        } => {
+        } =>
+        {
             let budget = OptimizationBudget {
                 min_speedup,
                 max_abs_error: abs_tolerance,
@@ -165,15 +184,18 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 },
                 &budget,
             )?;
-            if json {
+            if json
+            {
                 println!("{}", serde_json::to_string_pretty(&record)?);
-            } else {
+            }
+            else
+            {
                 println!("speedup: {:.6}x", record.speedup);
                 println!("correctness gate: {}", record.correctness_gate);
                 println!("performance gate: {}", record.performance_gate);
                 println!("decision: {:?}", record.decision);
             }
-        }
+        },
     }
     Ok(())
 }
