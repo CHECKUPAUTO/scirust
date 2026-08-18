@@ -3,21 +3,6 @@ Temporary strict rustdoc diagnostic for scirust-process.
 [1m[92m    Updating[0m crates.io index
 [1m[92m    Updating[0m git repository `https://github.com/Memorithm/FLAT-ATTENTION`
 [1m[92m Documenting[0m scirust-process v0.1.0 (/home/runner/work/scirust/scirust/scirust-process)
-[1m[91merror[0m[1m: unresolved link to `K, > 0`[0m
-  [1m[94m--> [0mscirust-process/src/pinch_analysis.rs:71:61
-   [1m[94m|[0m
-[1m[94m71[0m [1m[94m|[0m /// `actual_temperature` (T) température réelle du courant [K, > 0],
-   [1m[94m|[0m                                                             [1m[91m^^^^^^[0m [1m[91munbalanced angle brackets[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mnote[0m: `-D rustdoc::broken-intra-doc-links` implied by `-D warnings`
-   [1m[94m= [0m[1mhelp[0m: to override `-D warnings` add `#[allow(rustdoc::broken_intra_doc_links)]`
-
-[1m[91merror[0m[1m: unresolved link to `K, > 0`[0m
-  [1m[94m--> [0mscirust-process/src/pinch_analysis.rs:91:61
-   [1m[94m|[0m
-[1m[94m91[0m [1m[94m|[0m /// `actual_temperature` (T) température réelle du courant [K, > 0],
-   [1m[94m|[0m                                                             [1m[91m^^^^^^[0m [1m[91munbalanced angle brackets[0m
-
 [1m[91merror[0m[1m: unresolved link to `an`[0m
   [1m[94m--> [0mscirust-process/src/process_economics.rs:19:46
    [1m[94m|[0m
@@ -25,6 +10,8 @@ Temporary strict rustdoc diagnostic for scirust-process.
    [1m[94m|[0m                                              [1m[91m^^[0m [1m[91mno item named `an` in scope[0m
    [1m[94m|[0m
    [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+   [1m[94m= [0m[1mnote[0m: `-D rustdoc::broken-intra-doc-links` implied by `-D warnings`
+   [1m[94m= [0m[1mhelp[0m: to override `-D warnings` add `#[allow(rustdoc::broken_intra_doc_links)]`
 
 [1m[91merror[0m[1m: unresolved link to `an`[0m
   [1m[94m--> [0mscirust-process/src/process_economics.rs:20:67
@@ -89,23 +76,5 @@ Temporary strict rustdoc diagnostic for scirust-process.
    [1m[94m|[0m           [1m[91m^^^[0m [1m[91mno item named `psi` in scope[0m
    [1m[94m|[0m
    [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-
-[1m[91merror[0m[1m: unresolved link to `K, > 0`[0m
-  [1m[94m--> [0mscirust-process/src/cooling_tower.rs:42:76
-   [1m[94m|[0m
-[1m[94m42[0m [1m[94m|[0m /// `hot_water_temperature` `T_hot` température de l'eau chaude en entrée [K, > 0],
-   [1m[94m|[0m                                                                            [1m[91m^^^^^^[0m [1m[91munbalanced angle brackets[0m
-
-[1m[91merror[0m[1m: unresolved link to `K, > 0`[0m
-  [1m[94m--> [0mscirust-process/src/cooling_tower.rs:44:6
-   [1m[94m|[0m
-[1m[94m44[0m [1m[94m|[0m /// [K, > 0].
-   [1m[94m|[0m      [1m[91m^^^^^^[0m [1m[91munbalanced angle brackets[0m
-
-[1m[91merror[0m[1m: unresolved link to `K, > 0`[0m
-  [1m[94m--> [0mscirust-process/src/cooling_tower.rs:69:6
-   [1m[94m|[0m
-[1m[94m69[0m [1m[94m|[0m /// [K, > 0], `wet_bulb_temperature` `T_wb` température humide de l'air ambiant
-   [1m[94m|[0m      [1m[91m^^^^^^[0m [1m[91munbalanced angle brackets[0m
 
 [1m[91merror[0m: could not document `scirust-process`

@@ -13,8 +13,8 @@
 //! `xᵢ` fraction molaire du constituant dans le liquide [sans dimension, dans
 //! ``0, 1``], `yᵢ` fraction molaire dans la vapeur `sans dimension, dans ``0, 1```,
 //! `pᵢ` pression partielle du constituant `Pa`, `P_sat,ᵢ` pression de vapeur
-//! saturante du corps pur à la température considérée [Pa, strictement positive],
-//! `P` pression totale du système [Pa, strictement positive], `P_bulle` pression de
+//! saturante du corps pur à la température considérée `Pa, strictement positive`,
+//! `P` pression totale du système `Pa, strictement positive`, `P_bulle` pression de
 //! bulle du mélange (pression totale au point de bulle) `Pa`, `Kᵢ = yᵢ/xᵢ`
 //! coefficient de partage (constante d'équilibre) du constituant `sans dimension`,
 //! `α` volatilité relative du constituant 1 par rapport au constituant 2
@@ -36,7 +36,7 @@
 ///
 /// `liquid_fraction` `xᵢ` fraction molaire dans le liquide [sans dimension, dans
 /// ``0, 1``], `vapor_pressure_pure` `P_sat,ᵢ` pression de vapeur saturante du corps
-/// pur **fournie** [Pa, strictement positive].
+/// pur **fournie** `Pa, strictement positive`.
 ///
 /// Panique si `liquid_fraction` sort de ``0, 1`` ou si `vapor_pressure_pure` n'est
 /// pas fini et strictement positif.
@@ -56,8 +56,8 @@ pub fn vle_partial_pressure_raoult(liquid_fraction: f64, vapor_pressure_pure: f6
 /// `Kᵢ = P_sat,ᵢ / P` `sans dimension`.
 ///
 /// `vapor_pressure_pure` `P_sat,ᵢ` pression de vapeur saturante du corps pur
-/// **fournie** [Pa, strictement positive], `total_pressure` `P` pression totale du
-/// système [Pa, strictement positive].
+/// **fournie** `Pa, strictement positive`, `total_pressure` `P` pression totale du
+/// système `Pa, strictement positive`.
 ///
 /// Panique si `vapor_pressure_pure` ou `total_pressure` n'est pas fini et
 /// strictement positif.
@@ -82,7 +82,7 @@ pub fn vle_equilibrium_ratio(vapor_pressure_pure: f64, total_pressure: f64) -> f
 /// `liquid_fraction_1` `x₁` fraction molaire du constituant 1 dans le liquide
 /// `sans dimension, dans ``0, 1```, `vapor_pressure_1` `P_sat,1` et
 /// `vapor_pressure_2` `P_sat,2` pressions de vapeur saturantes des corps purs
-/// **fournies** [Pa, strictement positives].
+/// **fournies** `Pa, strictement positives`.
 ///
 /// Panique si `liquid_fraction_1` sort de ``0, 1`` ou si l'une des pressions de
 /// vapeur n'est pas finie et strictement positive.
@@ -116,7 +116,7 @@ pub fn vle_bubble_pressure_binary(
 ///
 /// `liquid_fraction_1` `x₁` fraction molaire du constituant 1 dans le liquide
 /// `sans dimension, dans ``0, 1```, `vapor_pressure_1` `P_sat,1` pression de vapeur
-/// saturante du corps pur 1 **fournie** [Pa, strictement positive],
+/// saturante du corps pur 1 **fournie** `Pa, strictement positive`,
 /// `bubble_pressure` `P_bulle` pression de bulle du mélange [Pa, strictement
 /// positive].
 ///
@@ -146,7 +146,7 @@ pub fn vle_vapor_fraction_binary(
 /// idéal `α = P_sat,1 / P_sat,2` `sans dimension`.
 ///
 /// `vapor_pressure_1` `P_sat,1` et `vapor_pressure_2` `P_sat,2` pressions de vapeur
-/// saturantes des corps purs **fournies** [Pa, strictement positives]. Une valeur
+/// saturantes des corps purs **fournies** `Pa, strictement positives`. Une valeur
 /// `α > 1` indique que le constituant 1 est le plus volatil.
 ///
 /// Panique si `vapor_pressure_1` ou `vapor_pressure_2` n'est pas fini et strictement

@@ -39,9 +39,9 @@
 /// Plage de refroidissement `range = T_hot − T_cold` `K` : chute de température
 /// de l'eau à travers la tour.
 ///
-/// `hot_water_temperature` `T_hot` température de l'eau chaude en entrée [K, > 0],
+/// `hot_water_temperature` `T_hot` température de l'eau chaude en entrée `K, > 0`,
 /// `cold_water_temperature` `T_cold` température de l'eau froide en sortie
-/// [K, > 0].
+/// `K, > 0`.
 ///
 /// Panique si l'une des températures n'est pas finie ou n'est pas strictement
 /// positive (échelle absolue), ou si `hot_water_temperature` est inférieure à
@@ -66,8 +66,8 @@ pub fn ctwr_range(hot_water_temperature: f64, cold_water_temperature: f64) -> f6
 /// température humide de l'air, mesure de la finesse d'approche de la tour.
 ///
 /// `cold_water_temperature` `T_cold` température de l'eau froide en sortie
-/// [K, > 0], `wet_bulb_temperature` `T_wb` température humide de l'air ambiant
-/// [K, > 0 ; FOURNIE par l'appelant].
+/// `K, > 0`, `wet_bulb_temperature` `T_wb` température humide de l'air ambiant
+/// `K, > 0 ; FOURNIE par l'appelant`.
 ///
 /// Panique si l'une des températures n'est pas finie ou n'est pas strictement
 /// positive (échelle absolue), ou si `cold_water_temperature` est inférieure à
@@ -93,8 +93,8 @@ pub fn ctwr_approach(cold_water_temperature: f64, wet_bulb_temperature: f64) -> 
 /// 0 ≤ ε ≤ 1 : fraction de l'écart maximal théorique `T_hot − T_wb`
 /// effectivement récupérée en refroidissement.
 ///
-/// `range` plage de refroidissement [K, ≥ 0], `approach` approche à la
-/// température humide [K, ≥ 0].
+/// `range` plage de refroidissement `K, ≥ 0`, `approach` approche à la
+/// température humide `K, ≥ 0`.
 ///
 /// Panique si `range` ou `approach` n'est pas fini ou est négatif, ou si leur
 /// somme est nulle (efficacité indéterminée : ni plage ni approche).
@@ -119,7 +119,7 @@ pub fn ctwr_effectiveness(range: f64, approach: f64) -> f64 {
 /// vaporisation d'une fraction du débit en circulation.
 ///
 /// `water_flow` `ṁ_w` débit massique d'eau en circulation `kg·s⁻¹, ≥ 0`,
-/// `range` plage de refroidissement [K, ≥ 0], `latent_heat` `λ` chaleur latente
+/// `range` plage de refroidissement `K, ≥ 0`, `latent_heat` `λ` chaleur latente
 /// de vaporisation de l'eau `J·kg⁻¹, > 0 ; FOURNIE par l'appelant`,
 /// `water_heat_capacity` `c_p` capacité thermique massique de l'eau
 /// `J·kg⁻¹·K⁻¹, > 0 ; FOURNIE par l'appelant`.
