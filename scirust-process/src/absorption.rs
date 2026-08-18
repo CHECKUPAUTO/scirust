@@ -12,8 +12,8 @@
 //! `A` facteur d'absorption `sans dimension`, `L` débit molaire de liquide
 //! (solvant) `mol·s⁻¹`, `G` débit molaire de gaz porteur `mol·s⁻¹`, `m` pente
 //! de la droite d'équilibre y = m·x `sans dimension`, `N` nombre d'étages
-//! théoriques `étages`, `φ_A` fraction du soluté absorbée [sans dimension,
-//! 0 ≤ φ_A ≤ 1], `Lₘ` débit molaire de liquide minimal `mol·s⁻¹`, `y_in`/`y_out`
+//! théoriques `étages`, `φ_A` fraction du soluté absorbée `sans dimension`,
+//! 0 ≤ φ_A ≤ 1, `Lₘ` débit molaire de liquide minimal `mol·s⁻¹`, `y_in`/`y_out`
 //! fractions molaires du soluté dans le gaz à l'entrée/à la sortie [sans
 //! dimension], `x_in` fraction molaire du soluté dans le liquide entrant [sans
 //! dimension], `N_tOG` nombre d'unités de transfert côté gaz `sans dimension`.

@@ -12,8 +12,8 @@
 //!
 //! `r` vitesse de réaction `mol·m⁻³·s⁻¹, cohérente avec `k` et `C``, `k` constante
 //! de vitesse [unité dépendant de l'ordre], `C` concentration du réactif
-//! `mol·m⁻³ ou unité cohérente avec `k``, `n` ordre de réaction [sans dimension,
-//! fourni], `A` facteur pré-exponentiel [même unité que `k`], `Eₐ` énergie
+//! `mol·m⁻³ ou unité cohérente avec `k``, `n` ordre de réaction `sans dimension`,
+//! fourni, `A` facteur pré-exponentiel [même unité que `k`], `Eₐ` énergie
 //! d'activation `J·mol⁻¹`, `R` constante des gaz parfaits `J·mol⁻¹·K⁻¹`, `T`
 //! température **absolue** `K`, `X` taux de conversion `sans dimension`, `t` temps
 //! de séjour/réaction `s`, `t½` demi-vie `s`, `k₁`/`k₂` constantes de vitesse aux

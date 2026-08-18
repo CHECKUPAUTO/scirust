@@ -13,8 +13,8 @@
 //! `C₁` coût de référence connu [$], `Q₁` capacité (ou taille) de référence
 //! [unité cohérente], `Q₂` capacité de l'unité à estimer [même unité], `C₂` coût
 //! extrapolé [$] ; `n` exposant d'échelle `sans dimension, ≈0,6 typique`,
-//! `C_PEC` coût des équipements achetés [$], `f_L` facteur de Lang [sans
-//! dimension, ≥1], `C_TIC` investissement total immobilisé [$] ; `I`
+//! `C_PEC` coût des équipements achetés [$], `f_L` facteur de Lang `sans dimension`,
+//! ≥1, `C_TIC` investissement total immobilisé [$] ; `I`
 //! investissement en capital [$], `A_cf` flux de trésorerie net annuel
 //! [$·an⁻¹], `t_pb` temps de retour simple [an] ; `i` taux d'intérêt annuel
 //! `sans dimension, par an`, `N` durée de vie de l'installation [an], `A`
