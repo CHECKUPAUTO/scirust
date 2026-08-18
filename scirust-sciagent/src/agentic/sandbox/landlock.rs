@@ -143,15 +143,11 @@ mod imp {
         Ok(())
     }
 
-    fn enforcement_for_abi(abi: u32) -> SandboxEnforcement {
-        if abi < MAX_ABI
-        {
-            SandboxEnforcement::Partial
-        }
-        else
-        {
-            SandboxEnforcement::Full
-        }
+    fn enforcement_for_abi(_abi: u32) -> SandboxEnforcement {
+        // Even ABI 5+ does not mediate every metadata mutation that a
+        // mount-namespace profile blocks, so Landlock is always reported as
+        // partial rather than claiming Bubblewrap-equivalent isolation.
+        SandboxEnforcement::Partial
     }
 
     fn fs_mask_for_abi(abi: u32) -> u64 {
@@ -323,11 +319,11 @@ mod imp {
         }
 
         #[test]
-        fn enforcement_is_partial_before_abi_five() {
+        fn landlock_is_always_reported_as_partial_enforcement() {
             assert_eq!(enforcement_for_abi(3), SandboxEnforcement::Partial);
             assert_eq!(enforcement_for_abi(4), SandboxEnforcement::Partial);
-            assert_eq!(enforcement_for_abi(5), SandboxEnforcement::Full);
-            assert_eq!(enforcement_for_abi(9), SandboxEnforcement::Full);
+            assert_eq!(enforcement_for_abi(5), SandboxEnforcement::Partial);
+            assert_eq!(enforcement_for_abi(9), SandboxEnforcement::Partial);
         }
 
         #[test]
