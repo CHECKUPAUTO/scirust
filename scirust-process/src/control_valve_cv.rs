@@ -21,7 +21,7 @@
 //! `Q` débit volumique de liquide, `G` densité relative du liquide (adimensionnelle,
 //! `G = ρ/ρ_eau` à conditions de référence), `ΔP` perte de charge aux bornes de la
 //! vanne, `Cv` coefficient de débit **impérial** (`Q` en gallons US par minute
-//! [gpm], `ΔP` en livres par pouce carré [psi]), `Kv` coefficient de débit
+//! `gpm`, `ΔP` en livres par pouce carré `psi`), `Kv` coefficient de débit
 //! **métrique** (`Q` en m³·h⁻¹, `ΔP` en bar). `N` autorité de la vanne (rapport de
 //! la perte de charge dans la vanne ouverte à la perte de charge totale du circuit,
 //! vanne + reste). `R` rangeabilité (rapport `Cv_max/Cv_min`, typiquement 30 à 50),
@@ -29,7 +29,7 @@
 //! `φ` fraction du `Cv` maximal restituée.
 //!
 //! Les formules `Cv`/`Q` sont **cohérentes en unités** : `Cv` en unités impériales
-//! avec `Q` [gpm] et `ΔP` [psi] ; pour la forme SI (`Kv`), utiliser `Q` `m³·h⁻¹` et
+//! avec `Q` `gpm` et `ΔP` `psi` ; pour la forme SI (`Kv`), utiliser `Q` `m³·h⁻¹` et
 //! `ΔP` `bar` et interpréter la valeur comme un `Kv`. La densité relative `G` étant
 //! adimensionnelle, la même expression vaut dans les deux systèmes.
 //!
@@ -43,8 +43,8 @@
 //! qui n'est pas calculée ici. Ce module **ne traite pas** les gaz/vapeurs
 //! (compressibilité), la **cavitation/flashing**, ni le régime étranglé.
 
-/// Coefficient de débit liquide `Cv = Q · √(G / ΔP)` (impérial : `Q` [gpm],
-/// `ΔP` [psi] ; ou forme `Kv` SI avec `Q` `m³·h⁻¹`, `ΔP` `bar`).
+/// Coefficient de débit liquide `Cv = Q · √(G / ΔP)` (impérial : `Q` `gpm`,
+/// `ΔP` `psi` ; ou forme `Kv` SI avec `Q` `m³·h⁻¹`, `ΔP` `bar`).
 ///
 /// `flow_rate` (Q) débit volumique de liquide, `specific_gravity` (G) densité
 /// relative adimensionnelle, `pressure_drop` (ΔP) perte de charge aux bornes de
