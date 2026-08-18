@@ -21,7 +21,7 @@
 //! sans dimension], `η` rendement (efficacité) d'étage `sans dimension` ; `r`
 //! rapport de rétention de solution par étage (fraction de soluté conservée dans
 //! le sous-débit à chaque lavage) [sans dimension, 0 ≤ r ≤ 1], `N` nombre d'étages
-//! [étages], `R` taux de récupération du soluté [sans dimension, 0 ≤ R ≤ 1].
+//! `étages`, `R` taux de récupération du soluté [sans dimension, 0 ≤ R ≤ 1].
 //!
 //! **Limite honnête** : ces relations décrivent une lixiviation à **étages
 //! idéaux** où la solution du **débordement** et celle du **sous-débit** ont la

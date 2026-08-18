@@ -5,7 +5,7 @@
 //! ```text
 //! volatilité relative   α  = K_L / K_H                                       [-]
 //! équilibre y-x         y  = α·x / (1 + (α − 1)·x)                           [-]
-//! Fenske (reflux total) Nₘ = ln`(d_L/d_H)·(b_H/b_L)` / ln(α)                [étages]
+//! Fenske (reflux total) Nₘ = ln`(d_L/d_H)·(b_H/b_L)` / ln(α)                `étages`
 //! pente rectification   s  = R / (R + 1)                                     [-]
 //! reflux minimal        Rₘ = (x_D − y*) / (y* − z_F)                         [-]
 //! ```
@@ -15,7 +15,7 @@
 //! des constituants léger et lourd `sans dimension`, `x` fraction molaire du léger
 //! en phase liquide [sans dimension, 0 ≤ x ≤ 1], `y` fraction molaire du léger en
 //! phase vapeur à l'équilibre `sans dimension`, `Nₘ` nombre minimal d'étages
-//! théoriques au reflux total [étages], `d_L`, `d_H` débits molaires du léger et
+//! théoriques au reflux total `étages`, `d_L`, `d_H` débits molaires du léger et
 //! du lourd dans le distillat `mol·s⁻¹`, `b_L`, `b_H` débits molaires du léger et
 //! du lourd dans le résidu de pied `mol·s⁻¹`, `s` pente de la droite opératoire de
 //! rectification `sans dimension`, `R` taux de reflux L/D `sans dimension`,
@@ -78,7 +78,7 @@ pub fn dist_equilibrium_vapor(liquid_fraction: f64, relative_volatility: f64) ->
 }
 
 /// Nombre minimal d'étages théoriques au **reflux total** (équation de Fenske) :
-/// `Nₘ = ln`(d_L/d_H)·(b_H/b_L)` / ln(α)` [étages].
+/// `Nₘ = ln`(d_L/d_H)·(b_H/b_L)` / ln(α)` `étages`.
 ///
 /// `distillate_light` `d_L` et `distillate_heavy` `d_H` débits molaires des
 /// constituants léger et lourd dans le distillat `mol·s⁻¹`, `bottoms_light` `b_L`
