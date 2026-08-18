@@ -102,13 +102,23 @@ case "$stage" in
     cargo build --quiet --release -p scirust-sciagent --features cuda --example cuda_decode_bench
     binary="target/release/examples/cuda_decode_bench"
     if command -v nsys >/dev/null 2>&1; then
+      base="${SCIAGENT_OPT_RUN_DIR:?}/nsys-${SCIAGENT_OPT_ITERATION:?}"
       SCIAGENT_DECODE_PROMPT="$prompt_len" \
       SCIAGENT_DECODE_NEW="${SCIAGENT_OPT_I250_PROFILE_NEW:-16}" \
         nsys profile \
           --force-overwrite=true \
-          -o "${SCIAGENT_OPT_RUN_DIR:?}/nsys-${SCIAGENT_OPT_ITERATION:?}" \
+          -o "$base" \
           "$binary" \
           > "${SCIAGENT_OPT_RUN_DIR}/profile-${SCIAGENT_OPT_ITERATION}.log" 2>&1
+
+      report="$(find "$SCIAGENT_OPT_RUN_DIR" -maxdepth 1 -type f -name "nsys-${SCIAGENT_OPT_ITERATION}*.nsys-rep" -print -quit)"
+      if [ -n "$report" ]; then
+        nsys stats "$report" \
+          > "${SCIAGENT_OPT_RUN_DIR}/profile-${SCIAGENT_OPT_ITERATION}.stats.log" 2>&1 || true
+      else
+        printf '%s\n' 'nsys completed but no .nsys-rep file was found for textual stats extraction' \
+          > "${SCIAGENT_OPT_RUN_DIR}/profile-${SCIAGENT_OPT_ITERATION}.note"
+      fi
     else
       run_bench "$prompt_len" "${SCIAGENT_OPT_I250_PROFILE_NEW:-16}" \
         > "${SCIAGENT_OPT_RUN_DIR:?}/profile-${SCIAGENT_OPT_ITERATION:?}.log"
