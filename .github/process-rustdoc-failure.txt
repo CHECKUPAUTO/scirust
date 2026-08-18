@@ -3,21 +3,14 @@ Temporary strict rustdoc diagnostic for scirust-process.
 [1m[92m    Updating[0m crates.io index
 [1m[92m    Updating[0m git repository `https://github.com/Memorithm/FLAT-ATTENTION`
 [1m[92m Documenting[0m scirust-process v0.1.0 (/home/runner/work/scirust/scirust/scirust-process)
-[1m[91merror[0m[1m: unresolved link to `effets`[0m
-  [1m[94m--> [0mscirust-process/src/evaporation.rs:21:6
-   [1m[94m|[0m
-[1m[94m21[0m [1m[94m|[0m //! [effets], `E_1` économie moyenne par effet `sans dimension`, `E_N` économie
-   [1m[94m|[0m      [1m[91m^^^^^^[0m [1m[91mno item named `effets` in scope[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-   [1m[94m= [0m[1mnote[0m: `-D rustdoc::broken-intra-doc-links` implied by `-D warnings`
-   [1m[94m= [0m[1mhelp[0m: to override `-D warnings` add `#[allow(rustdoc::broken_intra_doc_links)]`
-
 [1m[91merror[0m[1m: unresolved link to `sans dimension, 0 < ε_mf < 1`[0m
   [1m[94m--> [0mscirust-process/src/fluidization.rs:20:52
    [1m[94m|[0m
 [1m[94m20[0m [1m[94m|[0m //! (fraction de vide) au minimum de fluidisation [sans dimension, 0 < ε_mf < 1],
    [1m[94m|[0m                                                    [1m[91m^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m [1m[91munbalanced angle brackets[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mnote[0m: `-D rustdoc::broken-intra-doc-links` implied by `-D warnings`
+   [1m[94m= [0m[1mhelp[0m: to override `-D warnings` add `#[allow(rustdoc::broken_intra_doc_links)]`
 
 [1m[91merror[0m[1m: unresolved link to `cohérentes`[0m
   [1m[94m--> [0mscirust-process/src/liquid_extraction.rs:18:58
