@@ -15,8 +15,8 @@
 //! l'équilibre `mol·m⁻³`, `Kf` constante de **Freundlich** `mol·kg⁻¹·(m³·mol⁻¹)^(1/n)`,
 //! `1/n` = `exponent` exposant d'hétérogénéité `sans dimension`, `n_solute`
 //! quantité de soluté à retirer `mol`, `m` masse d'adsorbant `kg`, `C0`
-//! concentration d'alimentation `mol·m⁻³`, `RL` facteur de séparation [sans
-//! dimension, `0 < RL < 1` favorable].
+//! concentration d'alimentation `mol·m⁻³`, `RL` facteur de séparation `sans dimension`,
+//! `0 < RL < 1` favorable.
 //!
 //! **Limite honnête** : ces relations décrivent l'**adsorption à l'équilibre**.
 //! L'isotherme — paramètres de **Langmuir** (`qm`, `K`) ou de **Freundlich**

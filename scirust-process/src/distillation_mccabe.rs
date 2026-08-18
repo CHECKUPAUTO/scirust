@@ -140,8 +140,8 @@ pub fn dist_rectifying_operating_slope(reflux_ratio: f64) -> f64 {
 ///
 /// `distillate_fraction` `x_D` fraction molaire du léger au distillat
 /// `sans dimension, 0 ≤ x_D ≤ 1`, `feed_vapor_fraction_equilibrium` `y*` fraction
-/// molaire vapeur d'équilibre à la composition d'alimentation [sans dimension,
-/// 0 ≤ y* ≤ 1], `feed_fraction` `z_F` fraction molaire du léger à l'alimentation
+/// molaire vapeur d'équilibre à la composition d'alimentation `sans dimension`,
+/// 0 ≤ y* ≤ 1, `feed_fraction` `z_F` fraction molaire du léger à l'alimentation
 /// `sans dimension, 0 ≤ z_F ≤ 1`.
 ///
 /// Panique si l'une des trois fractions n'est pas dans ``0, 1``, ou si

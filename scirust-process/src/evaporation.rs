@@ -11,8 +11,8 @@
 //! ```
 //!
 //! `F` débit d'alimentation `kg·s⁻¹`, `x_F`/`x_P` fractions massiques de solides
-//! **non volatils** dans l'alimentation / le produit concentré [sans dimension,
-//! 0 ≤ x ≤ 1], `V` débit d'eau (solvant) évaporée `kg·s⁻¹` ; `S` débit de vapeur
+//! **non volatils** dans l'alimentation / le produit concentré `sans dimension`,
+//! 0 ≤ x ≤ 1, `V` débit d'eau (solvant) évaporée `kg·s⁻¹` ; `S` débit de vapeur
 //! vive consommée `kg·s⁻¹`, `E` économie de vapeur [sans dimension, kg évaporé
 //! par kg de vapeur vive] ; `k` pente de la droite de Dühring `sans dimension`,
 //! `T_b` température d'ébullition du **solvant pur** à la pression de l'effet

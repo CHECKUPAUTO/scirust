@@ -3,24 +3,6 @@ Temporary strict rustdoc diagnostic for scirust-process.
 [1m[92m    Updating[0m crates.io index
 [1m[92m    Updating[0m git repository `https://github.com/Memorithm/FLAT-ATTENTION`
 [1m[92m Documenting[0m scirust-process v0.1.0 (/home/runner/work/scirust/scirust/scirust-process)
-[1m[91merror[0m[1m: unresolved link to `cohérentes`[0m
-  [1m[94m--> [0mscirust-process/src/liquid_extraction.rs:18:58
-   [1m[94m|[0m
-[1m[94m18[0m [1m[94m|[0m //! (mêmes unités, p. ex. mol·m⁻³ ou fraction massique) [cohérentes], `E` facteur
-   [1m[94m|[0m                                                          [1m[91m^^^^^^^^^^[0m [1m[91mno item named `cohérentes` in scope[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-   [1m[94m= [0m[1mnote[0m: `-D rustdoc::broken-intra-doc-links` implied by `-D warnings`
-   [1m[94m= [0m[1mhelp[0m: to override `-D warnings` add `#[allow(rustdoc::broken_intra_doc_links)]`
-
-[1m[91merror[0m[1m: unresolved link to `sans dimension, 0 < RL < 1 favorable`[0m
-  [1m[94m--> [0mscirust-process/src/adsorption_isotherm.rs:18:73
-   [1m[94m|[0m
-[1m[94m18[0m [1m[94m|[0m   //! concentration d'alimentation `mol·m⁻³`, `RL` facteur de séparation [sans
-   [1m[94m|[0m [1m[91m _________________________________________________________________________^[0m
-[1m[94m19[0m [1m[94m|[0m [1m[91m|[0m //! dimension, `0 < RL < 1` favorable].
-   [1m[94m|[0m [1m[91m|_____________________________________^[0m [1m[91munbalanced angle brackets[0m
-
 [1m[91merror[0m[1m: unresolved link to `plateaux`[0m
   [1m[94m--> [0mscirust-process/src/distillation_efficiency.rs:18:42
    [1m[94m|[0m
@@ -28,6 +10,8 @@ Temporary strict rustdoc diagnostic for scirust-process.
    [1m[94m|[0m                                          [1m[91m^^^^^^^^[0m [1m[91mno item named `plateaux` in scope[0m
    [1m[94m|[0m
    [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+   [1m[94m= [0m[1mnote[0m: `-D rustdoc::broken-intra-doc-links` implied by `-D warnings`
+   [1m[94m= [0m[1mhelp[0m: to override `-D warnings` add `#[allow(rustdoc::broken_intra_doc_links)]`
 
 [1m[91merror[0m[1m: unresolved link to `plateaux`[0m
   [1m[94m--> [0mscirust-process/src/distillation_efficiency.rs:19:16

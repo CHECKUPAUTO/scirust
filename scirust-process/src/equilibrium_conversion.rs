@@ -12,8 +12,8 @@
 //! `K`/`K_ref` constante d'équilibre `sans dimension`, `ΔHr` enthalpie standard de
 //! réaction `J·mol⁻¹, positive endothermique, négative exothermique`, `R` constante
 //! des gaz parfaits `J·mol⁻¹·K⁻¹`, `T`/`T_ref` températures **absolues** `K`,
-//! `X_eq` conversion à l'équilibre d'une réaction `A⇌B` équimolaire [sans dimension,
-//! dans `[0, 1[`], `ΔG°` enthalpie libre standard de réaction `J·mol⁻¹`.
+//! `X_eq` conversion à l'équilibre d'une réaction `A⇌B` équimolaire `sans dimension`,
+//! dans `[0, 1[`, `ΔG°` enthalpie libre standard de réaction `J·mol⁻¹`.
 //!
 //! **Limite honnête** : ces relations décrivent un **équilibre thermodynamique** en
 //! **gaz parfaits / solutions idéales**. La constante d'équilibre de référence

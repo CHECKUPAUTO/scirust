@@ -13,8 +13,8 @@
 //!
 //! `L_o` solution (liquide) quittant l'étage au **débordement** `kg ou kg·s⁻¹`,
 //! `L_u` solution entraînée au **sous-débit** avec le solide [même unité que
-//! `L_o`], `f_o` fraction du soluté partant au débordement [sans dimension,
-//! 0 ≤ f_o ≤ 1] — le soluté est supposé à **même concentration** dans les deux
+//! `L_o`], `f_o` fraction du soluté partant au débordement `sans dimension`,
+//! 0 ≤ f_o ≤ 1 — le soluté est supposé à **même concentration** dans les deux
 //! phases liquides ; `m_s` masse de solide **inerte** (insoluble) `kg ou kg·s⁻¹`,
 //! `r_su` rapport de solution entraînée par unité de solide inerte [kg solution ·
 //! kg solide⁻¹] ; `X_a`/`X_eq` extractions **réelle**/à l'**équilibre** [fractions
@@ -111,8 +111,8 @@ pub fn leach_stage_efficiency(actual_extraction: f64, equilibrium_extraction: f6
 /// lavage). Pour `r < 1`, `R → 1` quand `N → ∞` ; à `N = 0` (lavage unique),
 /// `R = 1 − r`.
 ///
-/// `underflow_solution_ratio` (r) rapport de rétention par étage [sans
-/// dimension, 0 ≤ r ≤ 1] ; `stages` (N) nombre d'étages de lavage.
+/// `underflow_solution_ratio` (r) rapport de rétention par étage `sans dimension`,
+/// 0 ≤ r ≤ 1 ; `stages` (N) nombre d'étages de lavage.
 ///
 /// Panique si `underflow_solution_ratio < 0` ou `underflow_solution_ratio > 1`.
 pub fn leach_countercurrent_solute_recovery(underflow_solution_ratio: f64, stages: u32) -> f64 {

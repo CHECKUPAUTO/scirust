@@ -53,8 +53,8 @@ pub fn massbal_overall_steady(inputs: &[f64], outputs: &[f64]) -> f64 {
 /// `ṁᵢ = F·xᵢ − Σ(autres sorties du constituant)` `kg/s ou mol/s`.
 ///
 /// `input_flow` `F` débit total d'entrée `kg/s ou mol/s`, `input_fraction` `xᵢ`
-/// fraction (massique ou molaire) du constituant dans l'entrée [sans dimension,
-/// dans ``0, 1``], `other_outputs_component` débits partiels **du même
+/// fraction (massique ou molaire) du constituant dans l'entrée `sans dimension`,
+/// dans ``0, 1``, `other_outputs_component` débits partiels **du même
 /// constituant** déjà connus dans les autres courants sortants `kg/s ou mol/s`.
 /// Le résultat ferme le bilan du constituant sur le courant restant.
 ///

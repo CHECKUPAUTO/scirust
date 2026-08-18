@@ -85,10 +85,10 @@ pub fn yieldsel_selectivity(desired_product_formed: f64, undesired_product_forme
 /// Rendement obtenu comme **produit** de la conversion et de la sélectivité
 /// fractionnelle : `Y = X · S_frac` `sans dimension`.
 ///
-/// `conversion` `X` taux de conversion du réactif limitant [sans dimension,
-/// ``0, 1``], `instantaneous_selectivity` `S_frac` sélectivité **fractionnelle**
-/// (fraction du réactif consommé orientée vers le produit désiré) [sans dimension,
-/// ``0, 1``]. Comme les deux facteurs sont dans ``0, 1``, le rendement l'est aussi.
+/// `conversion` `X` taux de conversion du réactif limitant `sans dimension`,
+/// ``0, 1``, `instantaneous_selectivity` `S_frac` sélectivité **fractionnelle**
+/// (fraction du réactif consommé orientée vers le produit désiré) `sans dimension`,
+/// ``0, 1``. Comme les deux facteurs sont dans ``0, 1``, le rendement l'est aussi.
 ///
 /// Panique si `conversion` ou `instantaneous_selectivity` n'est pas fini ou sort de
 /// l'intervalle ``0, 1``.

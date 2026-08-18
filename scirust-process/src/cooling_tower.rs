@@ -89,8 +89,8 @@ pub fn ctwr_approach(cold_water_temperature: f64, wet_bulb_temperature: f64) -> 
     cold_water_temperature - wet_bulb_temperature
 }
 
-/// Efficacité de la tour `ε = range / (range + approach)` [sans dimension,
-/// 0 ≤ ε ≤ 1] : fraction de l'écart maximal théorique `T_hot − T_wb`
+/// Efficacité de la tour `ε = range / (range + approach)` `sans dimension`,
+/// 0 ≤ ε ≤ 1 : fraction de l'écart maximal théorique `T_hot − T_wb`
 /// effectivement récupérée en refroidissement.
 ///
 /// `range` plage de refroidissement [K, ≥ 0], `approach` approche à la

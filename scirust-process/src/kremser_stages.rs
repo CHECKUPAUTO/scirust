@@ -16,8 +16,8 @@
 //! `A` facteur d'absorption `sans dimension`, `S` facteur de stripping [sans
 //! dimension], `L` débit molaire de liquide (solvant) `mol·s⁻¹`, `G` débit
 //! molaire de gaz porteur `mol·s⁻¹`, `K` constante d'équilibre de la droite
-//! `y = K·x` `sans dimension`, `N` nombre d'étages théoriques [sans dimension,
-//! réel], `φ_A` fraction du soluté absorbée `sans dimension, 0 ≤ φ_A ≤ 1`,
+//! `y = K·x` `sans dimension`, `N` nombre d'étages théoriques `sans dimension`,
+//! réel, `φ_A` fraction du soluté absorbée `sans dimension, 0 ≤ φ_A ≤ 1`,
 //! `y_in`/`y_out` fractions molaires du soluté dans le gaz à l'entrée/à la
 //! sortie `sans dimension`, `y* = K·x_in` composition du gaz en équilibre avec
 //! le liquide entrant `sans dimension`, `Lₘ` débit molaire de liquide minimal
