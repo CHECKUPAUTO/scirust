@@ -307,8 +307,7 @@ mod imp {
 
         #[test]
         fn workspace_write_adds_tmp_and_workspace_rw() {
-            let plan =
-                build_plan(SandboxMode::WorkspaceWrite, Path::new("/workspace"), 5).unwrap();
+            let plan = build_plan(SandboxMode::WorkspaceWrite, Path::new("/workspace"), 5).unwrap();
             assert_eq!(plan.rules.len(), 4);
             assert_eq!(plan.rules[2].path.to_bytes(), b"/tmp");
             assert_eq!(plan.rules[2].access, plan.handled);
