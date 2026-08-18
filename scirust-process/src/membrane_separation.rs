@@ -3,24 +3,24 @@
 //! concentration du rétentat et pression osmotique (loi de **van't Hoff**).
 //!
 //! ```text
-//! flux solution-diffusion   J   = P·Δp / δ                               [mol·m⁻²·s⁻¹] ou [m·s⁻¹]
+//! flux solution-diffusion   J   = P·Δp / δ                               `mol·m⁻²·s⁻¹` ou `m·s⁻¹`
 //! taux de rejet observé     R   = 1 − c_p / c_f                          [-]
 //! taux de récupération      Y   = Q_p / Q_f                              [-]
 //! facteur de concentration  CF  = (1 − Y·(1 − R)) / (1 − Y)              [-]
-//! pression osmotique        π   = i·c·R_g·T                              [Pa]
+//! pression osmotique        π   = i·c·R_g·T                              `Pa`
 //! ```
 //!
 //! `J` flux transmembranaire (densité de flux ; unité selon la perméabilité
-//! fournie) ; `P` perméabilité de la membrane [(unité de J)·m·Pa⁻¹, FOURNIE] ;
-//! `Δp` pression motrice **effective** [Pa] ; `δ` épaisseur de la couche active
-//! [m] ; `R` taux de rejet observé [sans dimension] ; `c_f`/`c_p` concentrations
-//! côté alimentation/perméat [même unité, p. ex. mol·m⁻³] ; `Y` taux de
-//! récupération (conversion) [sans dimension] ; `Q_p`/`Q_f` débits de
-//! perméat/alimentation [même unité, p. ex. m³·s⁻¹] ; `CF` facteur de
-//! concentration du rétentat [sans dimension] ; `π` pression osmotique [Pa] ;
+//! fournie) ; `P` perméabilité de la membrane `(unité de J)·m·Pa⁻¹, FOURNIE` ;
+//! `Δp` pression motrice **effective** `Pa` ; `δ` épaisseur de la couche active
+//! `m` ; `R` taux de rejet observé `sans dimension` ; `c_f`/`c_p` concentrations
+//! côté alimentation/perméat `même unité, p. ex. mol·m⁻³` ; `Y` taux de
+//! récupération (conversion) `sans dimension` ; `Q_p`/`Q_f` débits de
+//! perméat/alimentation `même unité, p. ex. m³·s⁻¹` ; `CF` facteur de
+//! concentration du rétentat `sans dimension` ; `π` pression osmotique `Pa` ;
 //! `i` facteur de van't Hoff [sans dimension, FOURNI] ; `c` concentration
-//! molaire de soluté [mol·m⁻³] ; `R_g` constante des gaz parfaits [J·mol⁻¹·K⁻¹] ;
-//! `T` température [K].
+//! molaire de soluté `mol·m⁻³` ; `R_g` constante des gaz parfaits `J·mol⁻¹·K⁻¹` ;
+//! `T` température `K`.
 //!
 //! **Limite honnête** : modèle **solution-diffusion** avec **perméabilité `P`
 //! FOURNIE** par l'appelant (jamais inventée ; issue d'essais ou de fiches
@@ -37,9 +37,9 @@
 
 /// Flux transmembranaire (modèle **solution-diffusion**) `J = P·Δp / δ`.
 ///
-/// `permeability` (P) perméabilité FOURNIE [(unité de J)·m·Pa⁻¹] ;
-/// `thickness` (δ) épaisseur de la couche active [m] ; `driving_pressure` (Δp)
-/// pression motrice **effective** [Pa] (en osmose inverse : différence de
+/// `permeability` (P) perméabilité FOURNIE `(unité de J)·m·Pa⁻¹` ;
+/// `thickness` (δ) épaisseur de la couche active `m` ; `driving_pressure` (Δp)
+/// pression motrice **effective** `Pa` (en osmose inverse : différence de
 /// pression moins différence de pression osmotique, composée par l'appelant).
 ///
 /// Panique si `permeability < 0`, `thickness <= 0` ou `driving_pressure < 0`.
@@ -95,11 +95,11 @@ pub fn memb_recovery(permeate_flow: f64, feed_flow: f64) -> f64 {
 /// Facteur de concentration du rétentat `CF = (1 − Y·(1 − R)) / (1 − Y)`
 /// (sans dimension), à rejet `R` supposé **constant** sur le module.
 ///
-/// `recovery` (Y) taux de récupération [sans dimension] ; `rejection` (R) taux
-/// de rejet [sans dimension]. À rejet total (`R = 1`), `CF = 1/(1 − Y)`.
+/// `recovery` (Y) taux de récupération `sans dimension` ; `rejection` (R) taux
+/// de rejet `sans dimension`. À rejet total (`R = 1`), `CF = 1/(1 − Y)`.
 ///
 /// Panique si `recovery` n'est pas dans `[0, 1[` ou si `rejection` n'est pas
-/// dans `[0, 1]`.
+/// dans ``0, 1``.
 pub fn memb_concentration_factor(recovery: f64, rejection: f64) -> f64 {
     assert!(
         (0.0..1.0).contains(&recovery),
@@ -114,10 +114,10 @@ pub fn memb_concentration_factor(recovery: f64, rejection: f64) -> f64 {
 
 /// Pression osmotique `π = i·c·R_g·T` (Pa), loi de **van't Hoff**.
 ///
-/// `van_t_hoff_factor` (i) facteur de van't Hoff FOURNI [sans dimension] ;
-/// `molar_concentration` (c) concentration molaire de soluté [mol·m⁻³] ;
-/// `gas_constant` (R_g) constante des gaz parfaits [J·mol⁻¹·K⁻¹] ;
-/// `temperature` (T) température **en kelvin** [K].
+/// `van_t_hoff_factor` (i) facteur de van't Hoff FOURNI `sans dimension` ;
+/// `molar_concentration` (c) concentration molaire de soluté `mol·m⁻³` ;
+/// `gas_constant` (R_g) constante des gaz parfaits `J·mol⁻¹·K⁻¹` ;
+/// `temperature` (T) température **en kelvin** `K`.
 ///
 /// Panique si `van_t_hoff_factor <= 0`, `molar_concentration < 0`,
 /// `gas_constant <= 0` ou `temperature <= 0`.

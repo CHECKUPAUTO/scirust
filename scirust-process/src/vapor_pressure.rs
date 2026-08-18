@@ -6,7 +6,7 @@
 //! Antoine                     log₁₀ P = A − B / (C + T)
 //!   pression                  P    = 10^(A − B / (C + T))
 //!   température de saturation T_sat = B / (A − log₁₀ P) − C
-//! Clausius-Clapeyron intégrée P    = P_ref · exp[ (L / R) · (1/T_ref − 1/T) ]
+//! Clausius-Clapeyron intégrée P    = P_ref · exp`(L / R) · (1/T_ref − 1/T)`
 //!   chaleur latente (2 points) L   = R · ln(P₂/P₁) / (1/T₁ − 1/T₂)
 //! ```
 //!
@@ -15,9 +15,9 @@
 //! coefficients], `T` température [dans l'unité des coefficients d'Antoine],
 //! `P` pression de vapeur saturante [dans l'échelle des coefficients], `T_sat`
 //! température de saturation réciproque [même unité que `T`] ; pour
-//! Clausius-Clapeyron `P_ref` pression de référence [Pa], `T_ref` température de
-//! référence [K], `T` température [K], `L` chaleur (enthalpie) latente de
-//! vaporisation [J·mol⁻¹], `R` constante des gaz parfaits [J·mol⁻¹·K⁻¹],
+//! Clausius-Clapeyron `P_ref` pression de référence `Pa`, `T_ref` température de
+//! référence `K`, `T` température `K`, `L` chaleur (enthalpie) latente de
+//! vaporisation `J·mol⁻¹`, `R` constante des gaz parfaits `J·mol⁻¹·K⁻¹`,
 //! `P₁`/`P₂` pressions aux températures `T₁`/`T₂` [Pa et K]. Les grandeurs sans
 //! dimension le restent ; toutes les grandeurs de Clausius-Clapeyron sont en
 //! unités SI cohérentes.
@@ -84,13 +84,13 @@ pub fn vp_antoine_temperature(
 }
 
 /// Pression de vapeur par la relation de Clausius-Clapeyron intégrée
-/// `P = P_ref · exp[ (L / R) · (1/T_ref − 1/T) ]` (chaleur latente constante,
+/// `P = P_ref · exp`(L / R) · (1/T_ref − 1/T)`` (chaleur latente constante,
 /// vapeur assimilée à un gaz parfait).
 ///
-/// `reference_pressure` (P_ref) pression de référence [Pa], `latent_heat` (L)
-/// chaleur latente de vaporisation **FOURNIE** [J·mol⁻¹], `gas_constant` (R)
-/// constante des gaz parfaits [J·mol⁻¹·K⁻¹], `reference_temperature` (T_ref) et
-/// `temperature` (T) températures [K]. Résultat en pascals.
+/// `reference_pressure` (P_ref) pression de référence `Pa`, `latent_heat` (L)
+/// chaleur latente de vaporisation **FOURNIE** `J·mol⁻¹`, `gas_constant` (R)
+/// constante des gaz parfaits `J·mol⁻¹·K⁻¹`, `reference_temperature` (T_ref) et
+/// `temperature` (T) températures `K`. Résultat en pascals.
 ///
 /// Panique si `reference_pressure <= 0`, si `latent_heat < 0`, si
 /// `gas_constant <= 0`, si `reference_temperature <= 0` ou si `temperature <= 0`.
@@ -123,9 +123,9 @@ pub fn vp_clausius_clapeyron(
 /// de vapeur `L = R · ln(P₂/P₁) / (1/T₁ − 1/T₂)` (Clausius-Clapeyron intégrée
 /// inversée, chaleur latente supposée constante entre les deux points).
 ///
-/// `pressure1` (P₁) et `pressure2` (P₂) pressions de vapeur [Pa] aux températures
-/// `temperature1` (T₁) et `temperature2` (T₂) [K], `gas_constant` (R) constante
-/// des gaz parfaits [J·mol⁻¹·K⁻¹]. Résultat en J·mol⁻¹.
+/// `pressure1` (P₁) et `pressure2` (P₂) pressions de vapeur `Pa` aux températures
+/// `temperature1` (T₁) et `temperature2` (T₂) `K`, `gas_constant` (R) constante
+/// des gaz parfaits `J·mol⁻¹·K⁻¹`. Résultat en J·mol⁻¹.
 ///
 /// Panique si `pressure1 <= 0`, si `pressure2 <= 0`, si `temperature1 <= 0`, si
 /// `temperature2 <= 0`, si `gas_constant <= 0` ou si `temperature1 == temperature2`

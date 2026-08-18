@@ -5,20 +5,20 @@
 //! Rayleigh (intégrale)   ln(L₂/L₁) = ∫_{x₁}^{x₂} dx / (y*(x) − x)        [—]
 //! équilibre (α const.)   y*(x) = α·x / (1 + (α−1)·x)                     [—]
 //! forme intégrée         ln(L₂/L₁) = 1/(α−1)·[ln(x₂/x₁) − α·ln((1−x₂)/(1−x₁))]
-//! moles restantes        L₂ = L₁·(x₂/x₁)^{1/(α−1)}·((1−x₁)/(1−x₂))^{α/(α−1)}  [mol]
-//! moles distillées       D = L₁ − L₂                                     [mol]
+//! moles restantes        L₂ = L₁·(x₂/x₁)^{1/(α−1)}·((1−x₁)/(1−x₂))^{α/(α−1)}  `mol`
+//! moles distillées       D = L₁ − L₂                                     `mol`
 //! composition moyenne    x_D = (L₁·x₁ − L₂·x₂) / (L₁ − L₂)               [—]
 //! taux de récupération    R = D·x_D / (L₁·x₁)                             [—]
 //! ```
 //!
-//! `L₁` charge initiale du bouilleur [mol], `L₂` charge restante en fin
-//! d'opération [mol], `x₁` fraction molaire initiale du constituant léger dans le
+//! `L₁` charge initiale du bouilleur `mol`, `L₂` charge restante en fin
+//! d'opération `mol`, `x₁` fraction molaire initiale du constituant léger dans le
 //! liquide [sans dimension, dans `]0, 1[`], `x₂` fraction molaire finale dans le
 //! liquide [sans dimension, dans `]0, 1[`], `y*(x)` fraction molaire du léger dans
-//! la vapeur à l'équilibre [sans dimension], `α` volatilité relative léger/lourd
-//! [sans dimension, `> 0` et `≠ 1`], `D` quantité totale distillée [mol], `x_D`
-//! composition molaire moyenne du distillat [sans dimension], `R` taux de
-//! récupération d'un constituant [sans dimension].
+//! la vapeur à l'équilibre `sans dimension`, `α` volatilité relative léger/lourd
+//! [sans dimension, `> 0` et `≠ 1`], `D` quantité totale distillée `mol`, `x_D`
+//! composition molaire moyenne du distillat `sans dimension`, `R` taux de
+//! récupération d'un constituant `sans dimension`.
 //!
 //! **Limite honnête** : il s'agit d'une distillation **simple** (différentielle,
 //! de Rayleigh) d'un **binaire** : à chaque instant une **seule vaporisation
@@ -35,7 +35,7 @@
 
 /// Logarithme du rapport des charges `ln(L₂/L₁)` par l'intégrale de Rayleigh à
 /// volatilité relative constante
-/// `ln(L₂/L₁) = 1/(α−1)·[ln(x₂/x₁) − α·ln((1−x₂)/(1−x₁))]` [sans dimension].
+/// `ln(L₂/L₁) = 1/(α−1)·[ln(x₂/x₁) − α·ln((1−x₂)/(1−x₁))]` `sans dimension`.
 ///
 /// `initial_fraction` `x₁` et `final_fraction` `x₂` fractions molaires du léger
 /// [sans dimension, dans `]0, 1[`], `relative_volatility` `α` volatilité relative
@@ -70,7 +70,7 @@ pub fn bdist_rayleigh_constant_volatility(
 }
 
 /// Charge restante au bouilleur en fin d'opération
-/// `L₂ = L₁·(x₂/x₁)^{1/(α−1)}·((1−x₁)/(1−x₂))^{α/(α−1)}` [mol].
+/// `L₂ = L₁·(x₂/x₁)^{1/(α−1)}·((1−x₁)/(1−x₂))^{α/(α−1)}` `mol`.
 ///
 /// Forme exponentielle cohérente de l'intégrale de Rayleigh :
 /// `L₂ = L₁·exp(ln(L₂/L₁))` avec le logarithme donné par
@@ -117,7 +117,7 @@ pub fn bdist_remaining_moles(
         * ((1.0 - initial_fraction) / (1.0 - final_fraction)).powf(exponent_heavy)
 }
 
-/// Quantité totale distillée par bilan matière global `D = L₁ − L₂` [mol].
+/// Quantité totale distillée par bilan matière global `D = L₁ − L₂` `mol`.
 ///
 /// `initial_moles` `L₁` charge initiale [mol, strictement positive],
 /// `remaining_moles` `L₂` charge restante [mol, positive et au plus égale à `L₁`].
@@ -141,16 +141,16 @@ pub fn bdist_distillate_moles(initial_moles: f64, remaining_moles: f64) -> f64 {
 }
 
 /// Composition molaire moyenne du distillat par bilan matière
-/// `x_D = (L₁·x₁ − L₂·x₂) / (L₁ − L₂)` [sans dimension].
+/// `x_D = (L₁·x₁ − L₂·x₂) / (L₁ − L₂)` `sans dimension`.
 ///
-/// `initial_moles` `L₁` charge initiale [mol], `initial_fraction` `x₁` fraction
-/// molaire initiale du léger [sans dimension, dans `[0, 1]`], `remaining_moles`
-/// `L₂` charge restante [mol], `remaining_fraction` `x₂` fraction molaire finale du
-/// léger [sans dimension, dans `[0, 1]`]. Le dénominateur `L₁ − L₂` est le distillat
+/// `initial_moles` `L₁` charge initiale `mol`, `initial_fraction` `x₁` fraction
+/// molaire initiale du léger [sans dimension, dans ``0, 1``], `remaining_moles`
+/// `L₂` charge restante `mol`, `remaining_fraction` `x₂` fraction molaire finale du
+/// léger [sans dimension, dans ``0, 1``]. Le dénominateur `L₁ − L₂` est le distillat
 /// total `D`, qui doit être strictement positif.
 ///
 /// Panique si une charge n'est pas finie ou est négative, si une fraction sort de
-/// `[0, 1]`, ou si `remaining_moles ≥ initial_moles` (aucun distillat produit).
+/// ``0, 1``, ou si `remaining_moles ≥ initial_moles` (aucun distillat produit).
 pub fn bdist_average_distillate_fraction(
     initial_moles: f64,
     initial_fraction: f64,
@@ -182,7 +182,7 @@ pub fn bdist_average_distillate_fraction(
 }
 
 /// Taux de récupération d'un constituant dans le distillat
-/// `R = n_{D} / n_{0}` [sans dimension].
+/// `R = n_{D} / n_{0}` `sans dimension`.
 ///
 /// `distillate_moles_component` `n_D` moles du constituant passées au distillat
 /// [mol, positives], `initial_moles_component` `n₀` moles initiales de ce

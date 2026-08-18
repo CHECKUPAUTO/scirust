@@ -4,22 +4,22 @@
 //! conversion et de la sélectivité fractionnelle.
 //!
 //! ```text
-//! rendement global        Y  = n_D / n_A,cons                       [sans dimension]
-//! sélectivité (globale)   S  = n_D / n_U                            [sans dimension]
-//! rendement = conv × sél  Y  = X · S_frac                           [sans dimension]
-//! sélectivité instantanée s  = r_D / r_U                            [sans dimension]
+//! rendement global        Y  = n_D / n_A,cons                       `sans dimension`
+//! sélectivité (globale)   S  = n_D / n_U                            `sans dimension`
+//! rendement = conv × sél  Y  = X · S_frac                           `sans dimension`
+//! sélectivité instantanée s  = r_D / r_U                            `sans dimension`
 //! ```
 //!
 //! `Y` rendement (moles de produit désiré formé par mole de réactif limitant
-//! consommé, ou par mole chargée selon la définition) [sans dimension],
-//! `n_D` quantité de **produit désiré formé** [mol], `n_A,cons` quantité de
-//! **réactif limitant consommé** [mol], `S` sélectivité **globale** désiré/indésiré
-//! [sans dimension], `n_U` quantité de **produit indésiré formé** [mol],
-//! `X` taux de **conversion** du réactif limitant [sans dimension, `[0, 1]`],
+//! consommé, ou par mole chargée selon la définition) `sans dimension`,
+//! `n_D` quantité de **produit désiré formé** `mol`, `n_A,cons` quantité de
+//! **réactif limitant consommé** `mol`, `S` sélectivité **globale** désiré/indésiré
+//! `sans dimension`, `n_U` quantité de **produit indésiré formé** `mol`,
+//! `X` taux de **conversion** du réactif limitant [sans dimension, ``0, 1``],
 //! `S_frac` sélectivité **fractionnelle** (fraction du réactif consommé orientée
-//! vers le produit désiré) [sans dimension, `[0, 1]`], `s` sélectivité
-//! **instantanée** (rapport local des vitesses) [sans dimension], `r_D`/`r_U`
-//! vitesses de formation des produits désiré/indésiré [mol·m⁻³·s⁻¹, même unité].
+//! vers le produit désiré) [sans dimension, ``0, 1``], `s` sélectivité
+//! **instantanée** (rapport local des vitesses) `sans dimension`, `r_D`/`r_U`
+//! vitesses de formation des produits désiré/indésiré `mol·m⁻³·s⁻¹, même unité`.
 //!
 //! **Limite honnête** : ces relations ne sont que les **définitions molaires** du
 //! rendement et de la sélectivité pour des réactions **parallèles ou en série** ;
@@ -37,11 +37,11 @@
 
 /// Rendement **global** en produit désiré : `Y = n_D / n_A,cons`
 /// (moles de produit désiré formé par mole de réactif limitant consommé)
-/// [sans dimension].
+/// `sans dimension`.
 ///
-/// `desired_product_formed` `n_D` quantité de produit désiré **formé** [mol],
+/// `desired_product_formed` `n_D` quantité de produit désiré **formé** `mol`,
 /// `limiting_reactant_consumed` `n_A,cons` quantité de réactif limitant
-/// **consommé** [mol]. La base molaire (avec ou sans facteur stœchiométrique) est à
+/// **consommé** `mol`. La base molaire (avec ou sans facteur stœchiométrique) est à
 /// la charge de l'appelant.
 ///
 /// Panique si `desired_product_formed` est négatif ou non fini, ou si
@@ -61,10 +61,10 @@ pub fn yieldsel_overall_yield(desired_product_formed: f64, limiting_reactant_con
 
 /// Sélectivité **globale** désiré/indésiré : `S = n_D / n_U`
 /// (moles de produit désiré formé par mole de produit indésiré formé)
-/// [sans dimension].
+/// `sans dimension`.
 ///
-/// `desired_product_formed` `n_D` quantité de produit désiré **formé** [mol],
-/// `undesired_product_formed` `n_U` quantité de produit indésiré **formé** [mol].
+/// `desired_product_formed` `n_D` quantité de produit désiré **formé** `mol`,
+/// `undesired_product_formed` `n_U` quantité de produit indésiré **formé** `mol`.
 /// Une valeur `S > 1` indique que le produit désiré domine.
 ///
 /// Panique si `desired_product_formed` est négatif ou non fini, ou si
@@ -83,15 +83,15 @@ pub fn yieldsel_selectivity(desired_product_formed: f64, undesired_product_forme
 }
 
 /// Rendement obtenu comme **produit** de la conversion et de la sélectivité
-/// fractionnelle : `Y = X · S_frac` [sans dimension].
+/// fractionnelle : `Y = X · S_frac` `sans dimension`.
 ///
 /// `conversion` `X` taux de conversion du réactif limitant [sans dimension,
-/// `[0, 1]`], `instantaneous_selectivity` `S_frac` sélectivité **fractionnelle**
+/// ``0, 1``], `instantaneous_selectivity` `S_frac` sélectivité **fractionnelle**
 /// (fraction du réactif consommé orientée vers le produit désiré) [sans dimension,
-/// `[0, 1]`]. Comme les deux facteurs sont dans `[0, 1]`, le rendement l'est aussi.
+/// ``0, 1``]. Comme les deux facteurs sont dans ``0, 1``, le rendement l'est aussi.
 ///
 /// Panique si `conversion` ou `instantaneous_selectivity` n'est pas fini ou sort de
-/// l'intervalle `[0, 1]`.
+/// l'intervalle ``0, 1``.
 pub fn yieldsel_yield_from_conversion_selectivity(
     conversion: f64,
     instantaneous_selectivity: f64,
@@ -108,9 +108,9 @@ pub fn yieldsel_yield_from_conversion_selectivity(
 }
 
 /// Sélectivité **instantanée** comme rapport des vitesses locales :
-/// `s = r_D / r_U` [sans dimension].
+/// `s = r_D / r_U` `sans dimension`.
 ///
-/// `desired_rate` `r_D` vitesse de formation du produit désiré [mol·m⁻³·s⁻¹],
+/// `desired_rate` `r_D` vitesse de formation du produit désiré `mol·m⁻³·s⁻¹`,
 /// `undesired_rate` `r_U` vitesse de formation du produit indésiré [même unité].
 /// Ce rapport dépend des **concentrations locales**, donc du type de réacteur.
 ///

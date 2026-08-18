@@ -6,19 +6,19 @@
 //! Murphree (vapeur)   E_M = (yₙ − yₙ₊₁) / (yₙ* − yₙ₊₁)                 [-]
 //! plateaux réels      N_r = N_th / E_o                                 [plateaux]
 //! Lewis (global)      E_o = ln[1 + E_M·(λ − 1)] / ln(λ)               [-]
-//! hauteur colonne     H   = N_r · h_t                                  [m]
+//! hauteur colonne     H   = N_r · h_t                                  `m`
 //! ```
 //!
-//! `E_M` rendement de Murphree en phase vapeur d'un plateau [sans dimension],
+//! `E_M` rendement de Murphree en phase vapeur d'un plateau `sans dimension`,
 //! `yₙ` fraction molaire du constituant léger dans la vapeur quittant le plateau
-//! `n` [sans dimension], `yₙ₊₁` fraction molaire dans la vapeur entrant sous le
-//! plateau [sans dimension], `yₙ*` fraction molaire vapeur qui serait à l'équilibre
-//! avec le liquide du plateau [sans dimension], `E_o` rendement global de la colonne
+//! `n` `sans dimension`, `yₙ₊₁` fraction molaire dans la vapeur entrant sous le
+//! plateau `sans dimension`, `yₙ*` fraction molaire vapeur qui serait à l'équilibre
+//! avec le liquide du plateau `sans dimension`, `E_o` rendement global de la colonne
 //! [sans dimension, dans `]0, 1]` en pratique], `N_th` nombre de plateaux
 //! **théoriques** (étages d'équilibre) [plateaux], `N_r` nombre de plateaux
 //! **réels** [plateaux], `λ` facteur d'entraînement (stripping factor) `m·V̇/L̇`
 //! [sans dimension, strictement positif], `H` hauteur de la partie à plateaux de la
-//! colonne [m], `h_t` espacement entre plateaux (tray spacing) [m].
+//! colonne `m`, `h_t` espacement entre plateaux (tray spacing) `m`.
 //!
 //! **Limite honnête** : le rendement de Murphree (**plateau**) et le rendement
 //! **global** (colonne) sont reliés par le **facteur d'entraînement** `λ`
@@ -34,7 +34,7 @@
 //! l'hydraulique des plateaux, ni les rendements ponctuels.
 
 /// Rendement de Murphree en phase vapeur d'un plateau
-/// `E_M = (yₙ − yₙ₊₁) / (yₙ* − yₙ₊₁)` [sans dimension].
+/// `E_M = (yₙ − yₙ₊₁) / (yₙ* − yₙ₊₁)` `sans dimension`.
 ///
 /// C'est le rapport entre l'**enrichissement réel** de la vapeur sur le plateau et
 /// l'enrichissement qu'il faudrait pour atteindre l'équilibre avec le liquide du
@@ -84,17 +84,17 @@ pub fn deff_actual_stages(theoretical_stages: f64, overall_efficiency: f64) -> f
 
 /// Rendement **global** de la colonne à partir du rendement de Murphree et du
 /// facteur d'entraînement `E_o = ln[1 + E_M·(λ − 1)] / ln(λ)` (relation de Lewis)
-/// [sans dimension].
+/// `sans dimension`.
 ///
 /// L'argument du logarithme `1 + E_M·(λ − 1)` reste strictement positif pour
-/// `E_M ∈ [0, 1]` et `λ > 0` (il vaut au minimum `λ` lorsque `E_M = 1`). Pour
+/// `E_M ∈ `0, 1`` et `λ > 0` (il vaut au minimum `λ` lorsque `E_M = 1`). Pour
 /// `E_M = 1` on retrouve `E_o = 1` quel que soit `λ`.
 ///
 /// `murphree_efficiency` `E_M` rendement de Murphree du plateau
-/// [sans dimension, dans `[0, 1]`], `stripping_factor` `λ` facteur d'entraînement
+/// [sans dimension, dans ``0, 1``], `stripping_factor` `λ` facteur d'entraînement
 /// **fourni** [sans dimension, strictement positif et différent de 1].
 ///
-/// Panique si `murphree_efficiency` sort de `[0, 1]`, ou si `stripping_factor`
+/// Panique si `murphree_efficiency` sort de ``0, 1``, ou si `stripping_factor`
 /// n'est pas fini, n'est pas strictement positif, ou vaut exactement 1 (le rapport
 /// de logarithmes est alors indéterminé ; la limite continue est `E_o = E_M`).
 pub fn deff_overall_from_murphree(murphree_efficiency: f64, stripping_factor: f64) -> f64 {
@@ -109,7 +109,7 @@ pub fn deff_overall_from_murphree(murphree_efficiency: f64, stripping_factor: f6
     (1.0 + murphree_efficiency * (stripping_factor - 1.0)).ln() / stripping_factor.ln()
 }
 
-/// Hauteur de la partie à plateaux de la colonne `H = N_r · h_t` [m].
+/// Hauteur de la partie à plateaux de la colonne `H = N_r · h_t` `m`.
 ///
 /// `actual_stages` `N_r` nombre de plateaux réels [plateaux, positif ou nul, fini],
 /// `tray_spacing` `h_t` espacement entre plateaux **fourni** [m, strictement

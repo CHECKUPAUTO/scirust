@@ -56,7 +56,7 @@ pub fn econ_six_tenths_rule(known_cost: f64, known_capacity: f64, new_capacity: 
 ///
 /// `known_cost` (C₁) coût de référence [$], `known_capacity` (Q₁) et
 /// `new_capacity` (Q₂) capacités [même unité cohérente], `exponent` (n) exposant
-/// d'échelle [sans dimension].
+/// d'échelle `sans dimension`.
 ///
 /// Panique si `known_cost < 0`, si `known_capacity <= 0`, si `new_capacity < 0`
 /// ou si `exponent` n'est pas fini.
@@ -81,7 +81,7 @@ pub fn econ_scale_cost(
 /// achetés pour couvrir installation, tuyauterie, instrumentation, génie civil…
 ///
 /// `purchased_equipment_cost` (C_PEC) coût des équipements achetés [$],
-/// `lang_factor` (f_L) facteur de Lang [sans dimension], **FOURNI** par
+/// `lang_factor` (f_L) facteur de Lang `sans dimension`, **FOURNI** par
 /// l'appelant (typiquement de l'ordre de 3 à 5 selon le type de procédé).
 ///
 /// Panique si `purchased_equipment_cost < 0` ou si `lang_factor < 1`

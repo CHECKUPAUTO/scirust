@@ -3,17 +3,17 @@
 //! l'enthalpie libre standard `ΔG°`.
 //!
 //! ```text
-//! van't Hoff       K(T) = K_ref · exp[ (−ΔHr/R) · (1/T − 1/T_ref) ]   [sans dim.]
+//! van't Hoff       K(T) = K_ref · exp`(−ΔHr/R) · (1/T − 1/T_ref)`   [sans dim.]
 //! conversion A⇌B   X_eq = K / (1 + K)                                  [sans dim.]
-//! ΔG° depuis K     ΔG°  = −R·T·ln K                                    [J·mol⁻¹]
-//! K depuis ΔG°     K    = exp[ −ΔG° / (R·T) ]                          [sans dim.]
+//! ΔG° depuis K     ΔG°  = −R·T·ln K                                    `J·mol⁻¹`
+//! K depuis ΔG°     K    = exp`−ΔG° / (R·T)`                          [sans dim.]
 //! ```
 //!
-//! `K`/`K_ref` constante d'équilibre [sans dimension], `ΔHr` enthalpie standard de
-//! réaction [J·mol⁻¹, positive endothermique, négative exothermique], `R` constante
-//! des gaz parfaits [J·mol⁻¹·K⁻¹], `T`/`T_ref` températures **absolues** [K],
+//! `K`/`K_ref` constante d'équilibre `sans dimension`, `ΔHr` enthalpie standard de
+//! réaction `J·mol⁻¹, positive endothermique, négative exothermique`, `R` constante
+//! des gaz parfaits `J·mol⁻¹·K⁻¹`, `T`/`T_ref` températures **absolues** `K`,
 //! `X_eq` conversion à l'équilibre d'une réaction `A⇌B` équimolaire [sans dimension,
-//! dans `[0, 1[`], `ΔG°` enthalpie libre standard de réaction [J·mol⁻¹].
+//! dans `[0, 1[`], `ΔG°` enthalpie libre standard de réaction `J·mol⁻¹`.
 //!
 //! **Limite honnête** : ces relations décrivent un **équilibre thermodynamique** en
 //! **gaz parfaits / solutions idéales**. La constante d'équilibre de référence
@@ -25,13 +25,13 @@
 //! équimolaire et **borne** (majore) la conversion atteignable par un réacteur réel.
 
 /// Constante d'équilibre à la température `T` par la loi de van't Hoff intégrée :
-/// `K(T) = K_ref · exp[ (−ΔHr/R) · (1/T − 1/T_ref) ]` [sans dimension].
+/// `K(T) = K_ref · exp`(−ΔHr/R) · (1/T − 1/T_ref)`` `sans dimension`.
 ///
 /// `equilibrium_constant_ref` `K_ref` constante d'équilibre à la température de
-/// référence [sans dimension], `enthalpy_of_reaction` `ΔHr` enthalpie standard de
-/// réaction [J·mol⁻¹], `gas_constant` `R` constante des gaz [J·mol⁻¹·K⁻¹],
-/// `temperature_ref` `T_ref` température de référence **absolue** [K],
-/// `temperature` `T` température cible **absolue** [K]. Pour `ΔHr < 0`
+/// référence `sans dimension`, `enthalpy_of_reaction` `ΔHr` enthalpie standard de
+/// réaction `J·mol⁻¹`, `gas_constant` `R` constante des gaz `J·mol⁻¹·K⁻¹`,
+/// `temperature_ref` `T_ref` température de référence **absolue** `K`,
+/// `temperature` `T` température cible **absolue** `K`. Pour `ΔHr < 0`
 /// (exothermique) `K` **décroît** avec `T` ; pour `ΔHr > 0` (endothermique) `K`
 /// **croît** avec `T`. À `T = T_ref`, `K = K_ref`.
 ///
@@ -73,7 +73,7 @@ pub fn equil_vant_hoff(
 /// Conversion à l'équilibre d'une réaction réversible équimolaire `A⇌B` :
 /// `X_eq = K / (1 + K)` [sans dimension, dans `[0, 1[`].
 ///
-/// `equilibrium_constant` `K` constante d'équilibre [sans dimension]. `X_eq → 0`
+/// `equilibrium_constant` `K` constante d'équilibre `sans dimension`. `X_eq → 0`
 /// quand `K → 0`, `X_eq = 1/2` pour `K = 1`, `X_eq → 1` quand `K → ∞`. Cette
 /// conversion majore (borne) la conversion d'un réacteur réel.
 ///
@@ -87,11 +87,11 @@ pub fn equil_conversion_first_order_reversible(equilibrium_constant: f64) -> f64
 }
 
 /// Enthalpie libre standard de réaction à partir de la constante d'équilibre :
-/// `ΔG° = −R·T·ln K` [J·mol⁻¹].
+/// `ΔG° = −R·T·ln K` `J·mol⁻¹`.
 ///
-/// `gas_constant` `R` constante des gaz [J·mol⁻¹·K⁻¹], `temperature` `T`
-/// température **absolue** [K], `equilibrium_constant` `K` constante d'équilibre
-/// [sans dimension]. `ΔG° < 0` pour `K > 1` (réaction favorisée), `ΔG° = 0` pour
+/// `gas_constant` `R` constante des gaz `J·mol⁻¹·K⁻¹`, `temperature` `T`
+/// température **absolue** `K`, `equilibrium_constant` `K` constante d'équilibre
+/// `sans dimension`. `ΔG° < 0` pour `K > 1` (réaction favorisée), `ΔG° = 0` pour
 /// `K = 1`, `ΔG° > 0` pour `K < 1`.
 ///
 /// Panique si `gas_constant` ou `temperature` n'est pas strictement positif, ou si
@@ -114,11 +114,11 @@ pub fn equil_gibbs_from_k(gas_constant: f64, temperature: f64, equilibrium_const
 }
 
 /// Constante d'équilibre à partir de l'enthalpie libre standard de réaction :
-/// `K = exp[ −ΔG° / (R·T) ]` [sans dimension].
+/// `K = exp`−ΔG° / (R·T)`` `sans dimension`.
 ///
-/// `gibbs_energy` `ΔG°` enthalpie libre standard de réaction [J·mol⁻¹],
-/// `gas_constant` `R` constante des gaz [J·mol⁻¹·K⁻¹], `temperature` `T`
-/// température **absolue** [K]. Réciproque de [`equil_gibbs_from_k`].
+/// `gibbs_energy` `ΔG°` enthalpie libre standard de réaction `J·mol⁻¹`,
+/// `gas_constant` `R` constante des gaz `J·mol⁻¹·K⁻¹`, `temperature` `T`
+/// température **absolue** `K`. Réciproque de [`equil_gibbs_from_k`].
 ///
 /// Panique si `gibbs_energy` n'est pas fini, ou si `gas_constant` ou `temperature`
 /// n'est pas strictement positif ou n'est pas fini.

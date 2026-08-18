@@ -5,30 +5,30 @@
 //!
 //! ```text
 //! travail isentropique massique
-//!   w_s = r · T1 · [γ/(γ−1)] · (Π^((γ−1)/γ) − 1)          [J·kg⁻¹]
+//!   w_s = r · T1 · [γ/(γ−1)] · (Π^((γ−1)/γ) − 1)          `J·kg⁻¹`
 //! travail polytropique massique
-//!   w_p = r · T1 · [n/(n−1)] · (Π^((n−1)/n) − 1)          [J·kg⁻¹]
+//!   w_p = r · T1 · [n/(n−1)] · (Π^((n−1)/n) − 1)          `J·kg⁻¹`
 //! température de refoulement isentropique
-//!   T2  = T1 · Π^((γ−1)/γ)                                [K]
+//!   T2  = T1 · Π^((γ−1)/γ)                                `K`
 //! puissance d'entraînement (au frein)
-//!   P   = ṁ · w / η                                       [W]
+//!   P   = ṁ · w / η                                       `W`
 //! rapport de pression par étage (N étages égaux)
 //!   Π_e = Π_g^(1/N)                                        [-]
 //! ```
 //!
-//! `r` constante spécifique du gaz `r = R/M` [J·kg⁻¹·K⁻¹], `T1` température
-//! d'aspiration [K], `Π` (`pressure_ratio`) rapport de pression absolue
+//! `r` constante spécifique du gaz `r = R/M` `J·kg⁻¹·K⁻¹`, `T1` température
+//! d'aspiration `K`, `Π` (`pressure_ratio`) rapport de pression absolue
 //! refoulement/aspiration `p2/p1` [sans dimension, ≥ 1], `γ` (`gamma`) rapport
 //! des chaleurs massiques `cp/cv` [sans dimension, > 1], `n`
 //! (`polytropic_exponent`) exposant polytropique [sans dimension, > 1] ; `w_s`
 //! travail réversible isentropique massique et `w_p` travail polytropique
-//! massique [J·kg⁻¹] ; `T2` température de refoulement isentropique [K] ; `ṁ`
-//! (`mass_flow`) débit massique [kg·s⁻¹], `w` (`specific_work`) travail massique
-//! réversible [J·kg⁻¹], `η` (`isentropic_efficiency`) rendement isentropique (ou
+//! massique `J·kg⁻¹` ; `T2` température de refoulement isentropique `K` ; `ṁ`
+//! (`mass_flow`) débit massique `kg·s⁻¹`, `w` (`specific_work`) travail massique
+//! réversible `J·kg⁻¹`, `η` (`isentropic_efficiency`) rendement isentropique (ou
 //! polytropique selon le travail fourni) [sans dimension, 0 < η ≤ 1], `P`
-//! puissance mécanique à l'arbre [W] ; `Π_g` (`overall_ratio`) rapport de
+//! puissance mécanique à l'arbre `W` ; `Π_g` (`overall_ratio`) rapport de
 //! pression global [sans dimension, ≥ 1], `N` (`stages`) nombre d'étages
-//! [sans dimension, ≥ 1], `Π_e` rapport par étage [sans dimension].
+//! [sans dimension, ≥ 1], `Π_e` rapport par étage `sans dimension`.
 //!
 //! **Limite honnête** : le gaz est supposé **PARFAIT** (loi des gaz parfaits,
 //! facteur de compressibilité `Z = 1`) ; les gaz réels ne sont **pas** traités.
@@ -50,9 +50,9 @@
 /// de gaz parfait `w_s = r · T1 · [γ/(γ−1)] · (Π^((γ−1)/γ) − 1)` (J·kg⁻¹).
 ///
 /// `gas_constant_specific` (r) constante spécifique du gaz `r = R/M`
-/// [J·kg⁻¹·K⁻¹], `inlet_temperature` (T1) température d'aspiration [K],
-/// `pressure_ratio` (Π) rapport de pression `p2/p1` [sans dimension],
-/// `gamma` (γ) rapport des chaleurs massiques `cp/cv` [sans dimension].
+/// `J·kg⁻¹·K⁻¹`, `inlet_temperature` (T1) température d'aspiration `K`,
+/// `pressure_ratio` (Π) rapport de pression `p2/p1` `sans dimension`,
+/// `gamma` (γ) rapport des chaleurs massiques `cp/cv` `sans dimension`.
 ///
 /// Panique si `r < 0`, si `T1 ≤ 0` (température absolue), si `Π < 1` (une
 /// compression relève la pression), ou si `γ ≤ 1` (`γ/(γ−1)` non défini ou
@@ -87,10 +87,10 @@ pub fn cmp_isentropic_work(
 /// `w_p = r · T1 · [n/(n−1)] · (Π^((n−1)/n) − 1)` (J·kg⁻¹). Même forme que le
 /// travail isentropique avec l'exposant polytropique `n` à la place de `γ`.
 ///
-/// `gas_constant_specific` (r) constante spécifique `r = R/M` [J·kg⁻¹·K⁻¹],
-/// `inlet_temperature` (T1) température d'aspiration [K], `pressure_ratio` (Π)
-/// rapport de pression [sans dimension], `polytropic_exponent` (n) exposant
-/// polytropique [sans dimension].
+/// `gas_constant_specific` (r) constante spécifique `r = R/M` `J·kg⁻¹·K⁻¹`,
+/// `inlet_temperature` (T1) température d'aspiration `K`, `pressure_ratio` (Π)
+/// rapport de pression `sans dimension`, `polytropic_exponent` (n) exposant
+/// polytropique `sans dimension`.
 ///
 /// Panique si `r < 0`, si `T1 ≤ 0`, si `Π < 1`, ou si `n ≤ 1` (`n/(n−1)` non
 /// défini ou négatif).
@@ -127,9 +127,9 @@ pub fn cmp_polytropic_work(
 /// `T2 = T1 · Π^((γ−1)/γ)` (K), température atteinte en fin de compression
 /// réversible adiabatique.
 ///
-/// `inlet_temperature` (T1) température d'aspiration [K], `pressure_ratio` (Π)
-/// rapport de pression `p2/p1` [sans dimension], `gamma` (γ) rapport des
-/// chaleurs massiques [sans dimension].
+/// `inlet_temperature` (T1) température d'aspiration `K`, `pressure_ratio` (Π)
+/// rapport de pression `p2/p1` `sans dimension`, `gamma` (γ) rapport des
+/// chaleurs massiques `sans dimension`.
 ///
 /// Panique si `T1 ≤ 0` (température absolue), si `Π < 1`, ou si `γ ≤ 1`.
 pub fn cmp_discharge_temperature(inlet_temperature: f64, pressure_ratio: f64, gamma: f64) -> f64 {
@@ -150,9 +150,9 @@ pub fn cmp_discharge_temperature(inlet_temperature: f64, pressure_ratio: f64, ga
 /// `P = ṁ · w / η` (W), obtenue en corrigeant le travail réversible massique
 /// par le rendement de la machine.
 ///
-/// `mass_flow` (ṁ) débit massique de gaz [kg·s⁻¹], `specific_work` (w) travail
-/// réversible massique [J·kg⁻¹] (isentropique ou polytropique), `η`
-/// `isentropic_efficiency` rendement de la machine [sans dimension].
+/// `mass_flow` (ṁ) débit massique de gaz `kg·s⁻¹`, `specific_work` (w) travail
+/// réversible massique `J·kg⁻¹` (isentropique ou polytropique), `η`
+/// `isentropic_efficiency` rendement de la machine `sans dimension`.
 ///
 /// Panique si `ṁ < 0`, si `w < 0`, ou si `η` hors de `]0, 1]` (un rendement
 /// nul donnerait une puissance infinie ; un rendement > 1 violerait la
@@ -173,7 +173,7 @@ pub fn cmp_power(mass_flow: f64, specific_work: f64, isentropic_efficiency: f64)
 /// parfait (retour à `T1` avant chaque étage).
 ///
 /// `overall_ratio` (Π_g) rapport de pression global `p_final/p_initial`
-/// [sans dimension], `stages` (N) nombre d'étages [sans dimension].
+/// `sans dimension`, `stages` (N) nombre d'étages `sans dimension`.
 ///
 /// Panique si `Π_g < 1` (une compression relève la pression) ou si `N < 1`
 /// (il faut au moins un étage).

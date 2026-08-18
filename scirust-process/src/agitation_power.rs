@@ -7,23 +7,23 @@
 //! Reynolds d'agitation
 //!   Re = ρ · N · D² / μ                                        [-]
 //! puissance dissipée
-//!   P  = Np · ρ · N³ · D⁵                                      [W]
+//!   P  = Np · ρ · N³ · D⁵                                      `W`
 //! nombre de puissance, régime laminaire
 //!   Np = K_L / Re                                              [-]
 //! vitesse périphérique (bout de pale)
-//!   v_tip = π · D · N                                          [m·s⁻¹]
+//!   v_tip = π · D · N                                          `m·s⁻¹`
 //! débit de circulation (pompage)
-//!   Q  = Nq · N · D³                                           [m³·s⁻¹]
+//!   Q  = Nq · N · D³                                           `m³·s⁻¹`
 //! ```
 //!
-//! `ρ` masse volumique du liquide [kg·m⁻³], `N` vitesse de rotation en **tours
-//! par seconde** [s⁻¹] (et non rad·s⁻¹), `D` diamètre du mobile d'agitation [m],
-//! `μ` viscosité dynamique [Pa·s] ; `Re` nombre de Reynolds d'agitation
-//! [sans dimension] ; `Np` nombre de puissance [sans dimension], `P` puissance
-//! mécanique dissipée dans le liquide [W] ; `K_L` constante géométrique du mobile
-//! en régime laminaire [sans dimension] ; `v_tip` vitesse linéaire en bout de
-//! pale [m·s⁻¹] ; `Nq` nombre de débit (pompage) [sans dimension], `Q` débit de
-//! circulation refoulé par le mobile [m³·s⁻¹].
+//! `ρ` masse volumique du liquide `kg·m⁻³`, `N` vitesse de rotation en **tours
+//! par seconde** `s⁻¹` (et non rad·s⁻¹), `D` diamètre du mobile d'agitation `m`,
+//! `μ` viscosité dynamique `Pa·s` ; `Re` nombre de Reynolds d'agitation
+//! `sans dimension` ; `Np` nombre de puissance `sans dimension`, `P` puissance
+//! mécanique dissipée dans le liquide `W` ; `K_L` constante géométrique du mobile
+//! en régime laminaire `sans dimension` ; `v_tip` vitesse linéaire en bout de
+//! pale `m·s⁻¹` ; `Nq` nombre de débit (pompage) `sans dimension`, `Q` débit de
+//! circulation refoulé par le mobile `m³·s⁻¹`.
 //!
 //! **Limite honnête** : corrélations à l'échelle des **opérations unitaires**
 //! pour une cuve **standard munie de chicanes** et un fluide **newtonien**. Le
@@ -42,11 +42,11 @@ use core::f64::consts::PI;
 
 /// Nombre de Reynolds d'agitation `Re = ρ · N · D² / μ` (sans dimension).
 ///
-/// La vitesse de rotation `N` est exprimée en **tours par seconde** [s⁻¹].
+/// La vitesse de rotation `N` est exprimée en **tours par seconde** `s⁻¹`.
 ///
-/// `density` (ρ) masse volumique du liquide [kg·m⁻³], `rotation_speed` (N)
-/// vitesse de rotation [s⁻¹], `impeller_diameter` (D) diamètre du mobile [m],
-/// `viscosity` (μ) viscosité dynamique [Pa·s].
+/// `density` (ρ) masse volumique du liquide `kg·m⁻³`, `rotation_speed` (N)
+/// vitesse de rotation `s⁻¹`, `impeller_diameter` (D) diamètre du mobile `m`,
+/// `viscosity` (μ) viscosité dynamique `Pa·s`.
 ///
 /// Panique si `ρ ≤ 0`, si `N < 0`, si `D ≤ 0`, ou si `μ ≤ 0`.
 pub fn agit_reynolds(
@@ -65,12 +65,12 @@ pub fn agit_reynolds(
 /// Puissance dissipée à l'arbre par le mobile
 /// `P = Np · ρ · N³ · D⁵` (W).
 ///
-/// La vitesse de rotation `N` est exprimée en **tours par seconde** [s⁻¹]. Le
+/// La vitesse de rotation `N` est exprimée en **tours par seconde** `s⁻¹`. Le
 /// nombre de puissance `Np` est **FOURNI** par l'appelant (courbe Np–Re du
 /// mobile) et doit correspondre au régime (valeur de Re) considéré.
 ///
-/// `power_number` (Np) nombre de puissance [sans dimension], `density` (ρ)
-/// [kg·m⁻³], `rotation_speed` (N) [s⁻¹], `impeller_diameter` (D) [m].
+/// `power_number` (Np) nombre de puissance `sans dimension`, `density` (ρ)
+/// `kg·m⁻³`, `rotation_speed` (N) `s⁻¹`, `impeller_diameter` (D) `m`.
 ///
 /// Panique si `Np < 0`, si `ρ ≤ 0`, si `N < 0`, ou si `D ≤ 0`.
 pub fn agit_power(
@@ -91,8 +91,8 @@ pub fn agit_power(
 /// La constante géométrique `K_L` est **FOURNIE** par l'appelant (elle dépend du
 /// type de mobile et de la géométrie de la cuve). Valable pour `Re ≲ 10`.
 ///
-/// `constant` (K_L) constante géométrique laminaire [sans dimension],
-/// `reynolds` (Re) nombre de Reynolds d'agitation [sans dimension].
+/// `constant` (K_L) constante géométrique laminaire `sans dimension`,
+/// `reynolds` (Re) nombre de Reynolds d'agitation `sans dimension`.
 ///
 /// Panique si `K_L < 0` ou si `Re ≤ 0`.
 pub fn agit_power_number_laminar(constant: f64, reynolds: f64) -> f64 {
@@ -103,11 +103,11 @@ pub fn agit_power_number_laminar(constant: f64, reynolds: f64) -> f64 {
 
 /// Vitesse périphérique en bout de pale `v_tip = π · D · N` (m·s⁻¹).
 ///
-/// La vitesse de rotation `N` est exprimée en **tours par seconde** [s⁻¹], de
+/// La vitesse de rotation `N` est exprimée en **tours par seconde** `s⁻¹`, de
 /// sorte que `π · D` est la circonférence décrite par l'extrémité de la pale et
 /// `v_tip` la distance parcourue par seconde.
 ///
-/// `rotation_speed` (N) [s⁻¹], `impeller_diameter` (D) [m].
+/// `rotation_speed` (N) `s⁻¹`, `impeller_diameter` (D) `m`.
 ///
 /// Panique si `N < 0` ou si `D ≤ 0`.
 pub fn agit_tip_speed(rotation_speed: f64, impeller_diameter: f64) -> f64 {
@@ -119,12 +119,12 @@ pub fn agit_tip_speed(rotation_speed: f64, impeller_diameter: f64) -> f64 {
 /// Débit de circulation (pompage) refoulé par le mobile
 /// `Q = Nq · N · D³` (m³·s⁻¹).
 ///
-/// La vitesse de rotation `N` est exprimée en **tours par seconde** [s⁻¹]. Le
+/// La vitesse de rotation `N` est exprimée en **tours par seconde** `s⁻¹`. Le
 /// nombre de débit `Nq` est **FOURNI** par l'appelant (il dépend du mobile et de
 /// la géométrie).
 ///
-/// `flow_number` (Nq) nombre de débit [sans dimension], `rotation_speed` (N)
-/// [s⁻¹], `impeller_diameter` (D) [m].
+/// `flow_number` (Nq) nombre de débit `sans dimension`, `rotation_speed` (N)
+/// `s⁻¹`, `impeller_diameter` (D) `m`.
 ///
 /// Panique si `Nq < 0`, si `N < 0`, ou si `D ≤ 0`.
 pub fn agit_pumping_flow(flow_number: f64, rotation_speed: f64, impeller_diameter: f64) -> f64 {

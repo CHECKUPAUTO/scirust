@@ -4,21 +4,21 @@
 //! de la récupération maximale.
 //!
 //! ```text
-//! charge thermique d'un courant   Q      = CP · ΔT = ṁ · cp · ΔT   [W]
-//! débit de capacité thermique     CP     = ṁ · cp                  [W·K⁻¹]
-//! température décalée (chaud)      T*_h   = T − ΔTmin / 2           [K]
-//! température décalée (froid)      T*_c   = T + ΔTmin / 2           [K]
-//! utilité chaude minimale          Q_hu   = Q_c,tot − Q_rec,max     [W]
+//! charge thermique d'un courant   Q      = CP · ΔT = ṁ · cp · ΔT   `W`
+//! débit de capacité thermique     CP     = ṁ · cp                  `W·K⁻¹`
+//! température décalée (chaud)      T*_h   = T − ΔTmin / 2           `K`
+//! température décalée (froid)      T*_c   = T + ΔTmin / 2           `K`
+//! utilité chaude minimale          Q_hu   = Q_c,tot − Q_rec,max     `W`
 //! ```
 //!
-//! `ṁ` débit massique du courant [kg·s⁻¹], `cp` chaleur massique du courant
-//! [J·kg⁻¹·K⁻¹], `ΔT` variation de température subie par le courant
-//! [K, valeur ≥ 0], `Q` charge thermique du courant [W] ; `CP` débit de capacité
-//! thermique [W·K⁻¹] ; `T` température réelle du courant [K], `ΔTmin` écart minimal
+//! `ṁ` débit massique du courant `kg·s⁻¹`, `cp` chaleur massique du courant
+//! `J·kg⁻¹·K⁻¹`, `ΔT` variation de température subie par le courant
+//! [K, valeur ≥ 0], `Q` charge thermique du courant `W` ; `CP` débit de capacité
+//! thermique `W·K⁻¹` ; `T` température réelle du courant `K`, `ΔTmin` écart minimal
 //! d'approche imposé [K, ≥ 0], `T*_h`/`T*_c` températures décalées d'un courant
-//! chaud / froid [K] ; `Q_c,tot` charge froide totale à satisfaire [W],
-//! `Q_rec,max` récupération thermique maximale déduite de la cascade [W],
-//! `Q_hu` besoin minimal d'utilité chaude [W].
+//! chaud / froid `K` ; `Q_c,tot` charge froide totale à satisfaire `W`,
+//! `Q_rec,max` récupération thermique maximale déduite de la cascade `W`,
+//! `Q_hu` besoin minimal d'utilité chaude `W`.
 //!
 //! **Limite honnête** : ce module ne fournit que les **briques élémentaires** de
 //! la méthode du **pincement** (tableau des problèmes). Les **débits de capacité
@@ -36,8 +36,8 @@
 /// **valeur** de la variation de température subie (échauffement ou
 /// refroidissement), prise ≥ 0.
 ///
-/// `mass_flow` (ṁ) débit massique [kg·s⁻¹], `specific_heat` (cp) chaleur massique
-/// [J·kg⁻¹·K⁻¹], `temperature_change` (ΔT) variation de température [K, ≥ 0].
+/// `mass_flow` (ṁ) débit massique `kg·s⁻¹`, `specific_heat` (cp) chaleur massique
+/// `J·kg⁻¹·K⁻¹`, `temperature_change` (ΔT) variation de température [K, ≥ 0].
 ///
 /// Panique si `mass_flow < 0`, si `specific_heat < 0`, ou si
 /// `temperature_change < 0`.
@@ -54,8 +54,8 @@ pub fn pinch_stream_heat_duty(mass_flow: f64, specific_heat: f64, temperature_ch
 /// Débit de capacité thermique d'un courant `CP = ṁ · cp` (W·K⁻¹), supposé
 /// constant sur la plage de température du courant.
 ///
-/// `mass_flow` (ṁ) débit massique [kg·s⁻¹], `specific_heat` (cp) chaleur massique
-/// [J·kg⁻¹·K⁻¹].
+/// `mass_flow` (ṁ) débit massique `kg·s⁻¹`, `specific_heat` (cp) chaleur massique
+/// `J·kg⁻¹·K⁻¹`.
 ///
 /// Panique si `mass_flow < 0` ou si `specific_heat < 0`.
 pub fn pinch_heat_capacity_flowrate(mass_flow: f64, specific_heat: f64) -> f64 {

@@ -5,23 +5,23 @@
 //!
 //! ```text
 //! différence de température logarithmique moyenne (DTLM)
-//!   DTLM = (ΔT₁ − ΔT₂) / ln(ΔT₁/ΔT₂)        [K]   (ΔT₁ ≠ ΔT₂)
-//!   DTLM = ΔT₁                               [K]   (ΔT₁ = ΔT₂, limite)
+//!   DTLM = (ΔT₁ − ΔT₂) / ln(ΔT₁/ΔT₂)        `K`   (ΔT₁ ≠ ΔT₂)
+//!   DTLM = ΔT₁                               `K`   (ΔT₁ = ΔT₂, limite)
 //! puissance échangée
-//!   Q = U · A · DTLM · F                     [W]
+//!   Q = U · A · DTLM · F                     `W`
 //! aire de transfert requise
-//!   A = Q / (U · DTLM · F)                    [m²]
+//!   A = Q / (U · DTLM · F)                    `m²`
 //! température de sortie côté froid (bilan)
-//!   T_out = T_in + Q / (m·c_p)               [K]
+//!   T_out = T_in + Q / (m·c_p)               `K`
 //! ```
 //!
-//! `ΔT₁`, `ΔT₂` écarts de température aux deux extrémités de l'échangeur [K],
-//! `DTLM` différence de température logarithmique moyenne [K], `U` coefficient
-//! global d'échange rapporté à l'aire `A` [W·m⁻²·K⁻¹], `A` aire de transfert
-//! [m²], `F` facteur de correction de configuration [sans dimension, 0 < F ≤ 1],
-//! `Q` puissance thermique échangée [W], `T_in`/`T_out` températures d'entrée et
-//! de sortie du courant [K], `m` débit massique du courant [kg·s⁻¹], `c_p`
-//! capacité thermique massique [J·kg⁻¹·K⁻¹].
+//! `ΔT₁`, `ΔT₂` écarts de température aux deux extrémités de l'échangeur `K`,
+//! `DTLM` différence de température logarithmique moyenne `K`, `U` coefficient
+//! global d'échange rapporté à l'aire `A` `W·m⁻²·K⁻¹`, `A` aire de transfert
+//! `m²`, `F` facteur de correction de configuration [sans dimension, 0 < F ≤ 1],
+//! `Q` puissance thermique échangée `W`, `T_in`/`T_out` températures d'entrée et
+//! de sortie du courant `K`, `m` débit massique du courant `kg·s⁻¹`, `c_p`
+//! capacité thermique massique `J·kg⁻¹·K⁻¹`.
 //!
 //! **Limite honnête** : modèle à l'échelle des **opérations unitaires**. Le
 //! **coefficient global d'échange** `U`, le **facteur de correction** `F`
@@ -39,7 +39,7 @@
 /// écarts sont égaux (limite continue, forme indéterminée levée).
 ///
 /// `delta_t_1` (ΔT₁) et `delta_t_2` (ΔT₂) écarts de température aux deux
-/// extrémités de l'échangeur [K], strictement positifs (même sens de transfert).
+/// extrémités de l'échangeur `K`, strictement positifs (même sens de transfert).
 ///
 /// Panique si `ΔT₁ ≤ 0` ou si `ΔT₂ ≤ 0`.
 pub fn lmtd_log_mean(delta_t_1: f64, delta_t_2: f64) -> f64 {
@@ -65,8 +65,8 @@ pub fn lmtd_log_mean(delta_t_1: f64, delta_t_2: f64) -> f64 {
 /// `Q = U·A·DTLM·F` (W), produit du coefficient global d'échange, de l'aire de
 /// transfert, de la DTLM et du facteur de correction de configuration.
 ///
-/// `overall_coefficient` (U) coefficient global d'échange [W·m⁻²·K⁻¹], `area`
-/// (A) aire de transfert [m²], `log_mean_delta` (DTLM) [K], `correction_factor`
+/// `overall_coefficient` (U) coefficient global d'échange `W·m⁻²·K⁻¹`, `area`
+/// (A) aire de transfert `m²`, `log_mean_delta` (DTLM) `K`, `correction_factor`
 /// (F) facteur de correction [sans dimension, 0 < F ≤ 1].
 ///
 /// Panique si `U < 0`, si `A < 0`, si `DTLM < 0`, ou si `F` hors de `]0, 1]`.
@@ -96,8 +96,8 @@ pub fn lmtd_duty(
 /// `A = Q/(U·DTLM·F)` (m²), inverse de [`lmtd_duty`] : aire nécessaire pour
 /// échanger une puissance `Q` donnée sous une DTLM et un `U` fixés.
 ///
-/// `duty` (Q) puissance à échanger [W], `overall_coefficient` (U)
-/// [W·m⁻²·K⁻¹], `log_mean_delta` (DTLM) [K], `correction_factor` (F)
+/// `duty` (Q) puissance à échanger `W`, `overall_coefficient` (U)
+/// `W·m⁻²·K⁻¹`, `log_mean_delta` (DTLM) `K`, `correction_factor` (F)
 /// facteur de correction [sans dimension, 0 < F ≤ 1].
 ///
 /// Panique si `Q < 0`, si `U ≤ 0`, si `DTLM ≤ 0`, ou si `F` hors de `]0, 1]`.
@@ -127,9 +127,9 @@ pub fn lmtd_required_area(
 /// `T_out = T_in + Q/(m·c_p)` (K), élévation de température d'un courant qui
 /// reçoit la puissance `Q` en régime permanent.
 ///
-/// `inlet_temp` (T_in) température d'entrée du courant [K], `duty` (Q) puissance
-/// reçue par le courant [W], `mass_flow` (m) débit massique [kg·s⁻¹],
-/// `heat_capacity` (c_p) capacité thermique massique [J·kg⁻¹·K⁻¹].
+/// `inlet_temp` (T_in) température d'entrée du courant `K`, `duty` (Q) puissance
+/// reçue par le courant `W`, `mass_flow` (m) débit massique `kg·s⁻¹`,
+/// `heat_capacity` (c_p) capacité thermique massique `J·kg⁻¹·K⁻¹`.
 ///
 /// Panique si `T_in ≤ 0` (température absolue), si `m ≤ 0`, ou si `c_p ≤ 0`.
 pub fn lmtd_outlet_temp_from_duty(

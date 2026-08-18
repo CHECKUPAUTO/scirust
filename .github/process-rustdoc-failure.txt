@@ -1,222 +1,250 @@
 Temporary strict rustdoc diagnostic for scirust-process.
 
+[1m[92m    Updating[0m crates.io index
+[1m[92m    Updating[0m git repository `https://github.com/Memorithm/FLAT-ATTENTION`
+[1m[92m Documenting[0m scirust-process v0.1.0 (/home/runner/work/scirust/scirust/scirust-process)
+[1m[91merror[0m[1m: unresolved link to `étages`[0m
+  [1m[94m--> [0mscirust-process/src/absorption.rs:15:17
+   [1m[94m|[0m
+[1m[94m15[0m [1m[94m|[0m //! théoriques [étages], `φ_A` fraction du soluté absorbée [sans dimension,
+   [1m[94m|[0m                 [1m[91m^^^^^^[0m [1m[91mno item named `étages` in scope[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+   [1m[94m= [0m[1mnote[0m: `-D rustdoc::broken-intra-doc-links` implied by `-D warnings`
+   [1m[94m= [0m[1mhelp[0m: to override `-D warnings` add `#[allow(rustdoc::broken_intra_doc_links)]`
+
+[1m[91merror[0m[1m: unresolved link to `étages`[0m
+  [1m[94m--> [0mscirust-process/src/distillation_mccabe.rs:18:33
+   [1m[94m|[0m
+[1m[94m18[0m [1m[94m|[0m //! théoriques au reflux total [étages], `d_L`, `d_H` débits molaires du léger et
+   [1m[94m|[0m                                 [1m[91m^^^^^^[0m [1m[91mno item named `étages` in scope[0m
    [1m[94m|[0m
    [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
 
-[1m[91merror[0m[1m: unresolved link to `m²`[0m
-  [1m[94m--> [0mscirust-process/src/orifice_meter.rs:68:27
+[1m[91merror[0m[1m: unresolved link to `étages`[0m
+  [1m[94m--> [0mscirust-process/src/distillation_mccabe.rs:81:45
    [1m[94m|[0m
-[1m[94m68[0m [1m[94m|[0m /// section de l'orifice [m²], `density` (ρ) masse volumique FOURNIE [kg·m⁻³],
-   [1m[94m|[0m                           [1m[91m^^[0m [1m[91mno item named `m²` in scope[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-
-[1m[91merror[0m[1m: unresolved link to `Pa`[0m
-  [1m[94m--> [0mscirust-process/src/orifice_meter.rs:69:67
-   [1m[94m|[0m
-[1m[94m69[0m [1m[94m|[0m /// `differential_pressure` (ΔP) pression différentielle mesurée [Pa].
-   [1m[94m|[0m                                                                   [1m[91m^^[0m [1m[91mno item named `Pa` in scope[0m
+[1m[94m81[0m [1m[94m|[0m /// `Nₘ = ln`(d_L/d_H)·(b_H/b_L)` / ln(α)` [étages].
+   [1m[94m|[0m                                             [1m[91m^^^^^^[0m [1m[91mno item named `étages` in scope[0m
    [1m[94m|[0m
    [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
 
-[1m[91merror[0m[1m: unresolved link to `m²`[0m
-   [1m[94m--> [0mscirust-process/src/orifice_meter.rs:117:75
+[1m[91merror[0m[1m: unresolved link to `effets`[0m
+  [1m[94m--> [0mscirust-process/src/evaporation.rs:21:6
+   [1m[94m|[0m
+[1m[94m21[0m [1m[94m|[0m //! [effets], `E_1` économie moyenne par effet `sans dimension`, `E_N` économie
+   [1m[94m|[0m      [1m[91m^^^^^^[0m [1m[91mno item named `effets` in scope[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+
+[1m[91merror[0m[1m: unresolved link to `sans dimension, 0 < ε_mf < 1`[0m
+  [1m[94m--> [0mscirust-process/src/fluidization.rs:20:52
+   [1m[94m|[0m
+[1m[94m20[0m [1m[94m|[0m //! (fraction de vide) au minimum de fluidisation [sans dimension, 0 < ε_mf < 1],
+   [1m[94m|[0m                                                    [1m[91m^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m [1m[91munbalanced angle brackets[0m
+
+[1m[91merror[0m[1m: unresolved link to `étages`[0m
+  [1m[94m--> [0mscirust-process/src/leaching.rs:24:6
+   [1m[94m|[0m
+[1m[94m24[0m [1m[94m|[0m //! [étages], `R` taux de récupération du soluté [sans dimension, 0 ≤ R ≤ 1].
+   [1m[94m|[0m      [1m[91m^^^^^^[0m [1m[91mno item named `étages` in scope[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+
+[1m[91merror[0m[1m: unresolved link to `cohérentes`[0m
+  [1m[94m--> [0mscirust-process/src/liquid_extraction.rs:18:58
+   [1m[94m|[0m
+[1m[94m18[0m [1m[94m|[0m //! (mêmes unités, p. ex. mol·m⁻³ ou fraction massique) [cohérentes], `E` facteur
+   [1m[94m|[0m                                                          [1m[91m^^^^^^^^^^[0m [1m[91mno item named `cohérentes` in scope[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+
+[1m[91merror[0m[1m: unresolved link to `étages`[0m
+  [1m[94m--> [0mscirust-process/src/liquid_extraction.rs:21:65
+   [1m[94m|[0m
+[1m[94m21[0m [1m[94m|[0m //! par étage `sans dimension`, `N` nombre d'étages théoriques [étages],
+   [1m[94m|[0m                                                                 [1m[91m^^^^^^[0m [1m[91mno item named `étages` in scope[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+
+[1m[91merror[0m[1m: unresolved link to `sans dimension, 0 < ε < 1`[0m
+  [1m[94m--> [0mscirust-process/src/packed_bed.rs:17:45
+   [1m[94m|[0m
+[1m[94m17[0m [1m[94m|[0m //! `ε` porosité (fraction de vide) du lit [sans dimension, 0 < ε < 1], `μ`
+   [1m[94m|[0m                                             [1m[91m^^^^^^^^^^^^^^^^^^^^^^^^^[0m [1m[91munbalanced angle brackets[0m
+
+[1m[91merror[0m[1m: unresolved link to `sans dimension, 0 < RL < 1 favorable`[0m
+  [1m[94m--> [0mscirust-process/src/adsorption_isotherm.rs:18:73
+   [1m[94m|[0m
+[1m[94m18[0m [1m[94m|[0m   //! concentration d'alimentation `mol·m⁻³`, `RL` facteur de séparation [sans
+   [1m[94m|[0m [1m[91m _________________________________________________________________________^[0m
+[1m[94m19[0m [1m[94m|[0m [1m[91m|[0m //! dimension, `0 < RL < 1` favorable].
+   [1m[94m|[0m [1m[91m|_____________________________________^[0m [1m[91munbalanced angle brackets[0m
+
+[1m[91merror[0m[1m: unresolved link to `sans dimension, > 0 et ≠ 1`[0m
+  [1m[94m--> [0mscirust-process/src/batch_distillation.rs:19:6
+   [1m[94m|[0m
+[1m[94m19[0m [1m[94m|[0m //! [sans dimension, `> 0` et `≠ 1`], `D` quantité totale distillée `mol`, `x_D`
+   [1m[94m|[0m      [1m[91m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m [1m[91munbalanced angle brackets[0m
+
+[1m[91merror[0m[1m: unresolved link to `plateaux`[0m
+  [1m[94m--> [0mscirust-process/src/distillation_efficiency.rs:18:42
+   [1m[94m|[0m
+[1m[94m18[0m [1m[94m|[0m //! **théoriques** (étages d'équilibre) [plateaux], `N_r` nombre de plateaux
+   [1m[94m|[0m                                          [1m[91m^^^^^^^^[0m [1m[91mno item named `plateaux` in scope[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+
+[1m[91merror[0m[1m: unresolved link to `plateaux`[0m
+  [1m[94m--> [0mscirust-process/src/distillation_efficiency.rs:19:16
+   [1m[94m|[0m
+[1m[94m19[0m [1m[94m|[0m //! **réels** [plateaux], `λ` facteur d'entraînement (stripping factor) `m·V̇/L̇`
+   [1m[94m|[0m                [1m[91m^^^^^^^^[0m [1m[91mno item named `plateaux` in scope[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+
+[1m[91merror[0m[1m: unresolved link to `plateaux`[0m
+  [1m[94m--> [0mscirust-process/src/distillation_efficiency.rs:62:54
+   [1m[94m|[0m
+[1m[94m62[0m [1m[94m|[0m /// Nombre de plateaux **réels** `N_r = N_th / E_o` [plateaux].
+   [1m[94m|[0m                                                      [1m[91m^^^^^^^^[0m [1m[91mno item named `plateaux` in scope[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+
+[1m[91merror[0m[1m: unresolved link to `**K**`[0m
+  [1m[94m--> [0mscirust-process/src/henry_solubility.rs:21:31
+   [1m[94m|[0m
+[1m[94m21[0m [1m[94m|[0m //! température de référence [**K**].
+   [1m[94m|[0m                               [1m[91m^^^^^[0m [1m[91mno item named `**K**` in scope[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+
+[1m[91merror[0m[1m: unresolved link to `**K**`[0m
+  [1m[94m--> [0mscirust-process/src/henry_solubility.rs:88:66
+   [1m[94m|[0m
+[1m[94m88[0m [1m[94m|[0m /// `temperature_ref` (T_ref) et `temperature` (T) températures [**K**].
+   [1m[94m|[0m                                                                  [1m[91m^^^^^[0m [1m[91mno item named `**K**` in scope[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+
+[1m[91merror[0m[1m: unresolved link to `K, > 0`[0m
+  [1m[94m--> [0mscirust-process/src/pinch_analysis.rs:71:61
+   [1m[94m|[0m
+[1m[94m71[0m [1m[94m|[0m /// `actual_temperature` (T) température réelle du courant [K, > 0],
+   [1m[94m|[0m                                                             [1m[91m^^^^^^[0m [1m[91munbalanced angle brackets[0m
+
+[1m[91merror[0m[1m: unresolved link to `K, > 0`[0m
+  [1m[94m--> [0mscirust-process/src/pinch_analysis.rs:91:61
+   [1m[94m|[0m
+[1m[94m91[0m [1m[94m|[0m /// `actual_temperature` (T) température réelle du courant [K, > 0],
+   [1m[94m|[0m                                                             [1m[91m^^^^^^[0m [1m[91munbalanced angle brackets[0m
+
+[1m[91merror[0m[1m: unresolved link to `an`[0m
+  [1m[94m--> [0mscirust-process/src/process_economics.rs:19:46
+   [1m[94m|[0m
+[1m[94m19[0m [1m[94m|[0m //! [$·an⁻¹], `t_pb` temps de retour simple [an] ; `i` taux d'intérêt annuel
+   [1m[94m|[0m                                              [1m[91m^^[0m [1m[91mno item named `an` in scope[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+
+[1m[91merror[0m[1m: unresolved link to `an`[0m
+  [1m[94m--> [0mscirust-process/src/process_economics.rs:20:67
+   [1m[94m|[0m
+[1m[94m20[0m [1m[94m|[0m //! [sans dimension, par an], `N` durée de vie de l'installation [an], `A`
+   [1m[94m|[0m                                                                   [1m[91m^^[0m [1m[91mno item named `an` in scope[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+
+[1m[91merror[0m[1m: unresolved link to `an`[0m
+   [1m[94m--> [0mscirust-process/src/process_economics.rs:126:42
     [1m[94m|[0m
-[1m[94m117[0m [1m[94m|[0m /// diamètres [sans dimension], `orifice_area` (A₀) section de l'orifice [m²],
-    [1m[94m|[0m                                                                           [1m[91m^^[0m [1m[91mno item named `m²` in scope[0m
-    [1m[94m|[0m
-    [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-
-[1m[91merror[0m[1m: unresolved link to `m`[0m
-  [1m[94m--> [0mscirust-process/src/pipe_pressure_drop.rs:22:53
-   [1m[94m|[0m
-[1m[94m22[0m [1m[94m|[0m //! [m·s⁻¹], `D` diamètre intérieur de la conduite [m], `μ` viscosité dynamique
-   [1m[94m|[0m                                                     [1m[91m^[0m [1m[91mno item named `m` in scope[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-
-[1m[91merror[0m[1m: unresolved link to `m`[0m
-  [1m[94m--> [0mscirust-process/src/pipe_pressure_drop.rs:25:43
-   [1m[94m|[0m
-[1m[94m25[0m [1m[94m|[0m //! dimension], `L` longueur de conduite [m], `Δp` perte de charge régulière
-   [1m[94m|[0m                                           [1m[91m^[0m [1m[91mno item named `m` in scope[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-
-[1m[91merror[0m[1m: unresolved link to `Pa`[0m
-  [1m[94m--> [0mscirust-process/src/pipe_pressure_drop.rs:26:6
-   [1m[94m|[0m
-[1m[94m26[0m [1m[94m|[0m //! [Pa], `K` coefficient de perte singulière de l'accessoire [sans dimension],
-   [1m[94m|[0m      [1m[91m^^[0m [1m[91mno item named `Pa` in scope[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-
-[1m[91merror[0m[1m: unresolved link to `Pa`[0m
-  [1m[94m--> [0mscirust-process/src/pipe_pressure_drop.rs:27:40
-   [1m[94m|[0m
-[1m[94m27[0m [1m[94m|[0m //! `Δp_s` perte de charge singulière [Pa], `L_eq` longueur de conduite droite
-   [1m[94m|[0m                                        [1m[91m^^[0m [1m[91mno item named `Pa` in scope[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-
-[1m[91merror[0m[1m: unresolved link to `m`[0m
-  [1m[94m--> [0mscirust-process/src/pipe_pressure_drop.rs:28:50
-   [1m[94m|[0m
-[1m[94m28[0m [1m[94m|[0m //! produisant la même perte que la singularité [m].
-   [1m[94m|[0m                                                  [1m[91m^[0m [1m[91mno item named `m` in scope[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-
-[1m[91merror[0m[1m: unresolved link to `m`[0m
-  [1m[94m--> [0mscirust-process/src/pipe_pressure_drop.rs:49:40
-   [1m[94m|[0m
-[1m[94m49[0m [1m[94m|[0m /// `diameter` (D) diamètre intérieur [m], `viscosity` (μ) viscosité dynamique
-   [1m[94m|[0m                                        [1m[91m^[0m [1m[91mno item named `m` in scope[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-
-[1m[91merror[0m[1m: unresolved link to `m`[0m
-  [1m[94m--> [0mscirust-process/src/pipe_pressure_drop.rs:98:40
-   [1m[94m|[0m
-[1m[94m98[0m [1m[94m|[0m /// `length` (L) longueur de conduite [m], `diameter` (D) diamètre intérieur
-   [1m[94m|[0m                                        [1m[91m^[0m [1m[91mno item named `m` in scope[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-
-[1m[91merror[0m[1m: unresolved link to `m`[0m
-  [1m[94m--> [0mscirust-process/src/pipe_pressure_drop.rs:99:6
-   [1m[94m|[0m
-[1m[94m99[0m [1m[94m|[0m /// [m], `density` (ρ) [kg·m⁻³], `velocity` (v) vitesse débitante [m·s⁻¹].
-   [1m[94m|[0m      [1m[91m^[0m [1m[91mno item named `m` in scope[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-
-[1m[91merror[0m[1m: unresolved link to `m`[0m
-   [1m[94m--> [0mscirust-process/src/pipe_pressure_drop.rs:144:40
-    [1m[94m|[0m
-[1m[94m144[0m [1m[94m|[0m /// `diameter` (D) diamètre intérieur [m].
-    [1m[94m|[0m                                        [1m[91m^[0m [1m[91mno item named `m` in scope[0m
-    [1m[94m|[0m
-    [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-
-[1m[91merror[0m[1m: unresolved link to `s`[0m
-  [1m[94m--> [0mscirust-process/src/process_first_order.rs:18:47
-   [1m[94m|[0m
-[1m[94m18[0m [1m[94m|[0m //! écoulé depuis l'application de l'échelon [s], `τ` constante de temps [s], `f`
-   [1m[94m|[0m                                               [1m[91m^[0m [1m[91mno item named `s` in scope[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-
-[1m[91merror[0m[1m: unresolved link to `s`[0m
-  [1m[94m--> [0mscirust-process/src/process_first_order.rs:18:75
-   [1m[94m|[0m
-[1m[94m18[0m [1m[94m|[0m //! écoulé depuis l'application de l'échelon [s], `τ` constante de temps [s], `f`
-   [1m[94m|[0m                                                                           [1m[91m^[0m [1m[91mno item named `s` in scope[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-
-[1m[91merror[0m[1m: unresolved link to `s`[0m
-  [1m[94m--> [0mscirust-process/src/process_first_order.rs:21:12
-   [1m[94m|[0m
-[1m[94m21[0m [1m[94m|[0m //! mort) [s], `Kc` gain proportionnel du régulateur, `Ti` temps intégral [s].
-   [1m[94m|[0m            [1m[91m^[0m [1m[91mno item named `s` in scope[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-
-[1m[91merror[0m[1m: unresolved link to `s`[0m
-  [1m[94m--> [0mscirust-process/src/process_first_order.rs:21:76
-   [1m[94m|[0m
-[1m[94m21[0m [1m[94m|[0m //! mort) [s], `Kc` gain proportionnel du régulateur, `Ti` temps intégral [s].
-   [1m[94m|[0m                                                                            [1m[91m^[0m [1m[91mno item named `s` in scope[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-
-[1m[91merror[0m[1m: unresolved link to `s`[0m
-  [1m[94m--> [0mscirust-process/src/process_first_order.rs:38:6
-   [1m[94m|[0m
-[1m[94m38[0m [1m[94m|[0m /// [s], `time` `t` temps depuis l'application de l'échelon [s], `step_amplitude`
-   [1m[94m|[0m      [1m[91m^[0m [1m[91mno item named `s` in scope[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-
-[1m[91merror[0m[1m: unresolved link to `s`[0m
-  [1m[94m--> [0mscirust-process/src/process_first_order.rs:38:62
-   [1m[94m|[0m
-[1m[94m38[0m [1m[94m|[0m /// [s], `time` `t` temps depuis l'application de l'échelon [s], `step_amplitude`
-   [1m[94m|[0m                                                              [1m[91m^[0m [1m[91mno item named `s` in scope[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-
-[1m[91merror[0m[1m: unresolved link to `s`[0m
-  [1m[94m--> [0mscirust-process/src/process_first_order.rs:63:50
-   [1m[94m|[0m
-[1m[94m63[0m [1m[94m|[0m /// réponse du premier ordre `t = −τ·ln(1 − f)` [s] — réciproque de
-   [1m[94m|[0m                                                  [1m[91m^[0m [1m[91mno item named `s` in scope[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-
-[1m[91merror[0m[1m: unresolved link to `s`[0m
-  [1m[94m--> [0mscirust-process/src/process_first_order.rs:66:45
-   [1m[94m|[0m
-[1m[94m66[0m [1m[94m|[0m /// `time_constant` `τ` constante de temps [s], `fraction` `f` fraction de la
-   [1m[94m|[0m                                             [1m[91m^[0m [1m[91mno item named `s` in scope[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-
-[1m[91merror[0m[1m: unresolved link to `s`[0m
-  [1m[94m--> [0mscirust-process/src/process_first_order.rs:88:23
-   [1m[94m|[0m
-[1m[94m88[0m [1m[94m|[0m /// pur (temps mort) [s], `time_constant` `τ` constante de temps identifiée [s].
-   [1m[94m|[0m                       [1m[91m^[0m [1m[91mno item named `s` in scope[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-
-[1m[91merror[0m[1m: unresolved link to `s`[0m
-  [1m[94m--> [0mscirust-process/src/process_first_order.rs:88:78
-   [1m[94m|[0m
-[1m[94m88[0m [1m[94m|[0m /// pur (temps mort) [s], `time_constant` `τ` constante de temps identifiée [s].
-   [1m[94m|[0m                                                                              [1m[91m^[0m [1m[91mno item named `s` in scope[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-
-[1m[91merror[0m[1m: unresolved link to `s`[0m
-   [1m[94m--> [0mscirust-process/src/process_first_order.rs:111:20
-    [1m[94m|[0m
-[1m[94m111[0m [1m[94m|[0m /// `Ti = 3.33·θ` [s].
-    [1m[94m|[0m                    [1m[91m^[0m [1m[91mno item named `s` in scope[0m
+[1m[94m126[0m [1m[94m|[0m /// `plant_life_years` (N) durée de vie [an].
+    [1m[94m|[0m                                          [1m[91m^^[0m [1m[91mno item named `an` in scope[0m
     [1m[94m|[0m
     [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
 
-[1m[91merror[0m[1m: unresolved link to `s`[0m
-   [1m[94m--> [0mscirust-process/src/process_first_order.rs:113:56
-    [1m[94m|[0m
-[1m[94m113[0m [1m[94m|[0m /// `dead_time` `θ` retard pur (temps mort) identifié [s]. Le temps intégral
-    [1m[94m|[0m                                                        [1m[91m^[0m [1m[91mno item named `s` in scope[0m
-    [1m[94m|[0m
-    [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+[1m[91merror[0m[1m: unresolved link to `sans dimension, > 1`[0m
+  [1m[94m--> [0mscirust-process/src/compressor_power.rs:22:37
+   [1m[94m|[0m
+[1m[94m22[0m [1m[94m|[0m //! des chaleurs massiques `cp/cv` [sans dimension, > 1], `n`
+   [1m[94m|[0m                                     [1m[91m^^^^^^^^^^^^^^^^^^^[0m [1m[91munbalanced angle brackets[0m
 
-[1m[91merror[0m[1m: unresolved link to `s`[0m
-   [1m[94m--> [0mscirust-process/src/process_first_order.rs:129:71
-    [1m[94m|[0m
-[1m[94m129[0m [1m[94m|[0m /// `gain` `K` gain statique, `time_constant` `τ` constante de temps [s],
-    [1m[94m|[0m                                                                       [1m[91m^[0m [1m[91mno item named `s` in scope[0m
-    [1m[94m|[0m
-    [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+[1m[91merror[0m[1m: unresolved link to `sans dimension, > 1`[0m
+  [1m[94m--> [0mscirust-process/src/compressor_power.rs:23:52
+   [1m[94m|[0m
+[1m[94m23[0m [1m[94m|[0m //! (`polytropic_exponent`) exposant polytropique [sans dimension, > 1] ; `w_s`
+   [1m[94m|[0m                                                    [1m[91m^^^^^^^^^^^^^^^^^^^[0m [1m[91munbalanced angle brackets[0m
 
-[1m[91merror[0m[1m: unresolved link to `s`[0m
-   [1m[94m--> [0mscirust-process/src/process_first_order.rs:130:33
-    [1m[94m|[0m
-[1m[94m130[0m [1m[94m|[0m /// `dead_time` `θ` retard pur [s], `time` `t` temps depuis l'échelon [s],
-    [1m[94m|[0m                                 [1m[91m^[0m [1m[91mno item named `s` in scope[0m
-    [1m[94m|[0m
-    [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+[1m[91merror[0m[1m: unresolved link to `gpm`[0m
+  [1m[94m--> [0mscirust-process/src/control_valve_cv.rs:24:6
+   [1m[94m|[0m
+[1m[94m24[0m [1m[94m|[0m //! [gpm], `ΔP` en livres par pouce carré [psi]), `Kv` coefficient de débit
+   [1m[94m|[0m      [1m[91m^^^[0m [1m[91mno item named `gpm` in scope[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
 
-[1m[91merror[0m[1m: unresolved link to `s`[0m
-   [1m[94m--> [0mscirust-process/src/process_first_order.rs:130:72
-    [1m[94m|[0m
-[1m[94m130[0m [1m[94m|[0m /// `dead_time` `θ` retard pur [s], `time` `t` temps depuis l'échelon [s],
-    [1m[94m|[0m                                                                        [1m[91m^[0m [1m[91mno item named `s` in scope[0m
-    [1m[94m|[0m
-    [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+[1m[91merror[0m[1m: unresolved link to `psi`[0m
+  [1m[94m--> [0mscirust-process/src/control_valve_cv.rs:24:44
+   [1m[94m|[0m
+[1m[94m24[0m [1m[94m|[0m //! [gpm], `ΔP` en livres par pouce carré [psi]), `Kv` coefficient de débit
+   [1m[94m|[0m                                            [1m[91m^^^[0m [1m[91mno item named `psi` in scope[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+
+[1m[91merror[0m[1m: unresolved link to `gpm`[0m
+  [1m[94m--> [0mscirust-process/src/control_valve_cv.rs:32:15
+   [1m[94m|[0m
+[1m[94m32[0m [1m[94m|[0m //! avec `Q` [gpm] et `ΔP` [psi] ; pour la forme SI (`Kv`), utiliser `Q` `m³·h⁻¹` et
+   [1m[94m|[0m               [1m[91m^^^[0m [1m[91mno item named `gpm` in scope[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+
+[1m[91merror[0m[1m: unresolved link to `psi`[0m
+  [1m[94m--> [0mscirust-process/src/control_valve_cv.rs:32:29
+   [1m[94m|[0m
+[1m[94m32[0m [1m[94m|[0m //! avec `Q` [gpm] et `ΔP` [psi] ; pour la forme SI (`Kv`), utiliser `Q` `m³·h⁻¹` et
+   [1m[94m|[0m                             [1m[91m^^^[0m [1m[91mno item named `psi` in scope[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+
+[1m[91merror[0m[1m: unresolved link to `gpm`[0m
+  [1m[94m--> [0mscirust-process/src/control_valve_cv.rs:46:72
+   [1m[94m|[0m
+[1m[94m46[0m [1m[94m|[0m /// Coefficient de débit liquide `Cv = Q · √(G / ΔP)` (impérial : `Q` [gpm],
+   [1m[94m|[0m                                                                        [1m[91m^^^[0m [1m[91mno item named `gpm` in scope[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+
+[1m[91merror[0m[1m: unresolved link to `psi`[0m
+  [1m[94m--> [0mscirust-process/src/control_valve_cv.rs:47:11
+   [1m[94m|[0m
+[1m[94m47[0m [1m[94m|[0m /// `ΔP` [psi] ; ou forme `Kv` SI avec `Q` `m³·h⁻¹`, `ΔP` `bar`).
+   [1m[94m|[0m           [1m[91m^^^[0m [1m[91mno item named `psi` in scope[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+
+[1m[91merror[0m[1m: unresolved link to `K, > 0`[0m
+  [1m[94m--> [0mscirust-process/src/cooling_tower.rs:42:76
+   [1m[94m|[0m
+[1m[94m42[0m [1m[94m|[0m /// `hot_water_temperature` `T_hot` température de l'eau chaude en entrée [K, > 0],
+   [1m[94m|[0m                                                                            [1m[91m^^^^^^[0m [1m[91munbalanced angle brackets[0m
+
+[1m[91merror[0m[1m: unresolved link to `K, > 0`[0m
+  [1m[94m--> [0mscirust-process/src/cooling_tower.rs:44:6
+   [1m[94m|[0m
+[1m[94m44[0m [1m[94m|[0m /// [K, > 0].
+   [1m[94m|[0m      [1m[91m^^^^^^[0m [1m[91munbalanced angle brackets[0m
+
+[1m[91merror[0m[1m: unresolved link to `K, > 0`[0m
+  [1m[94m--> [0mscirust-process/src/cooling_tower.rs:69:6
+   [1m[94m|[0m
+[1m[94m69[0m [1m[94m|[0m /// [K, > 0], `wet_bulb_temperature` `T_wb` température humide de l'air ambiant
+   [1m[94m|[0m      [1m[91m^^^^^^[0m [1m[91munbalanced angle brackets[0m
+
+[1m[91merror[0m[1m: unresolved link to `sans dimension, 0 < β < 1`[0m
+  [1m[94m--> [0mscirust-process/src/orifice_meter.rs:19:32
+   [1m[94m|[0m
+[1m[94m19[0m [1m[94m|[0m //! `β` rapport des diamètres [sans dimension, 0 < β < 1], `Cd` coefficient de
+   [1m[94m|[0m                                [1m[91m^^^^^^^^^^^^^^^^^^^^^^^^^[0m [1m[91munbalanced angle brackets[0m
 
 [1m[91merror[0m: could not document `scirust-process`

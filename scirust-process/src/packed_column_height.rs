@@ -4,19 +4,19 @@
 //!
 //! ```text
 //! NTU dilué        N = ln(y_in / y_out)                                        [-]
-//! NTU (facteur A)  N = 1/(1 − 1/A) · ln[ (y_in − y*)/(y_out − y*)·(1 − 1/A) + 1/A ]  [-]
-//! HTU              H = G / (K_G·a)                                             [m]
-//! hauteur          Z = H · N                                                   [m]
+//! NTU (facteur A)  N = 1/(1 − 1/A) · ln`(y_in − y*)/(y_out − y*)·(1 − 1/A) + 1/A`  [-]
+//! HTU              H = G / (K_G·a)                                             `m`
+//! hauteur          Z = H · N                                                   `m`
 //! ```
 //!
-//! `N` nombre d'unités de transfert côté gaz [sans dimension], `y_in`/`y_out`
+//! `N` nombre d'unités de transfert côté gaz `sans dimension`, `y_in`/`y_out`
 //! fractions molaires du soluté dans le gaz à l'entrée/à la sortie [sans
 //! dimension], `y*` fraction molaire d'équilibre (droite d'équilibre de pente
-//! constante) [sans dimension], `A` facteur d'absorption `A = L/(m·G)` [sans
-//! dimension], `H` hauteur d'unité de transfert [m], `G` flux molaire surfacique
-//! de gaz [mol·s⁻¹·m⁻²], `K_G·a` coefficient global de transfert volumique
-//! [mol·s⁻¹·m⁻³] (produit du coefficient global `K_G` [mol·s⁻¹·m⁻²] par l'aire
-//! interfaciale spécifique `a` [m²·m⁻³ = m⁻¹]), `Z` hauteur de garnissage [m].
+//! constante) `sans dimension`, `A` facteur d'absorption `A = L/(m·G)` [sans
+//! dimension], `H` hauteur d'unité de transfert `m`, `G` flux molaire surfacique
+//! de gaz `mol·s⁻¹·m⁻²`, `K_G·a` coefficient global de transfert volumique
+//! `mol·s⁻¹·m⁻³` (produit du coefficient global `K_G` `mol·s⁻¹·m⁻²` par l'aire
+//! interfaciale spécifique `a` `m²·m⁻³ = m⁻¹`), `Z` hauteur de garnissage `m`.
 //!
 //! **Limite honnête** : ces relations valent pour une **colonne à garnissage en
 //! contre-courant**, avec une **droite d'équilibre de pente constante FOURNIE**
@@ -36,7 +36,7 @@
 /// logarithmique).
 ///
 /// `inlet_fraction` (y_in) et `outlet_fraction` (y_out) fractions molaires du
-/// soluté dans le gaz à l'entrée/à la sortie [sans dimension].
+/// soluté dans le gaz à l'entrée/à la sortie `sans dimension`.
 ///
 /// Panique si `inlet_fraction <= 0` ou `outlet_fraction <= 0`.
 pub fn htu_number_of_transfer_units_dilute(inlet_fraction: f64, outlet_fraction: f64) -> f64 {
@@ -49,12 +49,12 @@ pub fn htu_number_of_transfer_units_dilute(inlet_fraction: f64, outlet_fraction:
 
 /// Nombre d'unités de transfert côté gaz avec **droite d'équilibre** et **facteur
 /// d'absorption** `A` :
-/// `N = 1/(1 − 1/A) · ln[ (y_in − y*)/(y_out − y*)·(1 − 1/A) + 1/A ]` (sans
+/// `N = 1/(1 − 1/A) · ln`(y_in − y*)/(y_out − y*)·(1 − 1/A) + 1/A`` (sans
 /// dimension).
 ///
 /// `inlet_fraction` (y_in), `outlet_fraction` (y_out) et `equilibrium_fraction`
-/// (y*) fractions molaires [sans dimension] ; `absorption_factor` (A = L/(m·G))
-/// facteur d'absorption [sans dimension].
+/// (y*) fractions molaires `sans dimension` ; `absorption_factor` (A = L/(m·G))
+/// facteur d'absorption `sans dimension`.
 ///
 /// Panique si `absorption_factor <= 0`, si `absorption_factor ≈ 1` (terme
 /// `1 − 1/A` singulier), si `outlet_fraction ≈ equilibrium_fraction` (division
@@ -88,9 +88,9 @@ pub fn htu_number_of_transfer_units_absorption(
 
 /// Hauteur d'unité de transfert `H = G / (K_G·a)` (m).
 ///
-/// `molar_gas_flux` (G) flux molaire surfacique de gaz [mol·s⁻¹·m⁻²] ;
-/// `overall_coefficient` (K_G) coefficient global de transfert [mol·s⁻¹·m⁻²] ;
-/// `interfacial_area` (a) aire interfaciale spécifique [m²·m⁻³ = m⁻¹].
+/// `molar_gas_flux` (G) flux molaire surfacique de gaz `mol·s⁻¹·m⁻²` ;
+/// `overall_coefficient` (K_G) coefficient global de transfert `mol·s⁻¹·m⁻²` ;
+/// `interfacial_area` (a) aire interfaciale spécifique `m²·m⁻³ = m⁻¹`.
 ///
 /// Panique si `molar_gas_flux < 0`, `overall_coefficient <= 0` ou
 /// `interfacial_area <= 0`.

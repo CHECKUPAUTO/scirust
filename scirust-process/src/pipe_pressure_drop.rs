@@ -9,23 +9,23 @@
 //! facteur de frottement de Darcy, régime laminaire (Re ≲ 2300)
 //!   f    = 64 / Re                                              [-]
 //! facteur de frottement de Darcy, régime turbulent (Swamee-Jain)
-//!   f    = 0.25 / [ log₁₀( ε/D/3.7 + 5.74/Re^0.9 ) ]²           [-]
+//!   f    = 0.25 / `log₁₀( ε/D/3.7 + 5.74/Re^0.9 )`²           [-]
 //! perte de charge régulière (Darcy-Weisbach)
-//!   Δp   = f · (L/D) · ρ·v²/2                                   [Pa]
+//!   Δp   = f · (L/D) · ρ·v²/2                                   `Pa`
 //! pertes singulières (accessoires)
-//!   Δp_s = K · ρ·v²/2                                           [Pa]
+//!   Δp_s = K · ρ·v²/2                                           `Pa`
 //! longueur équivalente d'une singularité
-//!   L_eq = K · D / f                                            [m]
+//!   L_eq = K · D / f                                            `m`
 //! ```
 //!
-//! `ρ` masse volumique du fluide [kg·m⁻³], `v` vitesse débitante moyenne
-//! [m·s⁻¹], `D` diamètre intérieur de la conduite [m], `μ` viscosité dynamique
-//! [Pa·s], `Re` nombre de Reynolds [sans dimension], `f` facteur de frottement
-//! de Darcy [sans dimension], `ε/D` rugosité relative de la paroi [sans
-//! dimension], `L` longueur de conduite [m], `Δp` perte de charge régulière
-//! [Pa], `K` coefficient de perte singulière de l'accessoire [sans dimension],
-//! `Δp_s` perte de charge singulière [Pa], `L_eq` longueur de conduite droite
-//! produisant la même perte que la singularité [m].
+//! `ρ` masse volumique du fluide `kg·m⁻³`, `v` vitesse débitante moyenne
+//! `m·s⁻¹`, `D` diamètre intérieur de la conduite `m`, `μ` viscosité dynamique
+//! `Pa·s`, `Re` nombre de Reynolds `sans dimension`, `f` facteur de frottement
+//! de Darcy `sans dimension`, `ε/D` rugosité relative de la paroi [sans
+//! dimension], `L` longueur de conduite `m`, `Δp` perte de charge régulière
+//! `Pa`, `K` coefficient de perte singulière de l'accessoire `sans dimension`,
+//! `Δp_s` perte de charge singulière `Pa`, `L_eq` longueur de conduite droite
+//! produisant la même perte que la singularité `m`.
 //!
 //! **Limite honnête** : la masse volumique `ρ`, la viscosité dynamique `μ`, la
 //! rugosité relative `ε/D` et les coefficients de perte singulière `K` sont
@@ -45,9 +45,9 @@
 /// `Re = ρ·v·D / μ` (sans dimension), rapport des forces d'inertie aux forces
 /// visqueuses.
 ///
-/// `density` (ρ) [kg·m⁻³], `velocity` (v) vitesse débitante moyenne [m·s⁻¹],
-/// `diameter` (D) diamètre intérieur [m], `viscosity` (μ) viscosité dynamique
-/// [Pa·s].
+/// `density` (ρ) `kg·m⁻³`, `velocity` (v) vitesse débitante moyenne `m·s⁻¹`,
+/// `diameter` (D) diamètre intérieur `m`, `viscosity` (μ) viscosité dynamique
+/// `Pa·s`.
 ///
 /// Panique si `ρ ≤ 0`, si `v ≤ 0`, si `D ≤ 0`, ou si `μ ≤ 0`.
 pub fn dp_reynolds(density: f64, velocity: f64, diameter: f64, viscosity: f64) -> f64 {
@@ -62,7 +62,7 @@ pub fn dp_reynolds(density: f64, velocity: f64, diameter: f64, viscosity: f64) -
 /// `f = 64 / Re` (sans dimension), résultat exact de l'écoulement de
 /// Hagen-Poiseuille en conduite circulaire (`Re ≲ 2300`).
 ///
-/// `reynolds` (Re) nombre de Reynolds [sans dimension].
+/// `reynolds` (Re) nombre de Reynolds `sans dimension`.
 ///
 /// Panique si `Re ≤ 0`.
 pub fn dp_friction_factor_laminar(reynolds: f64) -> f64 {
@@ -72,12 +72,12 @@ pub fn dp_friction_factor_laminar(reynolds: f64) -> f64 {
 
 /// Facteur de frottement de Darcy en régime turbulent (corrélation de
 /// Swamee-Jain)
-/// `f = 0.25 / [ log₁₀( (ε/D)/3.7 + 5.74/Re^0.9 ) ]²` (sans dimension),
+/// `f = 0.25 / `log₁₀( (ε/D)/3.7 + 5.74/Re^0.9 )`²` (sans dimension),
 /// approximation explicite de l'équation implicite de Colebrook-White
 /// (turbulent, `Re > 4000` environ).
 ///
-/// `reynolds` (Re) nombre de Reynolds [sans dimension], `relative_roughness`
-/// (ε/D) rugosité relative de la paroi [sans dimension].
+/// `reynolds` (Re) nombre de Reynolds `sans dimension`, `relative_roughness`
+/// (ε/D) rugosité relative de la paroi `sans dimension`.
 ///
 /// Panique si `Re ≤ 0`, ou si `ε/D < 0`.
 pub fn dp_friction_factor_swamee_jain(reynolds: f64, relative_roughness: f64) -> f64 {
@@ -94,9 +94,9 @@ pub fn dp_friction_factor_swamee_jain(reynolds: f64, relative_roughness: f64) ->
 /// `Δp = f · (L/D) · ρ·v²/2` (Pa), perte de pression par frottement le long
 /// d'une conduite droite.
 ///
-/// `friction_factor` (f) facteur de frottement de Darcy [sans dimension],
-/// `length` (L) longueur de conduite [m], `diameter` (D) diamètre intérieur
-/// [m], `density` (ρ) [kg·m⁻³], `velocity` (v) vitesse débitante [m·s⁻¹].
+/// `friction_factor` (f) facteur de frottement de Darcy `sans dimension`,
+/// `length` (L) longueur de conduite `m`, `diameter` (D) diamètre intérieur
+/// `m`, `density` (ρ) `kg·m⁻³`, `velocity` (v) vitesse débitante `m·s⁻¹`.
 ///
 /// Panique si `f ≤ 0`, si `L ≤ 0`, si `D ≤ 0`, si `ρ ≤ 0`, ou si `v ≤ 0`.
 pub fn dp_darcy_weisbach(
@@ -121,8 +121,8 @@ pub fn dp_darcy_weisbach(
 /// `Δp_s = K · ρ·v²/2` (Pa), perte de pression localisée d'un coude, d'une
 /// vanne, d'un raccord, etc.
 ///
-/// `loss_coefficient` (K) coefficient de perte singulière [sans dimension],
-/// `density` (ρ) [kg·m⁻³], `velocity` (v) vitesse débitante [m·s⁻¹].
+/// `loss_coefficient` (K) coefficient de perte singulière `sans dimension`,
+/// `density` (ρ) `kg·m⁻³`, `velocity` (v) vitesse débitante `m·s⁻¹`.
 ///
 /// Panique si `K < 0`, si `ρ ≤ 0`, ou si `v ≤ 0`.
 pub fn dp_minor_loss(loss_coefficient: f64, density: f64, velocity: f64) -> f64 {
@@ -139,9 +139,9 @@ pub fn dp_minor_loss(loss_coefficient: f64, density: f64, velocity: f64) -> f64 
 /// `L_eq = K · D / f` (m), longueur de conduite droite produisant la même perte
 /// de charge que la singularité de coefficient `K`.
 ///
-/// `loss_coefficient` (K) coefficient de perte singulière [sans dimension],
-/// `friction_factor` (f) facteur de frottement de Darcy [sans dimension],
-/// `diameter` (D) diamètre intérieur [m].
+/// `loss_coefficient` (K) coefficient de perte singulière `sans dimension`,
+/// `friction_factor` (f) facteur de frottement de Darcy `sans dimension`,
+/// `diameter` (D) diamètre intérieur `m`.
 ///
 /// Panique si `K < 0`, si `f ≤ 0`, ou si `D ≤ 0`.
 pub fn dp_equivalent_length(loss_coefficient: f64, friction_factor: f64, diameter: f64) -> f64 {
