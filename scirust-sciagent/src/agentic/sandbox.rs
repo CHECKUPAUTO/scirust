@@ -46,7 +46,7 @@ enum SandboxMode {
 impl SandboxMode {
     fn parse(value: Option<&str>) -> Result<Self, String> {
         match value
-            .unwrap_or("danger-full-access")
+            .unwrap_or("workspace-write")
             .trim()
             .to_ascii_lowercase()
             .as_str()
@@ -762,7 +762,7 @@ mod tests {
     fn sandbox_mode_parser_matches_harness_vocabulary() {
         assert_eq!(
             SandboxMode::parse(None).unwrap(),
-            SandboxMode::DangerFullAccess
+            SandboxMode::WorkspaceWrite
         );
         assert_eq!(
             SandboxMode::parse(Some("read-only")).unwrap(),
