@@ -47,6 +47,7 @@ jobs:
           for manifest in \
             scirust-sciagent/examples/optimization_tasks/smoke.json \
             scirust-sciagent/examples/optimization_tasks/smoke_recovery.json \
+            scirust-sciagent/examples/optimization_tasks/smoke_budget_exhausted.json \
             scirust-sciagent/examples/optimization_tasks/i250_cuda_decode.json; do
             rustup run nightly-2026-07-02 cargo run -q -p scirust-sciagent --bin sciagent-optimize -- \
               plan --manifest "$manifest" --json > /tmp/sciagent-opt-plan.json
@@ -88,4 +89,25 @@ jobs:
           assert (1, 'compile') in failures, report
           assert (2, 'verify') in failures, report
           assert not any(item['stage'] == 'benchmark' for item in report['failures']), report
+          PY
+
+      - name: Prove budget exhaustion fails the command
+        run: |
+          set -euo pipefail
+          set +e
+          rustup run nightly-2026-07-02 cargo run -q -p scirust-sciagent --bin sciagent-optimize -- \
+            run \
+            --manifest scirust-sciagent/examples/optimization_tasks/smoke_budget_exhausted.json \
+            --workspace . \
+            --run-root target/sciagent-opt-budget-exhausted \
+            --json > /tmp/sciagent-opt-budget-exhausted.json
+          status=$?
+          set -e
+          test "$status" -eq 2
+          python3 - <<'PY'
+          import json
+          report = json.load(open('/tmp/sciagent-opt-budget-exhausted.json'))
+          assert report['final_decision'] == 'budget-exhausted', report
+          assert report['best_verified_speedup'] == 1.25, report
+          assert report['iterations'][-1]['decision'] == 'rewrite-for-performance', report
           PY
