@@ -1,0 +1,113 @@
+name: sciagent-optimization-loop
+
+on:
+  pull_request:
+    paths:
+      - "scirust-sciagent/SKILL_OPTIMIZATION.md"
+      - "scirust-sciagent/src/lib.rs"
+      - "scirust-sciagent/src/optimization_agent/**"
+      - "scirust-sciagent/src/bin/sciagent-optimize.rs"
+      - "scirust-sciagent/examples/optimization_tasks/**"
+      - "scripts/sciagent-opt-*.sh"
+      - "docs/SCIAGENT_OPTIMIZATION_LOOP.md"
+      - ".github/workflows/sciagent-optimization-loop.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  optimization-loop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt,clippy
+
+      - name: Check formatting
+        run: rustup run nightly-2026-07-02 cargo fmt --all -- --check
+
+      - name: Build optimization CLI
+        run: rustup run nightly-2026-07-02 cargo check -p scirust-sciagent --bin sciagent-optimize
+
+      - name: Clippy SciAgent optimization integration
+        run: rustup run nightly-2026-07-02 cargo clippy -p scirust-sciagent --all-targets --locked -- -D warnings
+
+      - name: Run optimization-agent unit tests
+        run: rustup run nightly-2026-07-02 cargo test -p scirust-sciagent optimization_agent
+
+      - name: Validate optimization manifests
+        run: |
+          set -euo pipefail
+          for manifest in \
+            scirust-sciagent/examples/optimization_tasks/smoke.json \
+            scirust-sciagent/examples/optimization_tasks/smoke_recovery.json \
+            scirust-sciagent/examples/optimization_tasks/smoke_budget_exhausted.json \
+            scirust-sciagent/examples/optimization_tasks/i250_cuda_decode.json; do
+            rustup run nightly-2026-07-02 cargo run -q -p scirust-sciagent --bin sciagent-optimize -- \
+              plan --manifest "$manifest" --json > /tmp/sciagent-opt-plan.json
+            test -s /tmp/sciagent-opt-plan.json
+          done
+
+      - name: Run end-to-end optimization smoke test
+        run: |
+          set -euo pipefail
+          rustup run nightly-2026-07-02 cargo run -q -p scirust-sciagent --bin sciagent-optimize -- \
+            run \
+            --manifest scirust-sciagent/examples/optimization_tasks/smoke.json \
+            --workspace . \
+            --run-root target/sciagent-opt-smoke \
+            --json > /tmp/sciagent-opt-report.json
+          python3 - <<'PY'
+          import json
+          report = json.load(open('/tmp/sciagent-opt-report.json'))
+          assert report['final_decision'] == 'promote', report
+          assert abs(report['iterations'][-1]['speedup'] - 1.25) < 1e-12, report
+          assert report['failures'] == [], report
+          PY
+
+      - name: Prove compile and correctness recovery
+        run: |
+          set -euo pipefail
+          rustup run nightly-2026-07-02 cargo run -q -p scirust-sciagent --bin sciagent-optimize -- \
+            run \
+            --manifest scirust-sciagent/examples/optimization_tasks/smoke_recovery.json \
+            --workspace . \
+            --run-root target/sciagent-opt-recovery \
+            --json > /tmp/sciagent-opt-recovery.json
+          python3 - <<'PY'
+          import json
+          report = json.load(open('/tmp/sciagent-opt-recovery.json'))
+          assert report['final_decision'] == 'promote', report
+          assert report['iterations'][-1]['iteration'] == 3, report
+          failures = {(item['iteration'], item['stage']) for item in report['failures']}
+          assert (1, 'compile') in failures, report
+          assert (2, 'verify') in failures, report
+          assert not any(item['stage'] == 'benchmark' for item in report['failures']), report
+          PY
+
+      - name: Prove budget exhaustion fails the command
+        run: |
+          set -euo pipefail
+          set +e
+          rustup run nightly-2026-07-02 cargo run -q -p scirust-sciagent --bin sciagent-optimize -- \
+            run \
+            --manifest scirust-sciagent/examples/optimization_tasks/smoke_budget_exhausted.json \
+            --workspace . \
+            --run-root target/sciagent-opt-budget-exhausted \
+            --json > /tmp/sciagent-opt-budget-exhausted.json
+          status=$?
+          set -e
+          test "$status" -eq 2
+          python3 - <<'PY'
+          import json
+          report = json.load(open('/tmp/sciagent-opt-budget-exhausted.json'))
+          assert report['final_decision'] == 'budget-exhausted', report
+          assert report['best_verified_speedup'] == 1.25, report
+          assert report['iterations'][-1]['decision'] == 'rewrite-for-performance', report
+          PY
