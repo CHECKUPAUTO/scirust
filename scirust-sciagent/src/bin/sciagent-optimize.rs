@@ -145,10 +145,10 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 {
                     println!("best verified speedup: {best:.4}x");
                 }
-                if report.final_decision != OptimizationDecision::Promote
-                {
-                    std::process::exit(2);
-                }
+            }
+            if report.final_decision != OptimizationDecision::Promote
+            {
+                std::process::exit(2);
             }
         },
         Command::Score {
