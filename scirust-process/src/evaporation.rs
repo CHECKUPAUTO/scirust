@@ -18,7 +18,7 @@
 //! `T_b` température d'ébullition du **solvant pur** à la pression de l'effet
 //! `K`, `T_ref` température d'ébullition de référence `K`, `ΔT` élévation du point
 //! d'ébullition de la solution au-dessus du solvant pur `K` ; `N` nombre d'effets
-//! [effets], `E_1` économie moyenne par effet `sans dimension`, `E_N` économie
+//! `effets`, `E_1` économie moyenne par effet `sans dimension`, `E_N` économie
 //! approchée de la batterie `sans dimension`.
 //!
 //! **Limite honnête** : le bilan matière porte sur les **solides non volatils**
