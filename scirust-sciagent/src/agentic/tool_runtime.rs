@@ -210,7 +210,7 @@ fn validate_parameters(
 {
     for ToolParam { name, required, .. } in &tool.parameters
     {
-        if *required && !params.contains_key(*name)
+        if *required && params.get(*name).is_none_or(String::is_empty)
         {
             return Err(ToolRuntimeError::MissingRequiredParameter {
                 tool: tool.name.to_string(),
@@ -221,7 +221,10 @@ fn validate_parameters(
 
     for name in params.keys()
     {
-        if !tool.parameters.iter().any(|parameter| parameter.name == name)
+        if !tool
+            .parameters
+            .iter()
+            .any(|parameter| parameter.name == name.as_str())
         {
             return Err(ToolRuntimeError::UndeclaredParameter {
                 tool: tool.name.to_string(),
@@ -238,16 +241,19 @@ mod tests
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    static EXECUTIONS: AtomicUsize = AtomicUsize::new(0);
     static OBSERVATIONS: AtomicUsize = AtomicUsize::new(0);
 
-    fn counted_tool(_params: HashMap<String, String>) -> String
+    fn panic_tool(_params: HashMap<String, String>) -> String
     {
-        EXECUTIONS.fetch_add(1, Ordering::SeqCst);
+        panic!("tool callback must not run")
+    }
+
+    fn ok_tool(_params: HashMap<String, String>) -> String
+    {
         "ok".to_string()
     }
 
-    fn synthetic_tool() -> Tool
+    fn synthetic_tool(execute: fn(HashMap<String, String>) -> String) -> Tool
     {
         Tool {
             name: "synthetic",
@@ -266,7 +272,7 @@ mod tests
                     required: false,
                 },
             ],
-            execute: counted_tool,
+            execute,
         }
     }
 
@@ -329,8 +335,7 @@ mod tests
     #[test]
     fn missing_required_parameter_is_refused_before_callback()
     {
-        EXECUTIONS.store(0, Ordering::SeqCst);
-        let runtime = ToolRuntime::new(vec![synthetic_tool()], AllowAllPolicy).unwrap();
+        let runtime = ToolRuntime::new(vec![synthetic_tool(panic_tool)], AllowAllPolicy).unwrap();
         let error = runtime
             .execute_named("synthetic", HashMap::new())
             .expect_err("required parameter must be enforced");
@@ -338,14 +343,27 @@ mod tests
             error,
             ToolRuntimeError::MissingRequiredParameter { .. }
         ));
-        assert_eq!(EXECUTIONS.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn empty_required_parameter_is_refused_before_callback()
+    {
+        let runtime = ToolRuntime::new(vec![synthetic_tool(panic_tool)], AllowAllPolicy).unwrap();
+        let mut call_params = params();
+        call_params.insert("required".to_string(), String::new());
+        let error = runtime
+            .execute_named("synthetic", call_params)
+            .expect_err("empty required parameter must be enforced");
+        assert!(matches!(
+            error,
+            ToolRuntimeError::MissingRequiredParameter { .. }
+        ));
     }
 
     #[test]
     fn undeclared_parameter_is_refused_before_callback()
     {
-        EXECUTIONS.store(0, Ordering::SeqCst);
-        let runtime = ToolRuntime::new(vec![synthetic_tool()], AllowAllPolicy).unwrap();
+        let runtime = ToolRuntime::new(vec![synthetic_tool(panic_tool)], AllowAllPolicy).unwrap();
         let mut call_params = params();
         call_params.insert("surprise".to_string(), "value".to_string());
         let error = runtime
@@ -355,14 +373,12 @@ mod tests
             error,
             ToolRuntimeError::UndeclaredParameter { .. }
         ));
-        assert_eq!(EXECUTIONS.load(Ordering::SeqCst), 0);
     }
 
     #[test]
     fn policy_denial_prevents_callback()
     {
-        EXECUTIONS.store(0, Ordering::SeqCst);
-        let runtime = ToolRuntime::new(vec![synthetic_tool()], DenyPolicy).unwrap();
+        let runtime = ToolRuntime::new(vec![synthetic_tool(panic_tool)], DenyPolicy).unwrap();
         let error = runtime
             .execute_named("synthetic", params())
             .expect_err("policy must deny");
@@ -373,31 +389,32 @@ mod tests
                 reason: "synthetic denial".to_string(),
             }
         );
-        assert_eq!(EXECUTIONS.load(Ordering::SeqCst), 0);
     }
 
     #[test]
     fn successful_execution_runs_post_hook()
     {
-        EXECUTIONS.store(0, Ordering::SeqCst);
         OBSERVATIONS.store(0, Ordering::SeqCst);
-        let runtime = ToolRuntime::new(vec![synthetic_tool()], ObservePolicy).unwrap();
+        let runtime = ToolRuntime::new(vec![synthetic_tool(ok_tool)], ObservePolicy).unwrap();
         assert_eq!(
             runtime.execute_named("synthetic", params()).unwrap(),
             "ok"
         );
-        assert_eq!(EXECUTIONS.load(Ordering::SeqCst), 1);
         assert_eq!(OBSERVATIONS.load(Ordering::SeqCst), 1);
     }
 
     #[test]
     fn duplicate_tool_registration_is_refused()
     {
-        let error = ToolRuntime::new(
-            vec![synthetic_tool(), synthetic_tool()],
+        let result = ToolRuntime::new(
+            vec![synthetic_tool(ok_tool), synthetic_tool(ok_tool)],
             AllowAllPolicy,
-        )
-        .expect_err("duplicate tools must fail");
+        );
+        let error = match result
+        {
+            Ok(_) => panic!("duplicate tools must fail"),
+            Err(error) => error,
+        };
         assert_eq!(
             error,
             ToolRuntimeError::DuplicateTool("synthetic".to_string())
