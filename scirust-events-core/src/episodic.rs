@@ -3,7 +3,7 @@
 //!
 //! `scirust-events-core` already defines the natural episodic-memory record
 //! ([`crate::Event`]: id, timestamp, label, confidence, data snapshot) and
-//! [`crate::EventRuntime`](scirust_events_runtime::EventRuntime) produces a
+//! `scirust_events_runtime::EventRuntime` produces a
 //! `Vec<Event>` — but today those events are returned to the caller and
 //! dropped. [`EpisodicEventLog`] turns them into a **store**: append-only,
 //! monotonically growing unless a capacity is set, queryable by timestamp

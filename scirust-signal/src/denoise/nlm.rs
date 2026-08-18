@@ -28,7 +28,7 @@ const AUTO_H_FACTOR: f64 = 0.8;
 /// half-width `patch_half` centred at sample `c` is the **contiguous** slice
 /// `&ext[c .. c + 2·patch_half + 1]`. Folding every border index once per signal
 /// — instead of twice per element of every patch comparison — is what lets
-/// [`sum_sq_diff`] run branch- and division-free over plain slices. Handles
+/// `sum_sq_diff` run branch- and division-free over plain slices. Handles
 /// `patch_half > n` (multiple folds) exactly like per-element [`mirror_index`].
 fn mirror_extend(signal: &[f64], patch_half: usize) -> Vec<f64> {
     let n = signal.len();
@@ -49,7 +49,7 @@ fn mirror_extend(signal: &[f64], patch_half: usize) -> Vec<f64> {
 /// AArch64). The remainder (≤ 3 elements) is summed scalar. Summation order
 /// therefore differs from a naive single-accumulator loop by reassociation
 /// only (≤ 1e-12 relative — pinned by unit test against
-/// [`patch_dist_reference`]); a NaN in either slice still propagates to the
+/// `patch_dist_reference`); a NaN in either slice still propagates to the
 /// result, exactly as it does through the naive loop.
 ///
 /// Shared with [`super::streaming::StreamingNlm`] so the causal filter's interior
@@ -111,7 +111,7 @@ fn patch_dist_reference(signal: &[f64], i: usize, j: usize, patch_half: usize) -
 /// w(i, j) = exp(−max(0, d²(i, j) − 2σ²) / h²)
 /// ```
 ///
-/// where `σ` is the robust noise scale ([`super::estimate_noise_std_helper`]).
+/// where `σ` is the robust noise scale (`super::estimate_noise_std_helper`).
 /// Subtracting `2σ²` — the expected distance between two noisy copies of the
 /// *same* clean patch — makes the weight respond to genuine structural
 /// difference instead of to the noise floor itself. The output sample is the
@@ -142,13 +142,13 @@ fn patch_dist_reference(signal: &[f64], i: usize, j: usize, patch_half: usize) -
 ///
 /// The patch-distance kernel is layout-optimized so LLVM auto-vectorizes it on
 /// stable Rust (explicit SIMD stays gated behind nightly in `scirust-simd`):
-/// the signal is mirror-extended **once** ([`mirror_extend`]) so every patch is
+/// the signal is mirror-extended **once** (`mirror_extend`) so every patch is
 /// a contiguous slice, and the distance is a straight-line sum of squared
 /// differences over two slices with four independent accumulators
-/// ([`sum_sq_diff`]) — no bounds checks, no branches, no per-element index
+/// (`sum_sq_diff`) — no bounds checks, no branches, no per-element index
 /// folding inside the loop. Reassociating the sum can move a distance by
 /// rounding only (≤ 1e-12 relative, pinned by unit test against the retained
-/// scalar [`patch_dist_reference`]); the weight rule, its guards, and the NaN
+/// scalar `patch_dist_reference`); the weight rule, its guards, and the NaN
 /// handling below are byte-for-byte unchanged.
 ///
 /// ## Degradation & robustness

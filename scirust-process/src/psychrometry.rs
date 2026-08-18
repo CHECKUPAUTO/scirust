@@ -3,23 +3,23 @@
 //! pression de vapeur au point de rosée et volume spécifique de l'air humide.
 //!
 //! ```text
-//! humidité absolue       W   = 0.622·pv/(P − pv)                    [kg/kg air sec]
+//! humidité absolue       W   = 0.622·pv/(P − pv)                    `kg/kg air sec`
 //! humidité relative      phi = pv/psat                              [-]
-//! pression partielle     pv  = W·P/(0.622 + W)                      [Pa]
-//! enthalpie (réf 0 °C)   h   = 1.006·t + W·(2501 + 1.86·t)          [kJ/kg air sec]
-//! pression au pt de rosée pd  = W·P/(0.622 + W)                     [Pa]
-//! volume spécifique      v   = R_a·T·(1 + 1.608·W)/P                [m³/kg air sec]
+//! pression partielle     pv  = W·P/(0.622 + W)                      `Pa`
+//! enthalpie (réf 0 °C)   h   = 1.006·t + W·(2501 + 1.86·t)          `kJ/kg air sec`
+//! pression au pt de rosée pd  = W·P/(0.622 + W)                     `Pa`
+//! volume spécifique      v   = R_a·T·(1 + 1.608·W)/P                `m³/kg air sec`
 //! ```
 //!
-//! `pv` pression partielle de vapeur d'eau [Pa], `P` pression totale [Pa],
-//! `psat` pression de vapeur **saturante** à la température considérée [Pa],
+//! `pv` pression partielle de vapeur d'eau (Pa), `P` pression totale (Pa),
+//! `psat` pression de vapeur **saturante** à la température considérée (Pa),
 //! `W` humidité absolue (rapport de mélange, kg d'eau par kg d'air **sec**,
-//! sans dimension), `phi` humidité relative [sans dimension, ∈ 0..1], `t`
-//! température [°C], `h` enthalpie spécifique de l'air humide rapportée à
-//! l'air sec [kJ · kg air sec⁻¹], `pd` pression de vapeur au **point de rosée**
-//! [Pa], `T` température absolue [K], `R_a` constante spécifique de l'**air
-//! sec** [J · kg⁻¹ · K⁻¹], `v` volume spécifique rapporté à l'air sec
-//! [m³ · kg air sec⁻¹]. Le facteur 0.622 = M_eau/M_air ≈ 18.015/28.97 et
+//! sans dimension), `phi` humidité relative (sans dimension, ∈ 0..1), `t`
+//! température (°C), `h` enthalpie spécifique de l'air humide rapportée à
+//! l'air sec (kJ · kg air sec⁻¹), `pd` pression de vapeur au **point de rosée**
+//! (Pa), `T` température absolue (K), `R_a` constante spécifique de l'**air
+//! sec** (J · kg⁻¹ · K⁻¹), `v` volume spécifique rapporté à l'air sec
+//! (m³ · kg air sec⁻¹). Le facteur 0.622 = M_eau/M_air ≈ 18.015/28.97 et
 //! 1.608 = 1/0.622.
 //!
 //! **Limite honnête** : la pression de vapeur **saturante** `psat` (via une
@@ -33,11 +33,11 @@
 //! ici. Ce module **complète** `drying` (courbe de séchage) sans le dupliquer.
 
 /// Humidité absolue (rapport de mélange) `W = 0.622·pv/(P − pv)`
-/// [kg d'eau · kg air sec⁻¹, sans dimension], masse de vapeur d'eau par unité de
+/// (kg d'eau · kg air sec⁻¹, sans dimension), masse de vapeur d'eau par unité de
 /// masse d'air **sec**.
 ///
-/// `partial_vapor_pressure` (pv) pression partielle de vapeur d'eau [Pa] et
-/// `total_pressure` (P) pression totale [Pa].
+/// `partial_vapor_pressure` (pv) pression partielle de vapeur d'eau (Pa) et
+/// `total_pressure` (P) pression totale (Pa).
 ///
 /// Panique si `partial_vapor_pressure < 0`, `total_pressure <= 0` ou si
 /// `total_pressure <= partial_vapor_pressure` (dénominateur `P − pv` non
@@ -55,11 +55,11 @@ pub fn psy_humidity_ratio(partial_vapor_pressure: f64, total_pressure: f64) -> f
     0.622 * partial_vapor_pressure / (total_pressure - partial_vapor_pressure)
 }
 
-/// Humidité relative `phi = pv/psat` [sans dimension, ∈ 0..1], rapport de la
+/// Humidité relative `phi = pv/psat` (sans dimension, ∈ 0..1), rapport de la
 /// pression partielle de vapeur à la pression saturante à la même température.
 ///
-/// `partial_vapor_pressure` (pv) pression partielle de vapeur [Pa] et
-/// `saturation_pressure` (psat) pression de vapeur saturante [Pa], **fournie**
+/// `partial_vapor_pressure` (pv) pression partielle de vapeur (Pa) et
+/// `saturation_pressure` (psat) pression de vapeur saturante (Pa), **fournie**
 /// par l'appelant (table ou corrélation externe).
 ///
 /// Panique si `partial_vapor_pressure < 0` ou `saturation_pressure <= 0`.
@@ -75,12 +75,12 @@ pub fn psy_relative_humidity(partial_vapor_pressure: f64, saturation_pressure: f
     partial_vapor_pressure / saturation_pressure
 }
 
-/// Pression partielle de vapeur `pv = W·P/(0.622 + W)` [Pa] reconstruite à
+/// Pression partielle de vapeur `pv = W·P/(0.622 + W)` (Pa) reconstruite à
 /// partir de l'humidité absolue. C'est l'opération réciproque de
 /// [`psy_humidity_ratio`].
 ///
-/// `humidity_ratio` (W) humidité absolue [kg eau · kg air sec⁻¹] et
-/// `total_pressure` (P) pression totale [Pa].
+/// `humidity_ratio` (W) humidité absolue (kg eau · kg air sec⁻¹) et
+/// `total_pressure` (P) pression totale (Pa).
 ///
 /// Panique si `humidity_ratio < 0` ou `total_pressure <= 0`.
 pub fn psy_vapor_pressure_from_humidity(humidity_ratio: f64, total_pressure: f64) -> f64 {
@@ -90,11 +90,11 @@ pub fn psy_vapor_pressure_from_humidity(humidity_ratio: f64, total_pressure: f64
 }
 
 /// Enthalpie spécifique de l'air humide (référence 0 °C)
-/// `h = 1.006·t + W·(2501 + 1.86·t)` [kJ · kg air sec⁻¹], somme de la chaleur
+/// `h = 1.006·t + W·(2501 + 1.86·t)` (kJ · kg air sec⁻¹), somme de la chaleur
 /// sensible de l'air sec et de l'enthalpie de la vapeur (latente + sensible).
 ///
-/// `temperature_celsius` (t) température [°C] et `humidity_ratio` (W) humidité
-/// absolue [kg eau · kg air sec⁻¹].
+/// `temperature_celsius` (t) température (°C) et `humidity_ratio` (W) humidité
+/// absolue (kg eau · kg air sec⁻¹).
 ///
 /// Panique si `humidity_ratio < 0`.
 pub fn psy_enthalpy(temperature_celsius: f64, humidity_ratio: f64) -> f64 {
@@ -102,14 +102,14 @@ pub fn psy_enthalpy(temperature_celsius: f64, humidity_ratio: f64) -> f64 {
     1.006 * temperature_celsius + humidity_ratio * (2501.0 + 1.86 * temperature_celsius)
 }
 
-/// Pression de vapeur au **point de rosée** `pd = W·P/(0.622 + W)` [Pa]. Le
+/// Pression de vapeur au **point de rosée** `pd = W·P/(0.622 + W)` (Pa). Le
 /// point de rosée est la température de saturation à la pression partielle de
 /// vapeur ; sa pression saturante vaut donc exactement la pression partielle de
 /// vapeur `pv` du mélange (même expression que
 /// [`psy_vapor_pressure_from_humidity`]).
 ///
-/// `humidity_ratio` (W) humidité absolue [kg eau · kg air sec⁻¹] et
-/// `total_pressure` (P) pression totale [Pa].
+/// `humidity_ratio` (W) humidité absolue (kg eau · kg air sec⁻¹) et
+/// `total_pressure` (P) pression totale (Pa).
 ///
 /// Panique si `humidity_ratio < 0` ou `total_pressure <= 0`.
 pub fn psy_dew_point_saturation_pressure(humidity_ratio: f64, total_pressure: f64) -> f64 {
@@ -119,13 +119,13 @@ pub fn psy_dew_point_saturation_pressure(humidity_ratio: f64, total_pressure: f6
 }
 
 /// Volume spécifique de l'air humide (rapporté à l'air sec)
-/// `v = R_a·T·(1 + 1.608·W)/P` [m³ · kg air sec⁻¹], obtenu par la loi des gaz
+/// `v = R_a·T·(1 + 1.608·W)/P` (m³ · kg air sec⁻¹), obtenu par la loi des gaz
 /// parfaits appliquée au mélange air sec + vapeur.
 ///
-/// `temperature_kelvin` (T) température absolue [K], `humidity_ratio` (W)
-/// humidité absolue [kg eau · kg air sec⁻¹], `total_pressure` (P) pression
-/// totale [Pa] et `dry_air_gas_constant` (R_a) constante spécifique de l'air sec
-/// [J · kg⁻¹ · K⁻¹], **fournie** par l'appelant.
+/// `temperature_kelvin` (T) température absolue (K), `humidity_ratio` (W)
+/// humidité absolue (kg eau · kg air sec⁻¹), `total_pressure` (P) pression
+/// totale (Pa) et `dry_air_gas_constant` (R_a) constante spécifique de l'air sec
+/// (J · kg⁻¹ · K⁻¹), **fournie** par l'appelant.
 ///
 /// Panique si `temperature_kelvin <= 0`, `humidity_ratio < 0`,
 /// `total_pressure <= 0` ou `dry_air_gas_constant <= 0`.

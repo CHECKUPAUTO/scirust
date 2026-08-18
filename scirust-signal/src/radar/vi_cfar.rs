@@ -492,7 +492,7 @@ pub enum CfarError {
     /// (`2 * (reference_cells + guard_cells)`, which bounds every narrower
     /// span the detectors compute — see [`CfarConfig::validate`]) would
     /// overflow `usize` arithmetic, or `reference_cells` exceeds
-    /// [`MAX_PRACTICAL_REFERENCE_CELLS`] — caught here, deterministically,
+    /// `MAX_PRACTICAL_REFERENCE_CELLS` — caught here, deterministically,
     /// rather than left to panic on overflow (or, with `overflow-checks`
     /// off, to wrap silently), or (for the practical bound) to hang inside
     /// calibration, wherever that happens to occur downstream.
@@ -1179,7 +1179,7 @@ impl DesignPointRng {
 /// (`reference_cells, trials, seconds`: `(8, 300_000, 0.034)`,
 /// `(64, 1_000_000, 0.677)`, `(1_000, 1_000_000, 9.88)`) to
 /// `time ≈ 1.0e-8·(reference_cells·trials) + 3.4e-8·trials`. Neither
-/// `reference_cells` (already under [`MAX_PRACTICAL_REFERENCE_CELLS`]) nor
+/// `reference_cells` (already under `MAX_PRACTICAL_REFERENCE_CELLS`) nor
 /// `trials` alone need look unreasonable for their product, or `trials` on
 /// its own, to still make a call run for an unbounded time, so both terms
 /// are capped independently, each to roughly half a second worst case;

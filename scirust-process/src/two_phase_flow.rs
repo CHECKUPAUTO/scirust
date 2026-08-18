@@ -9,23 +9,23 @@
 //! multiplicateur diphasique côté liquide (Chisholm)
 //!   φ_L² = 1 + C/X + 1/X²                                       [-]
 //! gradient de pression diphasique
-//!   (dp/dz)_TP = (dp/dz)_L · φ_L²                               [Pa·m⁻¹]
+//!   (dp/dz)_TP = (dp/dz)_L · φ_L²                               `Pa·m⁻¹`
 //! masse volumique du mélange (modèle homogène)
-//!   ρ_h  = 1 / [ x/ρ_G + (1 − x)/ρ_L ]                          [kg·m⁻³]
+//!   ρ_h  = 1 / `x/ρ_G + (1 − x)/ρ_L`                          `kg·m⁻³`
 //! taux de vide (modèle homogène, sans glissement)
-//!   α    = 1 / [ 1 + ((1 − x)/x)·(ρ_G/ρ_L) ]                    [-]
+//!   α    = 1 / `1 + ((1 − x)/x)·(ρ_G/ρ_L)`                    [-]
 //! ```
 //!
 //! `(dp/dz)_L` gradient de pression du liquide s'écoulant **seul** dans la
-//! conduite [Pa·m⁻¹], `(dp/dz)_G` gradient de pression du gaz s'écoulant
-//! **seul** [Pa·m⁻¹], `X` paramètre de Lockhart-Martinelli [sans dimension],
-//! `C` constante de Chisholm [sans dimension], `φ_L²` multiplicateur diphasique
-//! rapporté au gradient liquide seul [sans dimension], `(dp/dz)_TP` gradient de
-//! pression de l'écoulement diphasique [Pa·m⁻¹], `x` titre massique en vapeur
-//! (fraction massique de gaz) [sans dimension, 0 ≤ x ≤ 1], `ρ_L` masse
-//! volumique du liquide [kg·m⁻³], `ρ_G` masse volumique du gaz [kg·m⁻³], `ρ_h`
-//! masse volumique du mélange homogène [kg·m⁻³], `α` taux de vide (fraction
-//! volumique occupée par le gaz) [sans dimension].
+//! conduite `Pa·m⁻¹`, `(dp/dz)_G` gradient de pression du gaz s'écoulant
+//! **seul** `Pa·m⁻¹`, `X` paramètre de Lockhart-Martinelli `sans dimension`,
+//! `C` constante de Chisholm `sans dimension`, `φ_L²` multiplicateur diphasique
+//! rapporté au gradient liquide seul `sans dimension`, `(dp/dz)_TP` gradient de
+//! pression de l'écoulement diphasique `Pa·m⁻¹`, `x` titre massique en vapeur
+//! (fraction massique de gaz) `sans dimension, 0 ≤ x ≤ 1`, `ρ_L` masse
+//! volumique du liquide `kg·m⁻³`, `ρ_G` masse volumique du gaz `kg·m⁻³`, `ρ_h`
+//! masse volumique du mélange homogène `kg·m⁻³`, `α` taux de vide (fraction
+//! volumique occupée par le gaz) `sans dimension`.
 //!
 //! **Limite honnête** : corrélation **empirique** de Lockhart-Martinelli. Les
 //! gradients de pression **monophasiques** `(dp/dz)_L` et `(dp/dz)_G` (liquide
@@ -44,8 +44,8 @@
 /// `X = sqrt( (dp/dz)_L / (dp/dz)_G )` (sans dimension), racine du rapport des
 /// gradients de pression du liquide seul et du gaz seul dans la conduite.
 ///
-/// `liquid_pressure_gradient` ((dp/dz)_L) gradient du liquide seul [Pa·m⁻¹],
-/// `gas_pressure_gradient` ((dp/dz)_G) gradient du gaz seul [Pa·m⁻¹]. Tous deux
+/// `liquid_pressure_gradient` ((dp/dz)_L) gradient du liquide seul `Pa·m⁻¹`,
+/// `gas_pressure_gradient` ((dp/dz)_G) gradient du gaz seul `Pa·m⁻¹`. Tous deux
 /// exprimés en magnitude (valeur positive).
 ///
 /// Panique si `(dp/dz)_L ≤ 0` ou si `(dp/dz)_G ≤ 0`.
@@ -65,8 +65,8 @@ pub fn twop_martinelli_parameter(liquid_pressure_gradient: f64, gas_pressure_gra
 /// `φ_L² = 1 + C/X + 1/X²` (sans dimension), facteur par lequel le gradient de
 /// pression du liquide seul est amplifié par la présence du gaz.
 ///
-/// `martinelli_parameter` (X) paramètre de Lockhart-Martinelli [sans dimension],
-/// `chisholm_constant` (C) constante de Chisholm [sans dimension], **FOURNIE**
+/// `martinelli_parameter` (X) paramètre de Lockhart-Martinelli `sans dimension`,
+/// `chisholm_constant` (C) constante de Chisholm `sans dimension`, **FOURNIE**
 /// selon les régimes des deux phases (ex. 5, 10, 12, 20).
 ///
 /// Panique si `X ≤ 0` ou si `C < 0`.
@@ -87,7 +87,7 @@ pub fn twop_two_phase_multiplier_liquid(martinelli_parameter: f64, chisholm_cons
 /// `(dp/dz)_TP = (dp/dz)_L · φ_L²` (Pa·m⁻¹), gradient du liquide seul multiplié
 /// par le multiplicateur diphasique côté liquide.
 ///
-/// `liquid_pressure_gradient` ((dp/dz)_L) gradient du liquide seul [Pa·m⁻¹],
+/// `liquid_pressure_gradient` ((dp/dz)_L) gradient du liquide seul `Pa·m⁻¹`,
 /// `two_phase_multiplier_liquid` (φ_L²) multiplicateur diphasique [sans
 /// dimension].
 ///
@@ -109,13 +109,13 @@ pub fn twop_pressure_gradient(
 }
 
 /// Masse volumique du mélange selon le modèle homogène
-/// `ρ_h = 1 / [ x/ρ_G + (1 − x)/ρ_L ]` (kg·m⁻³), moyenne harmonique des masses
+/// `ρ_h = 1 / `x/ρ_G + (1 − x)/ρ_L`` (kg·m⁻³), moyenne harmonique des masses
 /// volumiques pondérée par le titre massique (volume spécifique du mélange).
 ///
-/// `quality` (x) titre massique en vapeur [sans dimension], `liquid_density`
-/// (ρ_L) [kg·m⁻³], `gas_density` (ρ_G) [kg·m⁻³].
+/// `quality` (x) titre massique en vapeur `sans dimension`, `liquid_density`
+/// (ρ_L) `kg·m⁻³`, `gas_density` (ρ_G) `kg·m⁻³`.
 ///
-/// Panique si `x` hors de `[0, 1]`, si `ρ_L ≤ 0`, ou si `ρ_G ≤ 0`.
+/// Panique si `x` hors de ``0, 1``, si `ρ_L ≤ 0`, ou si `ρ_G ≤ 0`.
 pub fn twop_homogeneous_density(quality: f64, liquid_density: f64, gas_density: f64) -> f64 {
     assert!(
         (0.0..=1.0).contains(&quality),
@@ -130,11 +130,11 @@ pub fn twop_homogeneous_density(quality: f64, liquid_density: f64, gas_density: 
 }
 
 /// Taux de vide selon le modèle homogène (sans glissement)
-/// `α = 1 / [ 1 + ((1 − x)/x)·(ρ_G/ρ_L) ]` (sans dimension), fraction de section
+/// `α = 1 / `1 + ((1 − x)/x)·(ρ_G/ρ_L)`` (sans dimension), fraction de section
 /// occupée par le gaz sous l'hypothèse de vitesses de phases égales.
 ///
-/// `quality` (x) titre massique en vapeur [sans dimension], `liquid_density`
-/// (ρ_L) [kg·m⁻³], `gas_density` (ρ_G) [kg·m⁻³].
+/// `quality` (x) titre massique en vapeur `sans dimension`, `liquid_density`
+/// (ρ_L) `kg·m⁻³`, `gas_density` (ρ_G) `kg·m⁻³`.
 ///
 /// Panique si `x` hors de `]0, 1]` (le titre doit être strictement positif : le
 /// terme `(1 − x)/x` diverge en `x = 0`), si `ρ_L ≤ 0`, ou si `ρ_G ≤ 0`.

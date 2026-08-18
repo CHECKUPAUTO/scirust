@@ -4,25 +4,25 @@
 //!
 //! ```text
 //! vitesse minimale (Ergun laminaire)
-//!   U_mf = [ d_p² · (ρ_p − ρ_f) · g / (150 · μ) ]
-//!          · [ ε_mf³ · φ² / (1 − ε_mf) ]                       [m·s⁻¹]
+//!   U_mf = `d_p² · (ρ_p − ρ_f) · g / (150 · μ)`
+//!          · `ε_mf³ · φ² / (1 − ε_mf)`                       `m·s⁻¹`
 //! perte de charge du lit fluidisé
-//!   ΔP   = H · (1 − ε) · (ρ_p − ρ_f) · g                       [Pa]
+//!   ΔP   = H · (1 − ε) · (ρ_p − ρ_f) · g                       `Pa`
 //! vitesse terminale (Stokes, Re ≪ 1)
-//!   U_t  = (ρ_p − ρ_f) · g · d_p² / (18 · μ)                   [m·s⁻¹]
+//!   U_t  = (ρ_p − ρ_f) · g · d_p² / (18 · μ)                   `m·s⁻¹`
 //! plage de fluidisation
 //!   R    = U_t / U_mf                                          [-]
 //! ```
 //!
-//! `d_p` diamètre de particule [m], `ρ_p` masse volumique de la particule
-//! [kg·m⁻³], `ρ_f` masse volumique du fluide [kg·m⁻³], `g` accélération de la
-//! pesanteur [m·s⁻²], `μ` viscosité dynamique du fluide [Pa·s], `ε_mf` porosité
-//! (fraction de vide) au minimum de fluidisation [sans dimension, 0 < ε_mf < 1],
-//! `φ` sphéricité de la particule [sans dimension, 0 < φ ≤ 1] ; `U_mf` vitesse
-//! superficielle minimale de fluidisation [m·s⁻¹] ; `H` hauteur du lit [m], `ε`
-//! porosité du lit [sans dimension, 0 ≤ ε < 1], `ΔP` perte de charge à travers le
-//! lit [Pa] ; `U_t` vitesse terminale de chute de la particule [m·s⁻¹] ; `R`
-//! rapport de fluidisation [sans dimension], marge entre l'apparition de la
+//! `d_p` diamètre de particule `m`, `ρ_p` masse volumique de la particule
+//! `kg·m⁻³`, `ρ_f` masse volumique du fluide `kg·m⁻³`, `g` accélération de la
+//! pesanteur `m·s⁻²`, `μ` viscosité dynamique du fluide `Pa·s`, `ε_mf` porosité
+//! (fraction de vide) au minimum de fluidisation `sans dimension, 0 < ε_mf < 1`,
+//! `φ` sphéricité de la particule `sans dimension, 0 < φ ≤ 1` ; `U_mf` vitesse
+//! superficielle minimale de fluidisation `m·s⁻¹` ; `H` hauteur du lit `m`, `ε`
+//! porosité du lit `sans dimension, 0 ≤ ε < 1`, `ΔP` perte de charge à travers le
+//! lit `Pa` ; `U_t` vitesse terminale de chute de la particule `m·s⁻¹` ; `R`
+//! rapport de fluidisation `sans dimension`, marge entre l'apparition de la
 //! fluidisation et l'entraînement des particules.
 //!
 //! **Limite honnête** : modèle de lit de particules à l'échelle des **opérations
@@ -39,12 +39,12 @@
 
 /// Vitesse superficielle minimale de fluidisation en **régime laminaire**
 /// (branche visqueuse de l'équation d'Ergun)
-/// `U_mf = [d_p²·(ρ_p − ρ_f)·g / (150·μ)] · [ε_mf³·φ² / (1 − ε_mf)]` (m·s⁻¹).
+/// `U_mf = `d_p²·(ρ_p − ρ_f)·g / (150·μ)` · `ε_mf³·φ² / (1 − ε_mf)`` (m·s⁻¹).
 ///
-/// `particle_diameter` (d_p) [m], `particle_density` (ρ_p) [kg·m⁻³],
-/// `fluid_density` (ρ_f) [kg·m⁻³], `fluid_viscosity` (μ) [Pa·s], `gravity` (g)
-/// [m·s⁻²], `voidage_mf` (ε_mf) porosité au minimum de fluidisation
-/// [sans dimension], `sphericity` (φ) sphéricité [sans dimension].
+/// `particle_diameter` (d_p) `m`, `particle_density` (ρ_p) `kg·m⁻³`,
+/// `fluid_density` (ρ_f) `kg·m⁻³`, `fluid_viscosity` (μ) `Pa·s`, `gravity` (g)
+/// `m·s⁻²`, `voidage_mf` (ε_mf) porosité au minimum de fluidisation
+/// `sans dimension`, `sphericity` (φ) sphéricité `sans dimension`.
 ///
 /// Panique si `d_p ≤ 0`, si `μ ≤ 0`, si `g ≤ 0`, si `ρ_f < 0`, si
 /// `ρ_p ≤ ρ_f` (aucune force motrice ascendante), si `ε_mf` hors de `]0, 1[`, ou
@@ -89,9 +89,9 @@ pub fn fluidize_minimum_velocity_fine(
 /// `ΔP = H · (1 − ε) · (ρ_p − ρ_f) · g` (Pa), égale au **poids apparent** des
 /// solides par unité de section (le lit est soutenu par le fluide).
 ///
-/// `bed_height` (H) [m], `voidage` (ε) porosité du lit [sans dimension],
-/// `particle_density` (ρ_p) [kg·m⁻³], `fluid_density` (ρ_f) [kg·m⁻³],
-/// `gravity` (g) [m·s⁻²].
+/// `bed_height` (H) `m`, `voidage` (ε) porosité du lit `sans dimension`,
+/// `particle_density` (ρ_p) `kg·m⁻³`, `fluid_density` (ρ_f) `kg·m⁻³`,
+/// `gravity` (g) `m·s⁻²`.
 ///
 /// Panique si `H < 0`, si `ε` hors de `[0, 1[`, si `ρ_f < 0`, si `ρ_p < ρ_f`
 /// (perte de charge négative non physique), ou si `g ≤ 0`.
@@ -123,9 +123,9 @@ pub fn fluidize_pressure_drop(
 /// **Stokes** (`Re ≪ 1`)
 /// `U_t = (ρ_p − ρ_f) · g · d_p² / (18 · μ)` (m·s⁻¹).
 ///
-/// `particle_diameter` (d_p) [m], `particle_density` (ρ_p) [kg·m⁻³],
-/// `fluid_density` (ρ_f) [kg·m⁻³], `fluid_viscosity` (μ) [Pa·s], `gravity` (g)
-/// [m·s⁻²].
+/// `particle_diameter` (d_p) `m`, `particle_density` (ρ_p) `kg·m⁻³`,
+/// `fluid_density` (ρ_f) `kg·m⁻³`, `fluid_viscosity` (μ) `Pa·s`, `gravity` (g)
+/// `m·s⁻²`.
 ///
 /// Panique si `d_p ≤ 0`, si `μ ≤ 0`, si `g ≤ 0`, si `ρ_f < 0`, ou si
 /// `ρ_p ≤ ρ_f` (la particule ne sédimente pas).
@@ -158,9 +158,9 @@ pub fn fluidize_terminal_velocity_stokes(
 /// de vitesses superficielles entre l'apparition de la fluidisation (`U_mf`) et
 /// l'entraînement des particules (`U_t`).
 ///
-/// `terminal_velocity` (U_t) vitesse terminale [m·s⁻¹],
+/// `terminal_velocity` (U_t) vitesse terminale `m·s⁻¹`,
 /// `minimum_fluidization_velocity` (U_mf) vitesse minimale de fluidisation
-/// [m·s⁻¹].
+/// `m·s⁻¹`.
 ///
 /// Panique si `U_t < 0` ou si `U_mf ≤ 0`.
 pub fn fluidize_ratio(terminal_velocity: f64, minimum_fluidization_velocity: f64) -> f64 {

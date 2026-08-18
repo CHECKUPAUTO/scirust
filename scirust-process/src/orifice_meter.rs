@@ -6,21 +6,21 @@
 //! rapport des diamètres (β)
 //!   β = d / D                                                    [sans dim.]
 //! débit massique (avec facteur d'approche E = 1/√(1 − β⁴))
-//!   ṁ = Cd / √(1 − β⁴) · A₀ · √(2·ρ·ΔP)                          [kg·s⁻¹]
+//!   ṁ = Cd / √(1 − β⁴) · A₀ · √(2·ρ·ΔP)                          `kg·s⁻¹`
 //! débit volumique
-//!   Q = ṁ / ρ                                                    [m³·s⁻¹]
+//!   Q = ṁ / ρ                                                    `m³·s⁻¹`
 //! perte de charge différentielle pour un débit visé
-//!   ΔP = [ ṁ·√(1 − β⁴) / (Cd·A₀) ]² / (2·ρ)                      [Pa]
+//!   ΔP = `ṁ·√(1 − β⁴) / (Cd·A₀)`² / (2·ρ)                      `Pa`
 //! fraction de perte de charge permanente (approchée)
 //!   ω = 1 − β²                                                   [sans dim.]
 //! ```
 //!
-//! `d` diamètre de l'orifice [m], `D` diamètre intérieur de la conduite [m],
-//! `β` rapport des diamètres [sans dimension, 0 < β < 1], `Cd` coefficient de
-//! décharge [sans dimension], `A₀` section de l'orifice [m²], `ρ` masse
-//! volumique du fluide [kg·m⁻³], `ΔP` pression différentielle mesurée aux prises
-//! [Pa], `ṁ` débit massique [kg·s⁻¹], `Q` débit volumique [m³·s⁻¹], `ω` fraction
-//! de la pression différentielle non récupérée en aval [sans dimension].
+//! `d` diamètre de l'orifice `m`, `D` diamètre intérieur de la conduite `m`,
+//! `β` rapport des diamètres `sans dimension, 0 < β < 1`, `Cd` coefficient de
+//! décharge `sans dimension`, `A₀` section de l'orifice `m²`, `ρ` masse
+//! volumique du fluide `kg·m⁻³`, `ΔP` pression différentielle mesurée aux prises
+//! `Pa`, `ṁ` débit massique `kg·s⁻¹`, `Q` débit volumique `m³·s⁻¹`, `ω` fraction
+//! de la pression différentielle non récupérée en aval `sans dimension`.
 //!
 //! **Limite honnête** : modèle à l'échelle des **opérations unitaires** pour un
 //! **liquide** (facteur de dilatation ε = 1), en écoulement **incompressible,
@@ -37,8 +37,8 @@
 /// Rapport des diamètres β d'un diaphragme
 /// `β = d / D`, orifice sur conduite (sans dimension).
 ///
-/// `orifice_diameter` (d) diamètre de l'orifice [m], `pipe_diameter` (D)
-/// diamètre intérieur de la conduite [m].
+/// `orifice_diameter` (d) diamètre de l'orifice `m`, `pipe_diameter` (D)
+/// diamètre intérieur de la conduite `m`.
 ///
 /// Panique si `d ≤ 0`, si `D ≤ 0`, ou si `d > D` (orifice plus large que la
 /// conduite, β physiquement impossible).
@@ -63,10 +63,10 @@ pub fn orif_beta_ratio(orifice_diameter: f64, pipe_diameter: f64) -> f64 {
 /// orifice pour un liquide (ε = 1), le terme `1/√(1 − β⁴)` étant le facteur
 /// d'approche de la vitesse.
 ///
-/// `discharge_coefficient` (Cd) coefficient de décharge FOURNI [sans dimension],
-/// `beta_ratio` (β) rapport des diamètres [sans dimension], `orifice_area` (A₀)
-/// section de l'orifice [m²], `density` (ρ) masse volumique FOURNIE [kg·m⁻³],
-/// `differential_pressure` (ΔP) pression différentielle mesurée [Pa].
+/// `discharge_coefficient` (Cd) coefficient de décharge FOURNI `sans dimension`,
+/// `beta_ratio` (β) rapport des diamètres `sans dimension`, `orifice_area` (A₀)
+/// section de l'orifice `m²`, `density` (ρ) masse volumique FOURNIE `kg·m⁻³`,
+/// `differential_pressure` (ΔP) pression différentielle mesurée `Pa`.
 ///
 /// Panique si `Cd ≤ 0`, si `β` hors de `[0, 1[`, si `A₀ ≤ 0`, si `ρ ≤ 0`, ou si
 /// `ΔP < 0`.
@@ -99,8 +99,8 @@ pub fn orif_mass_flow(
 /// Débit volumique à partir du débit massique
 /// `Q = ṁ / ρ` (m³·s⁻¹), conversion à masse volumique constante.
 ///
-/// `mass_flow` (ṁ) débit massique [kg·s⁻¹], `density` (ρ) masse volumique FOURNIE
-/// [kg·m⁻³].
+/// `mass_flow` (ṁ) débit massique `kg·s⁻¹`, `density` (ρ) masse volumique FOURNIE
+/// `kg·m⁻³`.
 ///
 /// Panique si `ρ ≤ 0`.
 pub fn orif_volumetric_flow(mass_flow: f64, density: f64) -> f64 {
@@ -109,13 +109,13 @@ pub fn orif_volumetric_flow(mass_flow: f64, density: f64) -> f64 {
 }
 
 /// Perte de charge différentielle pour un débit massique visé
-/// `ΔP = [ṁ·√(1 − β⁴)/(Cd·A₀)]² / (2·ρ)` (Pa), inversion de l'équation du
+/// `ΔP = `ṁ·√(1 − β⁴)/(Cd·A₀)`² / (2·ρ)` (Pa), inversion de l'équation du
 /// diaphragme (réciproque de [`orif_mass_flow`]).
 ///
-/// `mass_flow` (ṁ) débit massique visé [kg·s⁻¹], `discharge_coefficient` (Cd)
-/// coefficient de décharge FOURNI [sans dimension], `beta_ratio` (β) rapport des
-/// diamètres [sans dimension], `orifice_area` (A₀) section de l'orifice [m²],
-/// `density` (ρ) masse volumique FOURNIE [kg·m⁻³].
+/// `mass_flow` (ṁ) débit massique visé `kg·s⁻¹`, `discharge_coefficient` (Cd)
+/// coefficient de décharge FOURNI `sans dimension`, `beta_ratio` (β) rapport des
+/// diamètres `sans dimension`, `orifice_area` (A₀) section de l'orifice `m²`,
+/// `density` (ρ) masse volumique FOURNIE `kg·m⁻³`.
 ///
 /// Panique si `ṁ < 0`, si `Cd ≤ 0`, si `β` hors de `[0, 1[`, si `A₀ ≤ 0`, ou si
 /// `ρ ≤ 0`.
@@ -146,10 +146,10 @@ pub fn orif_differential_pressure(
 /// `ω = 1 − β²` (sans dimension), part de la pression différentielle non
 /// récupérée en aval du diaphragme.
 ///
-/// `beta_ratio` (β) rapport des diamètres [sans dimension] : plus β est petit
+/// `beta_ratio` (β) rapport des diamètres `sans dimension` : plus β est petit
 /// (orifice serré), plus ω tend vers 1 (perte quasi totale) ; ω → 0 quand β → 1.
 ///
-/// Panique si `β` hors de `[0, 1]`.
+/// Panique si `β` hors de ``0, 1``.
 pub fn orif_permanent_loss_fraction(beta_ratio: f64) -> f64 {
     assert!(
         (0.0..=1.0).contains(&beta_ratio),

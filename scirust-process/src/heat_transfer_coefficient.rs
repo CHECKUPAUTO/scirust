@@ -10,20 +10,20 @@
 //! Prandtl         Pr = cp · μ / k                                        [-]
 //! Dittus-Boelter  Nu = 0.023 · Re^0.8 · Pr^n   (n = 0.4 chauffage,
 //!                                               n = 0.3 refroidissement) [-]
-//! coeff. de film  h  = Nu · k / L                                 [W·m⁻²·K⁻¹]
-//! coeff. global   1/U = 1/h_i + R_w + 1/h_o  ⇒  U                 [W·m⁻²·K⁻¹]
+//! coeff. de film  h  = Nu · k / L                                 `W·m⁻²·K⁻¹`
+//! coeff. global   1/U = 1/h_i + R_w + 1/h_o  ⇒  U                 `W·m⁻²·K⁻¹`
 //! ```
 //!
-//! `Re` nombre de Reynolds [sans dimension], `ρ` masse volumique [kg·m⁻³], `u`
-//! vitesse débitante [m·s⁻¹], `L` longueur caractéristique (diamètre
-//! hydraulique en conduite) [m], `μ` viscosité dynamique [Pa·s = kg·m⁻¹·s⁻¹] ;
-//! `Pr` nombre de Prandtl [sans dimension], `cp` capacité thermique massique
-//! [J·kg⁻¹·K⁻¹], `k` conductivité thermique [W·m⁻¹·K⁻¹] ; `Nu` nombre de
-//! Nusselt [sans dimension], `n` exposant de Prandtl [sans dimension] ; `h`
-//! coefficient de transfert convectif de film [W·m⁻²·K⁻¹] ; `U` coefficient
-//! global de transfert [W·m⁻²·K⁻¹], `h_i`/`h_o` coefficients de film interne et
-//! externe [W·m⁻²·K⁻¹], `R_w` résistance thermique surfacique de la paroi
-//! [m²·K·W⁻¹]. Températures en K.
+//! `Re` nombre de Reynolds `sans dimension`, `ρ` masse volumique `kg·m⁻³`, `u`
+//! vitesse débitante `m·s⁻¹`, `L` longueur caractéristique (diamètre
+//! hydraulique en conduite) `m`, `μ` viscosité dynamique `Pa·s = kg·m⁻¹·s⁻¹` ;
+//! `Pr` nombre de Prandtl `sans dimension`, `cp` capacité thermique massique
+//! `J·kg⁻¹·K⁻¹`, `k` conductivité thermique `W·m⁻¹·K⁻¹` ; `Nu` nombre de
+//! Nusselt `sans dimension`, `n` exposant de Prandtl `sans dimension` ; `h`
+//! coefficient de transfert convectif de film `W·m⁻²·K⁻¹` ; `U` coefficient
+//! global de transfert `W·m⁻²·K⁻¹`, `h_i`/`h_o` coefficients de film interne et
+//! externe `W·m⁻²·K⁻¹`, `R_w` résistance thermique surfacique de la paroi
+//! `m²·K·W⁻¹`. Températures en K.
 //!
 //! **Limite honnête** : les **propriétés physiques** (`ρ`, `μ`, `k`, `cp`) sont
 //! **FOURNIES par l'appelant**, évaluées à la **température de film**, et ne
@@ -43,9 +43,9 @@
 /// Nombre de **Reynolds** `Re = ρ · u · L / μ` (sans dimension), rapport des
 /// forces d'inertie aux forces visqueuses.
 ///
-/// `density` (ρ) [kg·m⁻³] ; `velocity` (u) vitesse débitante [m·s⁻¹] ;
-/// `characteristic_length` (L) [m] ; `viscosity` (μ) viscosité dynamique
-/// [Pa·s].
+/// `density` (ρ) `kg·m⁻³` ; `velocity` (u) vitesse débitante `m·s⁻¹` ;
+/// `characteristic_length` (L) `m` ; `viscosity` (μ) viscosité dynamique
+/// `Pa·s`.
 ///
 /// Panique si `density < 0`, `characteristic_length < 0` ou `viscosity <= 0`.
 pub fn htc_reynolds(
@@ -66,8 +66,8 @@ pub fn htc_reynolds(
 /// Nombre de **Prandtl** `Pr = cp · μ / k` (sans dimension), rapport de la
 /// diffusivité de quantité de mouvement à la diffusivité thermique.
 ///
-/// `heat_capacity` (cp) [J·kg⁻¹·K⁻¹] ; `viscosity` (μ) [Pa·s] ;
-/// `thermal_conductivity` (k) [W·m⁻¹·K⁻¹].
+/// `heat_capacity` (cp) `J·kg⁻¹·K⁻¹` ; `viscosity` (μ) `Pa·s` ;
+/// `thermal_conductivity` (k) `W·m⁻¹·K⁻¹`.
 ///
 /// Panique si `heat_capacity < 0`, `viscosity < 0` ou
 /// `thermal_conductivity <= 0`.
@@ -106,7 +106,7 @@ pub fn htc_dittus_boelter(reynolds: f64, prandtl: f64, exponent: f64) -> f64 {
 /// (W·m⁻²·K⁻¹).
 ///
 /// `nusselt` (Nu) nombre adimensionnel ; `thermal_conductivity` (k)
-/// [W·m⁻¹·K⁻¹] ; `characteristic_length` (L) [m].
+/// `W·m⁻¹·K⁻¹` ; `characteristic_length` (L) `m`.
 ///
 /// Panique si `nusselt < 0`, `thermal_conductivity < 0` ou
 /// `characteristic_length <= 0`.
@@ -132,8 +132,8 @@ pub fn htc_coefficient_from_nusselt(
 /// `U = 1/(1/h_i + R_w + 1/h_o)` (W·m⁻²·K⁻¹).
 ///
 /// `inside_coefficient` (h_i) et `outside_coefficient` (h_o) coefficients de
-/// film interne et externe [W·m⁻²·K⁻¹] ; `wall_resistance` (R_w) résistance
-/// thermique surfacique de la paroi [m²·K·W⁻¹].
+/// film interne et externe `W·m⁻²·K⁻¹` ; `wall_resistance` (R_w) résistance
+/// thermique surfacique de la paroi `m²·K·W⁻¹`.
 ///
 /// Panique si `inside_coefficient <= 0`, `outside_coefficient <= 0` ou
 /// `wall_resistance < 0`.

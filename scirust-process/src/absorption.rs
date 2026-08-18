@@ -5,18 +5,18 @@
 //! ```text
 //! facteur d'absorption   A   = L / (m·G)                                   [-]
 //! Kremser (N étages)     φ_A = (A^(N+1) − A) / (A^(N+1) − 1)     (A ≠ 1)   [-]
-//! liquide minimal        Lₘ  = G·(y_in − y_out) / (y_in/m − x_in)         [mol·s⁻¹]
+//! liquide minimal        Lₘ  = G·(y_in − y_out) / (y_in/m − x_in)         `mol·s⁻¹`
 //! NTU dilué (colonne)    N_tOG = ln(y_in / y_out)                          [-]
 //! ```
 //!
-//! `A` facteur d'absorption [sans dimension], `L` débit molaire de liquide
-//! (solvant) [mol·s⁻¹], `G` débit molaire de gaz porteur [mol·s⁻¹], `m` pente
-//! de la droite d'équilibre y = m·x [sans dimension], `N` nombre d'étages
-//! théoriques [étages], `φ_A` fraction du soluté absorbée [sans dimension,
-//! 0 ≤ φ_A ≤ 1], `Lₘ` débit molaire de liquide minimal [mol·s⁻¹], `y_in`/`y_out`
+//! `A` facteur d'absorption `sans dimension`, `L` débit molaire de liquide
+//! (solvant) `mol·s⁻¹`, `G` débit molaire de gaz porteur `mol·s⁻¹`, `m` pente
+//! de la droite d'équilibre y = m·x `sans dimension`, `N` nombre d'étages
+//! théoriques `étages`, `φ_A` fraction du soluté absorbée `sans dimension`,
+//! 0 ≤ φ_A ≤ 1, `Lₘ` débit molaire de liquide minimal `mol·s⁻¹`, `y_in`/`y_out`
 //! fractions molaires du soluté dans le gaz à l'entrée/à la sortie [sans
 //! dimension], `x_in` fraction molaire du soluté dans le liquide entrant [sans
-//! dimension], `N_tOG` nombre d'unités de transfert côté gaz [sans dimension].
+//! dimension], `N_tOG` nombre d'unités de transfert côté gaz `sans dimension`.
 //!
 //! **Limite honnête** : ces relations valent pour une **absorption isotherme de
 //! solutions diluées**, avec une **droite d'équilibre de pente `m` constante
@@ -35,7 +35,7 @@
 /// Facteur d'absorption `A = L / (m·G)` (sans dimension).
 ///
 /// `liquid_flow` (L) et `gas_flow` (G) en mol·s⁻¹ ; `equilibrium_slope` (m)
-/// pente de la droite d'équilibre y = m·x [sans dimension].
+/// pente de la droite d'équilibre y = m·x `sans dimension`.
 ///
 /// Panique si `gas_flow <= 0`, `equilibrium_slope <= 0` ou `liquid_flow < 0`.
 pub fn absorp_factor(liquid_flow: f64, gas_flow: f64, equilibrium_slope: f64) -> f64 {
@@ -71,10 +71,10 @@ pub fn absorp_kremser_fraction_absorbed(absorption_factor: f64, theoretical_stag
 ///
 /// `gas_flow` (G) en mol·s⁻¹ ; `equilibrium_slope` (m) sans dimension ;
 /// `inlet_gas_fraction` (y_in), `outlet_gas_fraction` (y_out) et
-/// `inlet_liquid_fraction` (x_in) fractions molaires [sans dimension].
+/// `inlet_liquid_fraction` (x_in) fractions molaires `sans dimension`.
 ///
 /// Panique si `gas_flow <= 0`, `equilibrium_slope <= 0`, si les fractions ne
-/// sont pas dans `[0, 1]`, si `outlet_gas_fraction > inlet_gas_fraction`
+/// sont pas dans ``0, 1``, si `outlet_gas_fraction > inlet_gas_fraction`
 /// (absorption), ou si `y_in/m − x_in <= 0` (charge de liquide entrant
 /// infaisable, au-delà de l'équilibre).
 pub fn absorp_minimum_liquid_flow(
@@ -111,7 +111,7 @@ pub fn absorp_minimum_liquid_flow(
 /// pratiquement constante**.
 ///
 /// `inlet_fraction` (y_in) et `outlet_fraction` (y_out) fractions molaires du
-/// soluté dans le gaz à l'entrée/à la sortie [sans dimension].
+/// soluté dans le gaz à l'entrée/à la sortie `sans dimension`.
 ///
 /// Panique si `inlet_fraction <= 0` ou `outlet_fraction <= 0`.
 pub fn absorp_ntu_dilute(inlet_fraction: f64, outlet_fraction: f64) -> f64 {

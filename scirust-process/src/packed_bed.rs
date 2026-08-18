@@ -5,20 +5,20 @@
 //! ```text
 //! équation d'Ergun (gradient de pression)
 //!   dP/L = 150 · (1 − ε)² · μ · U / (ε³ · d_p²)
-//!        + 1.75 · (1 − ε) · ρ · U² / (ε³ · d_p)                  [Pa·m⁻¹]
+//!        + 1.75 · (1 − ε) · ρ · U² / (ε³ · d_p)                  `Pa·m⁻¹`
 //! terme visqueux seul (Kozeny-Carman)
-//!   (dP/L)_visq = 150 · (1 − ε)² · μ · U / (ε³ · d_p²)           [Pa·m⁻¹]
+//!   (dP/L)_visq = 150 · (1 − ε)² · μ · U / (ε³ · d_p²)           `Pa·m⁻¹`
 //! terme inertiel seul (Burke-Plummer)
-//!   (dP/L)_inert = 1.75 · (1 − ε) · ρ · U² / (ε³ · d_p)          [Pa·m⁻¹]
+//!   (dP/L)_inert = 1.75 · (1 − ε) · ρ · U² / (ε³ · d_p)          `Pa·m⁻¹`
 //! perte de charge sur la hauteur
-//!   ΔP = (dP/L) · L                                              [Pa]
+//!   ΔP = (dP/L) · L                                              `Pa`
 //! ```
 //!
-//! `ε` porosité (fraction de vide) du lit [sans dimension, 0 < ε < 1], `μ`
-//! viscosité dynamique du fluide [Pa·s], `U` vitesse **superficielle** (en fût
-//! vide) [m·s⁻¹], `d_p` diamètre de particule [m], `ρ` masse volumique du fluide
-//! [kg·m⁻³], `L` hauteur (épaisseur) du lit [m] ; `dP/L` gradient de pression
-//! [Pa·m⁻¹] ; `ΔP` perte de charge à travers le lit [Pa].
+//! `ε` porosité (fraction de vide) du lit `sans dimension, 0 < ε < 1`, `μ`
+//! viscosité dynamique du fluide `Pa·s`, `U` vitesse **superficielle** (en fût
+//! vide) `m·s⁻¹`, `d_p` diamètre de particule `m`, `ρ` masse volumique du fluide
+//! `kg·m⁻³`, `L` hauteur (épaisseur) du lit `m` ; `dP/L` gradient de pression
+//! `Pa·m⁻¹` ; `ΔP` perte de charge à travers le lit `Pa`.
 //!
 //! **Limite honnête** : modèle à l'échelle des **opérations unitaires**, valable
 //! pour un lit de particules approximativement **sphériques et uniformes**. La
@@ -34,9 +34,9 @@
 /// `dP/L = 150·(1 − ε)²·μ·U/(ε³·d_p²) + 1.75·(1 − ε)·ρ·U²/(ε³·d_p)` (Pa·m⁻¹),
 /// somme du terme visqueux (Kozeny-Carman) et du terme inertiel (Burke-Plummer).
 ///
-/// `voidage` (ε) porosité du lit [sans dimension], `fluid_viscosity` (μ) [Pa·s],
-/// `superficial_velocity` (U) vitesse superficielle [m·s⁻¹], `particle_diameter`
-/// (d_p) [m], `fluid_density` (ρ) [kg·m⁻³].
+/// `voidage` (ε) porosité du lit `sans dimension`, `fluid_viscosity` (μ) `Pa·s`,
+/// `superficial_velocity` (U) vitesse superficielle `m·s⁻¹`, `particle_diameter`
+/// (d_p) `m`, `fluid_density` (ρ) `kg·m⁻³`.
 ///
 /// Panique si `ε` hors de `]0, 1[`, si `μ < 0`, si `U < 0`, si `d_p ≤ 0`, ou si
 /// `ρ < 0`.
@@ -74,9 +74,9 @@ pub fn packedbed_ergun_pressure_gradient(
 /// `(dP/L)_visq = 150·(1 − ε)²·μ·U/(ε³·d_p²)` (Pa·m⁻¹), dominant en écoulement
 /// rampant (faible nombre de Reynolds de particule).
 ///
-/// `voidage` (ε) porosité du lit [sans dimension], `fluid_viscosity` (μ) [Pa·s],
-/// `superficial_velocity` (U) vitesse superficielle [m·s⁻¹], `particle_diameter`
-/// (d_p) [m].
+/// `voidage` (ε) porosité du lit `sans dimension`, `fluid_viscosity` (μ) `Pa·s`,
+/// `superficial_velocity` (U) vitesse superficielle `m·s⁻¹`, `particle_diameter`
+/// (d_p) `m`.
 ///
 /// Panique si `ε` hors de `]0, 1[`, si `μ < 0`, si `U < 0`, ou si `d_p ≤ 0`.
 pub fn packedbed_kozeny_carman_gradient(
@@ -106,9 +106,9 @@ pub fn packedbed_kozeny_carman_gradient(
 /// `(dP/L)_inert = 1.75·(1 − ε)·ρ·U²/(ε³·d_p)` (Pa·m⁻¹), dominant en écoulement
 /// turbulent (grand nombre de Reynolds de particule).
 ///
-/// `voidage` (ε) porosité du lit [sans dimension], `superficial_velocity` (U)
-/// vitesse superficielle [m·s⁻¹], `particle_diameter` (d_p) [m], `fluid_density`
-/// (ρ) [kg·m⁻³].
+/// `voidage` (ε) porosité du lit `sans dimension`, `superficial_velocity` (U)
+/// vitesse superficielle `m·s⁻¹`, `particle_diameter` (d_p) `m`, `fluid_density`
+/// (ρ) `kg·m⁻³`.
 ///
 /// Panique si `ε` hors de `]0, 1[`, si `U < 0`, si `d_p ≤ 0`, ou si `ρ < 0`.
 pub fn packedbed_burke_plummer_gradient(
@@ -140,8 +140,8 @@ pub fn packedbed_burke_plummer_gradient(
 /// Perte de charge à travers le lit `ΔP = (dP/L)·L` (Pa), gradient de pression
 /// intégré sur la hauteur du lit (gradient supposé uniforme).
 ///
-/// `pressure_gradient` (dP/L) gradient de pression [Pa·m⁻¹], `bed_height` (L)
-/// hauteur du lit [m].
+/// `pressure_gradient` (dP/L) gradient de pression `Pa·m⁻¹`, `bed_height` (L)
+/// hauteur du lit `m`.
 ///
 /// Panique si `dP/L < 0` ou si `L < 0`.
 pub fn packedbed_pressure_drop(pressure_gradient: f64, bed_height: f64) -> f64 {

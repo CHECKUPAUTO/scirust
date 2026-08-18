@@ -15,7 +15,7 @@
 //! 3. `Q` = base orthonormée de `Y` (QR de Householder déjà présent dans ce
 //!    module).
 //! 4. `B = Qᵀ·A` (l × n, petite) ; SVD exacte de `B` via
-//!    [`crate::linalg::svd`] (Jacobi à un côté, déjà déterministe).
+//!    [`crate::linalg::svd()`] (Jacobi à un côté, déjà déterministe).
 //! 5. `U = Q·U_B`, tronqué aux `k` premières colonnes (déjà triées par
 //!    valeur singulière décroissante).
 //!

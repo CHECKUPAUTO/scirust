@@ -4,21 +4,21 @@
 //!
 //! ```text
 //! vitesse spatiale (inverse du temps de passage)
-//!   SV = Q_in / V_r                                         [s⁻¹]
+//!   SV = Q_in / V_r                                         `s⁻¹`
 //! temps de passage (temps spatial)
-//!   τ  = V_r / Q_in                                         [s]
+//!   τ  = V_r / Q_in                                         `s`
 //! vitesse spatiale horaire gazeuse (Gas Hourly Space Velocity)
 //!   GHSV = Q_gaz,STP / V_cat                                [h⁻¹] (si Q en m³·h⁻¹)
 //! vitesse spatiale horaire massique (Weight Hourly Space Velocity)
 //!   WHSV = ṁ_in / m_cat                                     [h⁻¹] (si ṁ en kg·h⁻¹)
 //! ```
 //!
-//! `Q_in` débit volumique **d'entrée** de l'alimentation [m³·s⁻¹], `V_r` volume
-//! du réacteur [m³], `SV` vitesse spatiale [s⁻¹], `τ` temps de passage [s] ;
+//! `Q_in` débit volumique **d'entrée** de l'alimentation `m³·s⁻¹`, `V_r` volume
+//! du réacteur `m³`, `SV` vitesse spatiale `s⁻¹`, `τ` temps de passage `s` ;
 //! `Q_gaz,STP` débit volumique de gaz ramené aux **conditions normales** (STP)
-//! [m³·h⁻¹], `V_cat` volume de catalyseur (ou du lit) [m³], `GHSV` [h⁻¹] ;
-//! `ṁ_in` débit **massique** d'alimentation [kg·h⁻¹], `m_cat` masse de
-//! catalyseur [kg], `WHSV` [h⁻¹].
+//! `m³·h⁻¹`, `V_cat` volume de catalyseur (ou du lit) `m³`, `GHSV` [h⁻¹] ;
+//! `ṁ_in` débit **massique** d'alimentation `kg·h⁻¹`, `m_cat` masse de
+//! catalyseur `kg`, `WHSV` [h⁻¹].
 //!
 //! **Limite honnête** : la vitesse spatiale est simplement l'**inverse du temps
 //! de passage** ; elle est bâtie sur le **débit d'ENTRÉE** aux conditions
@@ -33,8 +33,8 @@
 
 /// Vitesse spatiale `SV = Q_in / V_r` (s⁻¹), inverse du temps de passage.
 ///
-/// `volumetric_feed_rate` (Q_in) débit volumique d'entrée [m³·s⁻¹],
-/// `reactor_volume` (V_r) volume du réacteur [m³].
+/// `volumetric_feed_rate` (Q_in) débit volumique d'entrée `m³·s⁻¹`,
+/// `reactor_volume` (V_r) volume du réacteur `m³`.
 ///
 /// Panique si `Q_in < 0` ou si `V_r ≤ 0`.
 pub fn rsv_space_velocity(volumetric_feed_rate: f64, reactor_volume: f64) -> f64 {
@@ -48,8 +48,8 @@ pub fn rsv_space_velocity(volumetric_feed_rate: f64, reactor_volume: f64) -> f64
 
 /// Temps de passage `τ = V_r / Q_in` (s), inverse de la vitesse spatiale.
 ///
-/// `reactor_volume` (V_r) volume du réacteur [m³], `volumetric_feed_rate` (Q_in)
-/// débit volumique d'entrée [m³·s⁻¹].
+/// `reactor_volume` (V_r) volume du réacteur `m³`, `volumetric_feed_rate` (Q_in)
+/// débit volumique d'entrée `m³·s⁻¹`.
 ///
 /// Panique si `V_r < 0` ou si `Q_in ≤ 0`.
 pub fn rsv_space_time(reactor_volume: f64, volumetric_feed_rate: f64) -> f64 {
@@ -65,7 +65,7 @@ pub fn rsv_space_time(reactor_volume: f64, volumetric_feed_rate: f64) -> f64 {
 /// est exprimé en m³·h⁻¹), débit gazeux ramené aux conditions normales (STP).
 ///
 /// `gas_volumetric_flow_stp` (Q_gaz,STP) débit volumique de gaz aux conditions
-/// normales [m³·h⁻¹], `catalyst_volume` (V_cat) volume de catalyseur [m³].
+/// normales `m³·h⁻¹`, `catalyst_volume` (V_cat) volume de catalyseur `m³`.
 ///
 /// Panique si `Q_gaz,STP < 0` ou si `V_cat ≤ 0`.
 pub fn rsv_ghsv(gas_volumetric_flow_stp: f64, catalyst_volume: f64) -> f64 {
@@ -84,8 +84,8 @@ pub fn rsv_ghsv(gas_volumetric_flow_stp: f64, catalyst_volume: f64) -> f64 {
 /// exprimé en kg·h⁻¹), rapport du débit massique d'alimentation à la masse de
 /// catalyseur.
 ///
-/// `mass_feed_rate` (ṁ_in) débit massique d'alimentation [kg·h⁻¹],
-/// `catalyst_mass` (m_cat) masse de catalyseur [kg].
+/// `mass_feed_rate` (ṁ_in) débit massique d'alimentation `kg·h⁻¹`,
+/// `catalyst_mass` (m_cat) masse de catalyseur `kg`.
 ///
 /// Panique si `ṁ_in < 0` ou si `m_cat ≤ 0`.
 pub fn rsv_whsv(mass_feed_rate: f64, catalyst_mass: f64) -> f64 {
