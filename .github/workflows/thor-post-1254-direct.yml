@@ -1,0 +1,162 @@
+name: Thor post-1254 direct validation
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - ".github/workflows/thor-post-1254-direct.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: thor-post-1254-direct-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: "-D warnings"
+  SCIRUST_THOR_GPU_LOCK: /dev/nvidia0
+  VALIDATED_REVISION: ab2dc17c0ef185a85e1388682dba994e66627c88
+
+jobs:
+  i250:
+    name: Direct Thor I250 CUDA validation
+    runs-on: [self-hosted]
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ env.VALIDATED_REVISION }}
+      - name: Require our physical Thor runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$RUNNER_NAME" in
+            tarek-scirust-arm64-01|tarek-scirust-arm64-02|tarek-scirust-arm64-03|tarek-scirust-arm64-04) ;;
+            *) echo "::error::refusing non-Thor runner $RUNNER_NAME"; exit 1 ;;
+          esac
+          test "$(git rev-parse HEAD)" = "$VALIDATED_REVISION"
+          test -c "$SCIRUST_THOR_GPU_LOCK"
+          nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader | tee /tmp/thor-gpu.txt
+          grep -F "NVIDIA Thor" /tmp/thor-gpu.txt
+      - name: Prepare isolated build directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmpdir="$(mktemp -d "$GITHUB_WORKSPACE/.ci-direct.XXXXXX")"
+          chmod 700 "$tmpdir"
+          mkdir -p "$tmpdir/cargo-home" "$tmpdir/rustup-home" "$tmpdir/target"
+          echo "TMPDIR=$tmpdir" >> "$GITHUB_ENV"
+          echo "CARGO_HOME=$tmpdir/cargo-home" >> "$GITHUB_ENV"
+          echo "RUSTUP_HOME=$tmpdir/rustup-home" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_DIR=$tmpdir/target" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt, clippy
+      - name: I250 parity, lint and benchmark on Thor
+        shell: bash
+        env:
+          SCIAGENT_DECODE_PROMPT: "128"
+          SCIAGENT_DECODE_NEW: "64"
+          SCIAGENT_DECODE_TARGET_TPS: "250"
+        run: |
+          set -euo pipefail
+          command -v flock >/dev/null
+          exec 9<>"$SCIRUST_THOR_GPU_LOCK"
+          flock -x 9
+          active="$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null)"
+          if [[ -n "${active//[[:space:]]/}" ]]; then
+            echo "::error::Thor must be idle before I250 validation"
+            printf '%s\n' "$active"
+            exit 1
+          fi
+          rustup run nightly-2026-07-02 cargo fmt --all -- --check
+          rustup run nightly-2026-07-02 cargo test -p scirust-sciagent --features cuda --test cuda_required -- --nocapture
+          rustup run nightly-2026-07-02 cargo test -p scirust-gpu --features cuda --test cuda_hardware_capabilities -- --nocapture
+          rustup run nightly-2026-07-02 cargo test -p scirust-sciagent --features cuda --test cuda_parity -- --nocapture
+          rustup run nightly-2026-07-02 cargo test -p scirust-sciagent --features cuda --test cuda_decode_parity -- --nocapture
+          rustup run nightly-2026-07-02 cargo clippy -p scirust-sciagent --features cuda --all-targets -- -D warnings
+          rustup run nightly-2026-07-02 cargo run -p scirust-sciagent --features cuda --release --example cuda_decode_bench
+
+  m33:
+    name: Direct Thor FLAT M33 validation
+    needs: i250
+    runs-on: [self-hosted]
+    timeout-minutes: 360
+    env:
+      WGPU_BACKEND: vulkan
+      SCIAGENT_FLAT_M33_PROMPT: "64"
+      SCIAGENT_FLAT_M33_NEW: "16"
+      SCIAGENT_FLAT_M33_WARMUPS: "2"
+      SCIAGENT_FLAT_M33_REPEATS: "5"
+      SCIAGENT_FLAT_M33_D_MODEL: "512"
+      SCIAGENT_FLAT_M33_LAYERS: "8"
+      SCIAGENT_FLAT_M33_Q_HEADS: "8"
+      SCIAGENT_FLAT_M33_KV_HEADS: "2"
+      SCIAGENT_FLAT_M33_D_FF: "1408"
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ env.VALIDATED_REVISION }}
+      - name: Require our physical Thor runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$RUNNER_NAME" in
+            tarek-scirust-arm64-01|tarek-scirust-arm64-02|tarek-scirust-arm64-03|tarek-scirust-arm64-04) ;;
+            *) echo "::error::refusing non-Thor runner $RUNNER_NAME"; exit 1 ;;
+          esac
+          test "$(git rev-parse HEAD)" = "$VALIDATED_REVISION"
+          test -c "$SCIRUST_THOR_GPU_LOCK"
+          nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader | grep -F "NVIDIA Thor"
+          vulkaninfo --summary | grep -F "NVIDIA Tegra NVIDIA Thor"
+      - name: Prepare isolated build directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmpdir="$(mktemp -d "$GITHUB_WORKSPACE/.ci-direct-m33.XXXXXX")"
+          chmod 700 "$tmpdir"
+          mkdir -p "$tmpdir/cargo-home" "$tmpdir/rustup-home" "$tmpdir/target"
+          echo "TMPDIR=$tmpdir" >> "$GITHUB_ENV"
+          echo "CARGO_HOME=$tmpdir/cargo-home" >> "$GITHUB_ENV"
+          echo "RUSTUP_HOME=$tmpdir/rustup-home" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_DIR=$tmpdir/target" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt, clippy
+      - name: Build M33 qualification binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup run nightly-2026-07-02 cargo test -p scirust-sciagent --features flat-attention --test flat_m33_lifecycle --locked --no-run
+          rustup run nightly-2026-07-02 cargo test -p scirust-sciagent --features flat-attention --test flat_runtime_decode --locked --no-run
+          rustup run nightly-2026-07-02 cargo build -p scirust-sciagent --features flat-attention --release --locked --example flat_m33_thor_bench
+      - name: M33 parity and benchmark on an idle Thor
+        shell: bash
+        run: |
+          set -euo pipefail
+          exec 9<>"$SCIRUST_THOR_GPU_LOCK"
+          flock -x 9
+          wait_idle_300() {
+            local ok=0
+            while (( ok < 300 )); do
+              active="$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null)"
+              if [[ -n "${active//[[:space:]]/}" ]]; then
+                ok=0
+              else
+                ok=$((ok + 5))
+              fi
+              sleep 5
+            done
+          }
+          wait_idle_300
+          rustup run nightly-2026-07-02 cargo test -p scirust-sciagent --features flat-attention --test flat_m33_lifecycle --locked -- --nocapture
+          rustup run nightly-2026-07-02 cargo test -p scirust-sciagent --features flat-attention --test flat_runtime_decode --locked -- --nocapture
+          wait_idle_300
+          "$CARGO_TARGET_DIR/release/examples/flat_m33_thor_bench" | tee "$RUNNER_TEMP/flat-m33-thor-direct.csv"
+          test "$(wc -l < "$RUNNER_TEMP/flat-m33-thor-direct.csv")" -ge 2
+          grep -F ',none' "$RUNNER_TEMP/flat-m33-thor-direct.csv"
