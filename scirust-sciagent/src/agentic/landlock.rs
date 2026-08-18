@@ -14,21 +14,31 @@
 //! modes still fail closed if neither backend can enforce its rung.
 
 use super::tools::Tool;
+#[cfg(target_os = "linux")]
 use command_group::{CommandGroup, GroupChild};
 use std::collections::HashMap;
 use std::ffi::OsString;
+#[cfg(target_os = "linux")]
 use std::io::Read;
 use std::path::{Path, PathBuf};
+#[cfg(target_os = "linux")]
 use std::process::{Command, ExitStatus, Stdio};
+#[cfg(target_os = "linux")]
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(target_os = "linux")]
+use std::time::Instant;
 
+#[cfg(target_os = "linux")]
 const MAX_TOOL_OUTPUT_BYTES: usize = 64 * 1024;
 const TOOL_TIMEOUT: Duration = Duration::from_secs(30);
+#[cfg(target_os = "linux")]
 const REAP_GRACE: Duration = Duration::from_secs(2);
+#[cfg(target_os = "linux")]
 const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const SANDBOX_UNAVAILABLE: &str = "SANDBOX_UNAVAILABLE";
 const MIN_LANDLOCK_ABI: i32 = 3;
+#[cfg(target_os = "linux")]
 const SECRET_ENV_VARS: &[&str] = &[
     "SCIRUST_DISCOVERY_KEY",
     "SCIRUST_EXCHANGE_SECRET",
@@ -112,7 +122,11 @@ fn should_use_landlock_fallback() -> bool {
     {
         return false;
     };
-    fallback_policy(mode, bubblewrap_is_executable(), landlock_abi())
+    if !mode.confined() || !cfg!(target_os = "linux") || bubblewrap_is_executable()
+    {
+        return false;
+    }
+    landlock_abi().is_some_and(|abi| abi >= MIN_LANDLOCK_ABI)
 }
 
 fn fallback_policy(mode: SandboxMode, bwrap_executable: bool, abi: Option<i32>) -> bool {
@@ -363,11 +377,13 @@ struct LimitedOutput {
     stderr: Vec<u8>,
 }
 
+#[cfg(target_os = "linux")]
 struct PipeDrain {
     bytes: Arc<Mutex<Vec<u8>>>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
+#[cfg(target_os = "linux")]
 impl PipeDrain {
     fn is_finished(&self) -> bool {
         self.thread
@@ -391,6 +407,7 @@ impl PipeDrain {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn drain_pipe<R: Read + Send + 'static>(mut pipe: R) -> PipeDrain {
     let bytes = Arc::new(Mutex::new(Vec::new()));
     let captured = Arc::clone(&bytes);
@@ -415,6 +432,7 @@ fn drain_pipe<R: Read + Send + 'static>(mut pipe: R) -> PipeDrain {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn spawn_process_group(command: &mut Command) -> std::io::Result<GroupChild> {
     #[cfg(windows)]
     {
@@ -426,6 +444,7 @@ fn spawn_process_group(command: &mut Command) -> std::io::Result<GroupChild> {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn defer_group_cleanup(child: GroupChild, stdout: PipeDrain, stderr: PipeDrain) {
     std::thread::spawn(move || {
         #[cfg(windows)]
@@ -451,6 +470,7 @@ fn defer_group_cleanup(child: GroupChild, stdout: PipeDrain, stderr: PipeDrain) 
     });
 }
 
+#[cfg(target_os = "linux")]
 fn terminate_and_reap(
     mut child: GroupChild,
     stdout: PipeDrain,
