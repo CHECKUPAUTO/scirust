@@ -42,13 +42,14 @@ jobs:
 
           def unit_like(text: str) -> bool:
               t = text.strip()
-              low = t.lower()
-              if t in simple_units or low in prose_labels or low.startswith('sans dimension,'):
+              plain = t.strip('*_`').strip()
+              low = plain.lower()
+              if plain in simple_units or low in prose_labels or low.startswith('sans dimension,'):
                   return True
-              if re.fullmatch(r'[+−-]?\d+(?:[.,]\d+)?\s*(?:[,;:]\s*[+−-]?\d+(?:[.,]\d+)?)?', t):
+              if re.fullmatch(r'[+−-]?\d+(?:[.,]\d+)?\s*(?:[,;:]\s*[+−-]?\d+(?:[.,]\d+)?)?', plain):
                   return True
-              if any(ch in t for ch in ('·', '⁻', '⁺', '²', '³', '⁴', '°', 'µ', 'μ', '/')):
-                  return len(t) <= 64 and any(tok in t for tok in unit_tokens)
+              if any(ch in plain for ch in ('·', '⁻', '⁺', '²', '³', '⁴', '°', 'µ', 'μ', '/')):
+                  return len(plain) <= 64 and any(tok in plain for tok in unit_tokens)
               return False
 
           def fix_multiline_dimensionless(text: str) -> str:
