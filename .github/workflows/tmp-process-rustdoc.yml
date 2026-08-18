@@ -41,7 +41,7 @@ jobs:
 
           def unit_like(text: str) -> bool:
               t = text.strip()
-              if t in simple_units or t.lower() in {'sans dimension', 'dimensionless'}:
+              if t in simple_units or t.lower() in {'sans dimension', 'dimensionless', 'étages'}:
                   return True
               if re.fullmatch(r'[+−-]?\d+(?:[.,]\d+)?\s*(?:[,;:]\s*[+−-]?\d+(?:[.,]\d+)?)?', t):
                   return True
@@ -58,8 +58,7 @@ jobs:
                   stripped = line.lstrip()
                   if stripped.startswith('///') or stripped.startswith('//!'):
                       def repl(match):
-                          nonlocal_marker = unit_like(match.group(1))
-                          return f'`{match.group(1).strip()}`' if nonlocal_marker else match.group(0)
+                          return f'`{match.group(1).strip()}`' if unit_like(match.group(1)) else match.group(0)
                       new_line = bracket.sub(repl, line)
                       if new_line != line:
                           touched = True
