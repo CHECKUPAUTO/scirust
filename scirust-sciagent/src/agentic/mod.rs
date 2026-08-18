@@ -1,6 +1,10 @@
 pub mod guard;
+pub mod tool_runtime;
 pub mod tools;
 pub use guard::{ConformalGuard, GuardVerdict};
+pub use tool_runtime::{
+    AllowAllPolicy, ToolCall, ToolPolicy, ToolRuntime, ToolRuntimeError,
+};
 pub use tools::Tool;
 pub use tools::ToolResult;
 
@@ -25,7 +29,7 @@ pub struct AgentTurn {
 }
 
 pub struct AgentRouter {
-    tools: Vec<Tool>,
+    runtime: ToolRuntime,
 }
 
 impl Default for AgentRouter {
@@ -37,7 +41,7 @@ impl Default for AgentRouter {
 impl AgentRouter {
     pub fn new() -> Self {
         Self {
-            tools: Tool::builtins(),
+            runtime: ToolRuntime::builtins(),
         }
     }
 
@@ -75,7 +79,7 @@ impl AgentRouter {
             })
             .unwrap_or_default();
 
-        if self.tools.iter().any(|t| t.name == name)
+        if self.runtime.has_tool(name)
         {
             Some(AgentAction::Call {
                 tool: name.to_string(),
@@ -91,17 +95,10 @@ impl AgentRouter {
     pub fn execute(&self, action: &AgentAction) -> String {
         match action
         {
-            AgentAction::Call { tool, params } =>
-            {
-                for t in &self.tools
-                {
-                    if t.name == *tool
-                    {
-                        return (t.execute)(params.clone());
-                    }
-                }
-                format!("Unknown tool: {tool}")
-            },
+            AgentAction::Call { tool, params } => self
+                .runtime
+                .execute_named(tool, params.clone())
+                .unwrap_or_else(|error| error.to_string()),
             AgentAction::Respond { text } => text.clone(),
             AgentAction::Abstain => "I abstain — confidence below threshold.".to_string(),
         }
@@ -231,5 +228,16 @@ mod tests {
             result.contains("NdMuon"),
             "Search should find NdMuon, got: {result}"
         );
+    }
+
+    #[test]
+    fn router_enforces_required_tool_parameters() {
+        let router = AgentRouter::new();
+        let action = AgentAction::Call {
+            tool: "search".to_string(),
+            params: HashMap::new(),
+        };
+        let result = router.execute(&action);
+        assert!(result.contains("Missing required parameter"), "{result}");
     }
 }
