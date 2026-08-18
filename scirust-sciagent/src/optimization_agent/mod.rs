@@ -35,7 +35,8 @@ pub enum OptimizationBackend {
 
 impl fmt::Display for OptimizationBackend {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let text = match self {
+        let text = match self
+        {
             Self::Cpu => "cpu",
             Self::Simd => "simd",
             Self::Sve => "sve",
@@ -59,12 +60,14 @@ pub struct CommandSpec {
 
 impl CommandSpec {
     fn validate(&self, name: &str) -> Result<(), OptimizationError> {
-        if self.program.trim().is_empty() {
+        if self.program.trim().is_empty()
+        {
             return Err(OptimizationError::InvalidTask(format!(
                 "{name}.program must not be empty"
             )));
         }
-        if self.timeout_secs == Some(0) {
+        if self.timeout_secs == Some(0)
+        {
             return Err(OptimizationError::InvalidTask(format!(
                 "{name}.timeout_secs must be greater than zero"
             )));
@@ -153,17 +156,20 @@ impl OptimizationTask {
                 "id must contain only ASCII letters, digits, '-' or '_'".to_string(),
             ));
         }
-        if self.goal.trim().is_empty() {
+        if self.goal.trim().is_empty()
+        {
             return Err(OptimizationError::InvalidTask(
                 "goal must not be empty".to_string(),
             ));
         }
-        if self.crate_name.trim().is_empty() {
+        if self.crate_name.trim().is_empty()
+        {
             return Err(OptimizationError::InvalidTask(
                 "crate_name must not be empty".to_string(),
             ));
         }
-        if self.allowed_paths.is_empty() {
+        if self.allowed_paths.is_empty()
+        {
             return Err(OptimizationError::InvalidTask(
                 "allowed_paths must name at least one path".to_string(),
             ));
@@ -174,16 +180,17 @@ impl OptimizationTask {
             .any(|path| path.is_empty() || Path::new(path).is_absolute() || path.contains(".."))
         {
             return Err(OptimizationError::InvalidTask(
-                "allowed_paths must be non-empty workspace-relative paths without '..'"
-                    .to_string(),
+                "allowed_paths must be non-empty workspace-relative paths without '..'".to_string(),
             ));
         }
-        if self.budget.max_iterations == 0 {
+        if self.budget.max_iterations == 0
+        {
             return Err(OptimizationError::InvalidTask(
                 "budget.max_iterations must be greater than zero".to_string(),
             ));
         }
-        if !self.budget.min_speedup.is_finite() || self.budget.min_speedup < 1.0 {
+        if !self.budget.min_speedup.is_finite() || self.budget.min_speedup < 1.0
+        {
             return Err(OptimizationError::InvalidTask(
                 "budget.min_speedup must be finite and >= 1.0".to_string(),
             ));
@@ -191,14 +198,17 @@ impl OptimizationTask {
         for (name, value) in [
             ("max_abs_error", self.budget.max_abs_error),
             ("max_rel_error", self.budget.max_rel_error),
-        ] {
-            if !value.is_finite() || value < 0.0 {
+        ]
+        {
+            if !value.is_finite() || value < 0.0
+            {
                 return Err(OptimizationError::InvalidTask(format!(
                     "budget.{name} must be finite and >= 0"
                 )));
             }
         }
-        if self.budget.command_timeout_secs == 0 {
+        if self.budget.command_timeout_secs == 0
+        {
             return Err(OptimizationError::InvalidTask(
                 "budget.command_timeout_secs must be greater than zero".to_string(),
             ));
@@ -209,10 +219,12 @@ impl OptimizationTask {
         self.commands.compile.validate("commands.compile")?;
         self.commands.verify.validate("commands.verify")?;
         self.commands.benchmark.validate("commands.benchmark")?;
-        if let Some(command) = &self.commands.profile {
+        if let Some(command) = &self.commands.profile
+        {
             command.validate("commands.profile")?;
         }
-        if let Some(command) = &self.commands.rewrite {
+        if let Some(command) = &self.commands.rewrite
+        {
             command.validate("commands.rewrite")?;
         }
         Ok(())
@@ -226,7 +238,8 @@ pub struct TimingMeasurement {
 
 impl TimingMeasurement {
     fn validate(&self, label: &str) -> Result<(), OptimizationError> {
-        if !self.median_ns.is_finite() || self.median_ns <= 0.0 {
+        if !self.median_ns.is_finite() || self.median_ns <= 0.0
+        {
             return Err(OptimizationError::InvalidMetrics(format!(
                 "{label}.median_ns must be finite and > 0"
             )));
@@ -251,9 +264,12 @@ impl VerificationMeasurement {
         for (name, value) in [
             ("max_abs_error", self.max_abs_error),
             ("max_rel_error", self.max_rel_error),
-        ] {
-            if let Some(value) = value {
-                if !value.is_finite() || value < 0.0 {
+        ]
+        {
+            if let Some(value) = value
+            {
+                if !value.is_finite() || value < 0.0
+                {
                     return Err(OptimizationError::InvalidMetrics(format!(
                         "verification.{name} must be finite and >= 0"
                     )));
@@ -315,32 +331,55 @@ struct OptimizationContext {
 #[derive(Debug)]
 pub enum OptimizationError {
     InvalidTask(String),
-    Io { path: PathBuf, source: std::io::Error },
-    Json { path: PathBuf, source: serde_json::Error },
-    CommandSpawn { stage: String, source: std::io::Error },
-    CommandPoll { stage: String, source: std::io::Error },
-    CommandFailed { stage: String, code: Option<i32> },
-    CommandTimedOut { stage: String, timeout_secs: u64 },
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    Json {
+        path: PathBuf,
+        source: serde_json::Error,
+    },
+    CommandSpawn {
+        stage: String,
+        source: std::io::Error,
+    },
+    CommandPoll {
+        stage: String,
+        source: std::io::Error,
+    },
+    CommandFailed {
+        stage: String,
+        code: Option<i32>,
+    },
+    CommandTimedOut {
+        stage: String,
+        timeout_secs: u64,
+    },
     InvalidMetrics(String),
 }
 
 impl fmt::Display for OptimizationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self
+        {
             Self::InvalidTask(message) => write!(f, "invalid optimization task: {message}"),
             Self::Io { path, source } => write!(f, "I/O error at {}: {source}", path.display()),
-            Self::Json { path, source } => {
+            Self::Json { path, source } =>
+            {
                 write!(f, "invalid JSON at {}: {source}", path.display())
-            }
-            Self::CommandSpawn { stage, source } => {
+            },
+            Self::CommandSpawn { stage, source } =>
+            {
                 write!(f, "cannot start stage `{stage}`: {source}")
-            }
-            Self::CommandPoll { stage, source } => {
+            },
+            Self::CommandPoll { stage, source } =>
+            {
                 write!(f, "cannot poll stage `{stage}`: {source}")
-            }
-            Self::CommandFailed { stage, code } => {
+            },
+            Self::CommandFailed { stage, code } =>
+            {
                 write!(f, "stage `{stage}` failed with exit code {code:?}")
-            }
+            },
             Self::CommandTimedOut {
                 stage,
                 timeout_secs,
@@ -369,9 +408,12 @@ impl OptimizationRunner {
     pub fn run(&self, task: &OptimizationTask) -> Result<OptimizationReport, OptimizationError> {
         task.validate()?;
         let workspace = canonicalize_existing(&self.workspace)?;
-        let run_root = if self.run_root.is_absolute() {
+        let run_root = if self.run_root.is_absolute()
+        {
             self.run_root.clone()
-        } else {
+        }
+        else
+        {
             workspace.join(&self.run_root)
         };
         fs::create_dir_all(&run_root).map_err(|source| OptimizationError::Io {
@@ -408,7 +450,8 @@ impl OptimizationRunner {
             best_verified_speedup: None,
         };
 
-        for iteration in 1..=task.budget.max_iterations {
+        for iteration in 1..=task.budget.max_iterations
+        {
             let context_path = run_dir.join("context.json");
             let verify_path = run_dir.join("verify.json");
             let candidate_path = run_dir.join("candidate.json");
@@ -433,10 +476,20 @@ impl OptimizationRunner {
             remove_if_exists(&candidate_path)?;
 
             self.execute_stage(
-                if iteration == 1 { "generate" } else { "rewrite" },
-                if iteration == 1 {
+                if iteration == 1
+                {
+                    "generate"
+                }
+                else
+                {
+                    "rewrite"
+                },
+                if iteration == 1
+                {
                     &task.commands.generate
-                } else {
+                }
+                else
+                {
                     task.commands
                         .rewrite
                         .as_ref()
@@ -486,15 +539,21 @@ impl OptimizationRunner {
                     .max_rel_error
                     .is_none_or(|value| value <= task.budget.max_rel_error);
             let performance_gate = speedup >= task.budget.min_speedup;
-            let decision = if correctness_gate && performance_gate {
+            let decision = if correctness_gate && performance_gate
+            {
                 OptimizationDecision::Promote
-            } else if !correctness_gate {
+            }
+            else if !correctness_gate
+            {
                 OptimizationDecision::RewriteForCorrectness
-            } else {
+            }
+            else
+            {
                 OptimizationDecision::RewriteForPerformance
             };
 
-            if correctness_gate {
+            if correctness_gate
+            {
                 report.best_verified_speedup = Some(
                     report
                         .best_verified_speedup
@@ -514,19 +573,15 @@ impl OptimizationRunner {
             report.final_decision = decision;
             write_json(&run_dir.join("report.json"), &report)?;
 
-            if decision == OptimizationDecision::Promote {
+            if decision == OptimizationDecision::Promote
+            {
                 return Ok(report);
             }
-            if decision == OptimizationDecision::RewriteForPerformance {
-                if let Some(profile) = &task.commands.profile {
-                    self.execute_stage(
-                        "profile",
-                        profile,
-                        task,
-                        iteration,
-                        &workspace,
-                        &run_dir,
-                    )?;
+            if decision == OptimizationDecision::RewriteForPerformance
+            {
+                if let Some(profile) = &task.commands.profile
+                {
+                    self.execute_stage("profile", profile, task, iteration, &workspace, &run_dir)?;
                 }
             }
         }
@@ -550,10 +605,12 @@ impl OptimizationRunner {
             .unwrap_or(task.budget.command_timeout_secs);
         let mut command = Command::new(&spec.program);
         command.args(&spec.args).current_dir(workspace);
-        for secret in SECRET_ENV_VARS {
+        for secret in SECRET_ENV_VARS
+        {
             command.env_remove(secret);
         }
-        for (key, value) in &spec.env {
+        for (key, value) in &spec.env
+        {
             command.env(key, value);
         }
         command.env("SCIAGENT_OPT_TASK_ID", &task.id);
@@ -583,30 +640,35 @@ impl OptimizationRunner {
                 source,
             })?;
         let deadline = Instant::now() + Duration::from_secs(timeout_secs);
-        loop {
+        loop
+        {
             match child
                 .try_wait()
                 .map_err(|source| OptimizationError::CommandPoll {
                     stage: stage.to_string(),
                     source,
-                })? {
-                Some(status) => {
-                    if status.success() {
+                })?
+            {
+                Some(status) =>
+                {
+                    if status.success()
+                    {
                         return Ok(());
                     }
                     return Err(OptimizationError::CommandFailed {
                         stage: stage.to_string(),
                         code: status.code(),
                     });
-                }
-                None if Instant::now() >= deadline => {
+                },
+                None if Instant::now() >= deadline =>
+                {
                     let _ = child.kill();
                     let _ = child.wait();
                     return Err(OptimizationError::CommandTimedOut {
                         stage: stage.to_string(),
                         timeout_secs,
                     });
-                }
+                },
                 None => thread::sleep(Duration::from_millis(50)),
             }
         }
@@ -631,11 +693,16 @@ pub fn evaluate_candidate(
             .max_rel_error
             .is_none_or(|value| value <= budget.max_rel_error);
     let performance_gate = speedup >= budget.min_speedup;
-    let decision = if correctness_gate && performance_gate {
+    let decision = if correctness_gate && performance_gate
+    {
         OptimizationDecision::Promote
-    } else if !correctness_gate {
+    }
+    else if !correctness_gate
+    {
         OptimizationDecision::RewriteForCorrectness
-    } else {
+    }
+    else
+    {
         OptimizationDecision::RewriteForPerformance
     };
     Ok(IterationRecord {
@@ -664,7 +731,8 @@ fn canonicalize_existing(path: &Path) -> Result<PathBuf, OptimizationError> {
 }
 
 fn remove_if_exists(path: &Path) -> Result<(), OptimizationError> {
-    match fs::remove_file(path) {
+    match fs::remove_file(path)
+    {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(source) => Err(OptimizationError::Io {
@@ -765,7 +833,9 @@ mod tests {
                 max_rel_error: None,
                 notes: None,
             },
-            &TimingMeasurement { median_ns: f64::NAN },
+            &TimingMeasurement {
+                median_ns: f64::NAN,
+            },
             &OptimizationBudget::default(),
         )
         .expect_err("NaN timing must be rejected");
