@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "scirust-sciagent/SKILL_OPTIMIZATION.md"
+      - "scirust-sciagent/src/lib.rs"
       - "scirust-sciagent/src/optimization_agent/**"
       - "scirust-sciagent/src/bin/sciagent-optimize.rs"
       - "scirust-sciagent/examples/optimization_tasks/**"
@@ -26,13 +27,16 @@ jobs:
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: nightly-2026-07-02
-          components: rustfmt
+          components: rustfmt,clippy
 
       - name: Check formatting
         run: rustup run nightly-2026-07-02 cargo fmt --all -- --check
 
       - name: Build optimization CLI
         run: rustup run nightly-2026-07-02 cargo check -p scirust-sciagent --bin sciagent-optimize
+
+      - name: Clippy SciAgent optimization integration
+        run: rustup run nightly-2026-07-02 cargo clippy -p scirust-sciagent --all-targets --locked -- -D warnings
 
       - name: Run optimization-agent unit tests
         run: rustup run nightly-2026-07-02 cargo test -p scirust-sciagent optimization_agent
