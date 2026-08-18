@@ -78,8 +78,9 @@ impl std::error::Error for ToolRuntimeError {}
 
 /// Contract-validating runtime around the existing hardened SciAgent tools.
 ///
-/// The built-in tool callbacks continue to own filesystem/process confinement;
-/// this layer centralises schema validation and pre/post execution policy.
+/// Built-in path checks, process limits, and secret stripping remain intact;
+/// process-spawning callbacks are additionally routed through the sandbox seam.
+/// This layer centralises schema validation and pre/post execution policy.
 pub struct ToolRuntime<P = AllowAllPolicy> {
     tools: Vec<Tool>,
     policy: P,
@@ -87,8 +88,9 @@ pub struct ToolRuntime<P = AllowAllPolicy> {
 
 impl ToolRuntime<AllowAllPolicy> {
     pub fn builtins() -> Self {
-        Self::new(Tool::builtins(), AllowAllPolicy)
-            .expect("built-in SciAgent tool contracts must be valid")
+        let mut tools = Tool::builtins();
+        super::sandbox::install_process_sandbox(&mut tools);
+        Self::new(tools, AllowAllPolicy).expect("built-in SciAgent tool contracts must be valid")
     }
 }
 
