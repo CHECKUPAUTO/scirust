@@ -53,7 +53,8 @@ impl std::fmt::Display for ToolRuntimeError {
         match self
         {
             Self::DuplicateTool(tool) => write!(f, "Duplicate tool registration: {tool}"),
-            Self::DuplicateParameter { tool, parameter } => {
+            Self::DuplicateParameter { tool, parameter } =>
+            {
                 write!(f, "Duplicate parameter {parameter:?} in tool {tool:?}")
             },
             Self::UnknownTool(tool) => write!(f, "Unknown tool: {tool}"),
@@ -61,10 +62,12 @@ impl std::fmt::Display for ToolRuntimeError {
                 f,
                 "Missing required parameter {parameter:?} for tool {tool:?}"
             ),
-            Self::UndeclaredParameter { tool, parameter } => {
+            Self::UndeclaredParameter { tool, parameter } =>
+            {
                 write!(f, "Undeclared parameter {parameter:?} for tool {tool:?}")
             },
-            Self::PolicyDenied { tool, reason } => {
+            Self::PolicyDenied { tool, reason } =>
+            {
                 write!(f, "Tool {tool:?} denied by policy: {reason}")
             },
         }
@@ -123,12 +126,12 @@ impl<P: ToolPolicy> ToolRuntime<P> {
 
     pub fn execute(&self, call: &ToolCall) -> Result<String, ToolRuntimeError> {
         let tool = self.validate_call(call)?;
-        self.policy
-            .before_execute(call, tool)
-            .map_err(|reason| ToolRuntimeError::PolicyDenied {
+        self.policy.before_execute(call, tool).map_err(|reason| {
+            ToolRuntimeError::PolicyDenied {
                 tool: call.tool.clone(),
                 reason,
-            })?;
+            }
+        })?;
         let output = (tool.execute)(call.params.clone());
         self.policy.after_execute(call, tool, &output);
         Ok(output)
@@ -342,10 +345,7 @@ mod tests {
     fn successful_execution_runs_post_hook() {
         OBSERVATIONS.store(0, Ordering::SeqCst);
         let runtime = ToolRuntime::new(vec![synthetic_tool(ok_tool)], ObservePolicy).unwrap();
-        assert_eq!(
-            runtime.execute_named("synthetic", params()).unwrap(),
-            "ok"
-        );
+        assert_eq!(runtime.execute_named("synthetic", params()).unwrap(), "ok");
         assert_eq!(OBSERVATIONS.load(Ordering::SeqCst), 1);
     }
 
