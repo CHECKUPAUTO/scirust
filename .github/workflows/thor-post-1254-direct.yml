@@ -23,7 +23,7 @@ env:
 jobs:
   i250:
     name: Direct Thor I250 CUDA validation
-    runs-on: [self-hosted, Linux, ARM64]
+    runs-on: [self-hosted]
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -84,7 +84,7 @@ jobs:
   m33:
     name: Direct Thor FLAT M33 validation
     needs: i250
-    runs-on: [self-hosted, Linux, ARM64]
+    runs-on: [self-hosted]
     timeout-minutes: 360
     env:
       WGPU_BACKEND: vulkan
