@@ -1,0 +1,41 @@
+name: Temporary Landlock formatter
+
+on:
+  push:
+    branches: [feat/sciagent-landlock-sandbox]
+    paths:
+      - ".github/workflows/tmp-landlock-fmt.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  format-and-clean:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt
+      - name: Format touched Rust sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup run nightly-2026-07-02 cargo fmt --all
+          git diff --check
+      - name: Commit formatting and remove helper
+        shell: bash
+        env:
+          HEAD_REF: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add scirust-sciagent/src/agentic/landlock.rs scirust-sciagent/src/agentic/mod.rs scirust-sciagent/src/agentic/tool_runtime.rs
+          git rm .github/workflows/tmp-landlock-fmt.yml
+          git diff --cached --check
+          git commit -m "style(sciagent): format Landlock sandbox fallback"
+          git push origin "HEAD:${HEAD_REF}"
