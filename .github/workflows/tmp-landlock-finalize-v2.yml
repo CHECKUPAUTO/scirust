@@ -1,0 +1,175 @@
+name: Temporary Landlock finalizer v2
+
+on:
+  push:
+    branches: [feat/sciagent-landlock-sandbox]
+    paths:
+      - ".github/workflows/tmp-landlock-finalize-v2.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt
+      - name: Patch portable Landlock source and live regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('scirust-sciagent/src/agentic/landlock.rs')
+          text = path.read_text()
+
+          signature = 'fn fallback_policy(mode: SandboxMode, bwrap_executable: bool, abi: Option<i32>) -> bool {'
+          desired = '#[cfg(test)]\n' + signature
+          for prefix in [
+              '#[cfg(any(target_os = "linux", test))]\n',
+              '#[cfg(target_os = "linux")]\n',
+          ]:
+              text = text.replace(prefix + signature, signature)
+          if desired not in text:
+              if text.count(signature) != 1:
+                  raise SystemExit(f'expected fallback_policy once, found {text.count(signature)}')
+              text = text.replace(signature, desired, 1)
+
+          if 'fn live_landlock_enforces_file_effect_modes_when_supported()' not in text:
+              anchor = '''    #[cfg(target_os = "linux")]
+    #[test]
+    fn abi_three_write_set_covers_refer_and_truncate() {
+        let access = linux_landlock::write_access_for_test(3).unwrap();
+        assert_ne!(access & linux_landlock::REFER_FOR_TEST, 0);
+        assert_ne!(access & linux_landlock::TRUNCATE_FOR_TEST, 0);
+        assert!(linux_landlock::write_access_for_test(2).is_err());
+    }
+}'''
+              replacement = '''    #[cfg(target_os = "linux")]
+    #[test]
+    fn abi_three_write_set_covers_refer_and_truncate() {
+        let access = linux_landlock::write_access_for_test(3).unwrap();
+        assert_ne!(access & linux_landlock::REFER_FOR_TEST, 0);
+        assert_ne!(access & linux_landlock::TRUNCATE_FOR_TEST, 0);
+        assert!(linux_landlock::write_access_for_test(2).is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn live_landlock_enforces_file_effect_modes_when_supported() {
+        let Ok(abi) = linux_landlock::abi()
+        else
+        {
+            return;
+        };
+        if abi < MIN_LANDLOCK_ABI
+        {
+            return;
+        }
+
+        let root = canonical_workspace_root().unwrap();
+        let target = root.join("target");
+        std::fs::create_dir_all(&target).unwrap();
+        let nonce = format!(
+            "{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let inside = target.join(format!(".landlock-live-{nonce}"));
+        let outside = PathBuf::from(format!("/tmp/scirust-landlock-live-{nonce}"));
+        let _ = std::fs::remove_file(&inside);
+        let _ = std::fs::remove_file(&outside);
+        std::fs::write(&inside, b"seed").unwrap();
+
+        let write_args = |path: &Path| {
+            vec![
+                OsString::from("-c"),
+                OsString::from(r#"printf '%s' "$1" > "$2""#),
+                OsString::from("sh"),
+                OsString::from("payload"),
+                path.as_os_str().to_owned(),
+            ]
+        };
+
+        let read_only = run_landlocked_with_timeout(
+            "sh",
+            &write_args(&inside),
+            &root,
+            SandboxMode::ReadOnly,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        assert!(
+            !read_only.success,
+            "read-only unexpectedly permitted O_TRUNC/write"
+        );
+        assert_eq!(std::fs::read(&inside).unwrap(), b"seed");
+
+        let workspace_write = run_landlocked_with_timeout(
+            "sh",
+            &write_args(&inside),
+            &root,
+            SandboxMode::WorkspaceWrite,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        assert!(
+            workspace_write.success,
+            "workspace write was denied: {}",
+            String::from_utf8_lossy(&workspace_write.stderr)
+        );
+        assert_eq!(std::fs::read(&inside).unwrap(), b"payload");
+
+        let outside_write = run_landlocked_with_timeout(
+            "sh",
+            &write_args(&outside),
+            &root,
+            SandboxMode::WorkspaceWrite,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        assert!(
+            !outside_write.success,
+            "workspace-write unexpectedly escaped to /tmp"
+        );
+        assert!(!outside.exists());
+        std::fs::remove_file(&inside).unwrap();
+    }
+}'''
+              if text.count(anchor) != 1:
+                  raise SystemExit(f'expected live-test anchor once, found {text.count(anchor)}')
+              text = text.replace(anchor, replacement, 1)
+
+          path.write_text(text)
+          PY
+          rustup run nightly-2026-07-02 cargo fmt --all
+          git diff --check
+      - name: Prove Landlock enforcement with warnings denied
+        shell: bash
+        env:
+          RUSTFLAGS: "-D warnings"
+        run: |
+          set -euo pipefail
+          rustup run nightly-2026-07-02 cargo test -p scirust-sciagent live_landlock_enforces_file_effect_modes_when_supported --locked -- --nocapture
+      - name: Commit proven source and self-delete
+        shell: bash
+        env:
+          HEAD_REF: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add scirust-sciagent/src/agentic/landlock.rs
+          git rm .github/workflows/tmp-landlock-finalize-v2.yml
+          git diff --cached --check
+          git commit -m "test(sciagent): prove live Landlock file-effect enforcement"
+          git push origin "HEAD:${HEAD_REF}"
