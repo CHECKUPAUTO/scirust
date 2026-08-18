@@ -17,7 +17,7 @@
 //!    integrates them with the *symplectic* (semi-implicit) Euler method,
 //!    whose energy error stays bounded over long horizons where the explicit
 //!    method drifts.
-//! 2. **A gym-style interaction layer** ([`env`]) — the [`Environment`] trait
+//! 2. **A gym-style interaction layer** ([`mod@env`]) — the [`Environment`] trait
 //!    (`reset` / `step(action) -> observation, reward, done`) for
 //!    agent-in-the-loop simulation, with ready-made control environments
 //!    ([`envs::CartPole`], [`envs::GridWorld`]) and an episode runner.
@@ -75,7 +75,7 @@
 //! methods.
 //! The [`Environment`] trait mirrors the `(state, reward, done)` step shape of
 //! `scirust_learning::rl::Env`. Enabling the optional **`rl`** feature adds
-//! [`rl_bridge::RlEnv`], an adapter that presents any
+//! `rl_bridge::RlEnv`, an adapter that presents any
 //! [`Environment`] + [`FiniteActionSpace`] as a `scirust_learning::rl::Env`, so
 //! the existing tabular/PPO/deep agents train on these environments unchanged
 //! (a tabular Q-learner finding the shortest path on [`envs::GridWorld`] is a

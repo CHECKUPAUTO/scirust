@@ -134,7 +134,7 @@
 //!   longueur à plat (facteur `K`).
 //! - [`process_time`] — temps de gamme : temps de série, temps par pièce et
 //!   cadence de production.
-//! - [`oee`] — taux de rendement synthétique (**TRS/OEE**) : disponibilité,
+//! - [`mod@oee`] — taux de rendement synthétique (**TRS/OEE**) : disponibilité,
 //!   performance, qualité et leur produit.
 //! - [`torsion_springs`] — ressorts de torsion : raideur angulaire, rotation et
 //!   contrainte de flexion du fil.
@@ -302,7 +302,7 @@
 //!   horizontal selon l'angle.
 //! - [`lifting_lug`] — oreille de levage : matage, section nette et cisaillement
 //!   double de l'axe.
-//! - [`blanking_force`] — découpage/poinçonnage : effort de découpe, dévêtisseur et
+//! - [`mod@blanking_force`] — découpage/poinçonnage : effort de découpe, dévêtisseur et
 //!   travail.
 //! - [`deep_drawing`] — emboutissage : rapport limite (LDR), effort de poinçon et
 //!   serre-flan.
@@ -331,7 +331,7 @@
 //!   puissances d'entraînement/élévation.
 //! - [`screw_conveyor`] — vis sans fin : débits volumétrique et massique.
 //! - [`carburizing`] — cémentation : profondeur en √t (**Harris**) et durée de cycle.
-//! - [`weld_heat_input`] — soudage à l'arc : puissance d'arc et apport linéique
+//! - [`mod@weld_heat_input`] — soudage à l'arc : puissance d'arc et apport linéique
 //!   `η·U·I/v`.
 //! - [`surface_grinding`] — rectification plane : débits, épaisseur de copeau
 //!   équivalente et rapport `G`.
@@ -352,7 +352,7 @@
 //!   coût total, point de commande.
 //! - [`break_even`] — seuil de rentabilité : quantité/CA d'équilibre, marge sur
 //!   coût variable et marge de sécurité.
-//! - [`machine_hour_rate`] — coût horaire machine : amortissement, énergie et
+//! - [`mod@machine_hour_rate`] — coût horaire machine : amortissement, énergie et
 //!   taux horaire global.
 //! - [`learning_curve`] — courbe d'apprentissage (**Wright**) : temps unitaire,
 //!   cumulé et moyen.
@@ -374,14 +374,14 @@
 //! - [`total_runout`] — métrologie : battement total/circulaire par relevé.
 //! - [`flatness_from_readings`] — métrologie : planéité/rectitude par l'étendue
 //!   min-max.
-//! - [`cosine_error`] — métrologie : erreur cosinus d'un instrument désaligné.
+//! - [`mod@cosine_error`] — métrologie : erreur cosinus d'un instrument désaligné.
 //! - [`thread_milling`] — usinage : fraisage de filet (interpolation hélicoïdale,
 //!   correction d'avance).
 //! - [`drill_point_geometry`] — usinage : géométrie de pointe de foret (longueur
 //!   de pointe, course supplémentaire).
 //! - [`tap_drill_size`] — usinage : diamètre de foret d'avant-trou de taraudage
 //!   (filet ISO).
-//! - [`countersink_depth`] — usinage : profondeur d'un lamage conique
+//! - [`mod@countersink_depth`] — usinage : profondeur d'un lamage conique
 //!   (fraisure).
 //! - [`electroplating`] — galvanoplastie : loi de **Faraday** (masse déposée,
 //!   épaisseur, durée d'électrolyse).
@@ -421,7 +421,7 @@
 //!   D4) et test sous contrôle.
 //! - [`rolled_throughput_yield`] — qualité multi-étapes : FPY, RTY, rendement
 //!   normalisé et DPU.
-//! - [`takt_time`] — Lean : temps takt, cadence requise et nombre d'opérateurs.
+//! - [`mod@takt_time`] — Lean : temps takt, cadence requise et nombre d'opérateurs.
 //! - [`line_balancing`] — équilibrage de ligne : postes minimaux, efficacité,
 //!   retard d'équilibrage et lissage.
 //! - [`littles_law`] — loi de **Little** : en-cours, débit et temps de passage.
@@ -466,7 +466,7 @@
 //! - [`capillary_rise`] — ascension capillaire (**Jurin**) et saut de Laplace.
 //! - [`surface_tension_laplace`] — surpression de **Laplace** (goutte, bulle) et
 //!   longueur capillaire.
-//! - [`nozzle_thrust`] — tuyère : débit-masse, poussée idéale et vitesse d'éjection.
+//! - [`mod@nozzle_thrust`] — tuyère : débit-masse, poussée idéale et vitesse d'éjection.
 //! - [`paris_law`] — propagation de fissure (**Paris**) : `ΔK`, `da/dN = C·ΔK^m`.
 //! - [`thermal_shock_resistance`] — paramètres de **Kingery** `R`/`R'` et `ΔT` max.
 //! - [`bimetal_strip`] — bilame thermique : courbure, rayon et flèche.
@@ -477,7 +477,7 @@
 //! - [`circular_plate`] — plaque circulaire sous pression : rigidité, flèche max.
 //! - [`taper_pin`] — goupille conique : section moyenne, cisaillement simple/double.
 //! - [`woodruff_key`] — clavette Woodruff : cisaillement et matage arbre-moyeu.
-//! - [`abbe_error`] — métrologie : erreur d'**Abbe** `e = d·tan α`.
+//! - [`mod@abbe_error`] — métrologie : erreur d'**Abbe** `e = d·tan α`.
 //! - [`gauge_temperature_correction`] — correction thermique des mesures à 20 °C
 //!   (**ISO 1**).
 //! - [`powder_compaction`] — métallurgie des poudres : densité crue, retrait de
@@ -519,7 +519,7 @@
 //! - [`dc_motor`] — moteur à courant continu idéal : f.c.é.m., couple, tension, vitesse.
 //! - [`three_phase_power`] — puissances triphasées équilibrées : active, apparente,
 //!   réactive, courant de ligne.
-//! - [`motor_efficiency`] — rendement et pertes globales d'un moteur, couple à l'arbre.
+//! - [`mod@motor_efficiency`] — rendement et pertes globales d'un moteur, couple à l'arbre.
 //! - [`vfd_volts_per_hertz`] — variateur V/f : rapport V/Hz, tension avec boost, flux relatif.
 //! - [`bearing_defect_frequencies`] — fréquences cinématiques de défaut de roulement
 //!   (BPFO, BPFI, BSF, FTF).
@@ -548,14 +548,14 @@
 //! - [`stokes_settling`] — sédimentation d'une sphère (Stokes) : vitesse limite, Re, traînée.
 //! - [`weir_flow`] — déversoir mince : rectangulaire (Poleni), en V (Thomson), charge amont.
 //! - [`hydraulic_jump`] — ressaut hydraulique : Froude, profondeur conjuguée, perte d'énergie.
-//! - [`cavitation_number`] — cavitation et NPSH : indice σ, NPSHa, marge.
+//! - [`mod@cavitation_number`] — cavitation et NPSH : indice σ, NPSHa, marge.
 //! - [`pump_affinity`] — lois d'affinité des pompes : débit, hauteur, puissance, roue.
-//! - [`lmtd`] — écart de température logarithmique moyen : contre/co-courant, flux U·A·F·ΔT.
-//! - [`fin_efficiency`] — ailette droite : paramètre m, rendement, efficience, flux évacué.
+//! - [`mod@lmtd`] — écart de température logarithmique moyen : contre/co-courant, flux U·A·F·ΔT.
+//! - [`mod@fin_efficiency`] — ailette droite : paramètre m, rendement, efficience, flux évacué.
 //! - [`thermal_expansion`] — dilatation thermique : allongement, volume, contrainte de bridage.
 //! - [`torsion_bar`] — barre de torsion : inertie polaire, raideur, contrainte, rotation.
 //! - [`keyway_stress`] — clavette parallèle : effort tangentiel, cisaillement, matage, longueur.
-//! - [`gyroscopic_couple`] — couple gyroscopique et précession d'un rotor rapide.
+//! - [`mod@gyroscopic_couple`] — couple gyroscopique et précession d'un rotor rapide.
 //! - [`hall_petch`] — renforcement par taille de grain (Hall-Petch) : limite d'élasticité.
 //! - [`larson_miller`] — paramètre de Larson-Miller : fluage/rupture temps-température.
 //! - [`calorific_value`] — pouvoir calorifique : PCS de Dulong, PCI, énergie dégagée.
@@ -563,19 +563,19 @@
 //! - [`standard_atmosphere`] — atmosphère standard (troposphère ISA) : pression, température, densité.
 //! - [`centrifugal_separation`] — séparation centrifuge : RCF, vitesse de sédimentation.
 //! - [`riser_design`] — masselotte de fonderie : méthode des modules, rendement d'alimentation.
-//! - [`thermal_resistance`] — mur composite : conduction/convection, série/parallèle, U, flux.
+//! - [`mod@thermal_resistance`] — mur composite : conduction/convection, série/parallèle, U, flux.
 //! - [`view_factor`] — rayonnement : facteurs de forme (réciprocité, fermeture), échange net.
 //! - [`faraday_corrosion`] — corrosion (loi de Faraday) : perte de masse, vitesse de pénétration.
 //! - [`beam_deflection`] — flèche de poutres (Euler-Bernoulli) : cas console et sur appuis.
 //! - [`section_modulus`] — module de flexion Z = I/c et contrainte σ = M/Z.
-//! - [`bend_allowance`] — développé de tôle pliée : facteur K, allongement, déduction de pli.
+//! - [`mod@bend_allowance`] — développé de tôle pliée : facteur K, allongement, déduction de pli.
 //! - [`turning_roughness`] — rugosité théorique en tournage : Ra, Rz depuis avance/bec.
 //! - [`elastic_constants`] — relations E, G, K, ν, λ (matériau isotrope linéaire).
 //! - [`restitution`] — choc direct : coefficient de restitution, vitesses, énergie dissipée.
 //! - [`projectile_motion`] — balistique du vide : portée, hauteur, temps de vol, angle optimal.
 //! - [`spring_combination`] — association de ressorts : raideurs série/parallèle.
 //! - [`gear_lewis`] — flexion de denture (Lewis) : contrainte, effort admissible, facteur de Barth.
-//! - [`gear_contact_ratio`] — rapport de conduite d'un engrenage droit à développante.
+//! - [`mod@gear_contact_ratio`] — rapport de conduite d'un engrenage droit à développante.
 //! - [`bolt_torque`] — serrage de boulon : couple-tension T = K·d·F, précharge.
 //! - [`fillet_weld`] — cordon d'angle : gorge, cisaillement, effort admissible, longueur.
 //! - [`crank_effort`] — moment moteur sur vilebrequin (bielle-manivelle, obliquité).
@@ -585,7 +585,7 @@
 //! - [`choked_flow`] — tuyère compressible : rapports critiques, débit massique bloqué.
 //! - [`duct_sizing`] — gaine HVAC : diamètre hydraulique/équivalent, vitesse, perte de charge.
 //! - [`forging_force`] — forgeage : refoulement, matriçage, contrainte d'écoulement (Hollomon).
-//! - [`rolling_force`] — laminage à plat : arc de contact, effort, couple, puissance.
+//! - [`mod@rolling_force`] — laminage à plat : arc de contact, effort, couple, puissance.
 //! - [`bolt_group_shear`] — groupe de boulons excentré : cisaillement direct + torsion.
 //! - [`weld_group`] — groupe de cordons excentré : module polaire, contrainte résultante.
 //! - [`rotating_unbalance`] — balourd tournant : force centrifuge, amplitude, ISO 1940.
@@ -602,7 +602,7 @@
 //! - [`taper_turning`] — tournage conique : conicité, décalage de contre-poupée, angle de chariot.
 //! - [`gear_backlash`] — jeu de denture : jeu circonférentiel/angulaire, entraxe requis.
 //! - [`bucket_elevator`] — élévateur à godets : débit, puissance de levage et moteur.
-//! - [`pump_specific_speed`] — vitesse spécifique de pompe : adimensionnelle, aspiration, classement.
+//! - [`mod@pump_specific_speed`] — vitesse spécifique de pompe : adimensionnelle, aspiration, classement.
 //! - [`hydraulic_turbine`] — turbine hydraulique : puissance, vitesse spécifique, type Pelton/Francis.
 //! - [`plastic_bending`] — flexion plastique : module plastique, facteur de forme, moment plastique.
 //! - [`rankine_column`] — flambement Rankine-Gordon (poteaux courts à moyens).

@@ -1,0 +1,49 @@
+name: Workspace Rustdoc
+
+on:
+  push:
+    branches: [master, main, develop]
+  pull_request:
+    branches: [master, main, develop]
+
+concurrency:
+  group: rustdoc-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUSTDOCFLAGS: "-D warnings"
+
+jobs:
+  rustdoc:
+    name: Rustdoc (stable, workspace)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Build authoritative workspace rustdoc
+        shell: bash
+        run: |
+          set +e
+          cargo +stable doc --workspace --no-deps --locked >rustdoc.log 2>&1
+          status=$?
+          cat rustdoc.log
+          if [ "$status" -ne 0 ]; then
+            {
+              echo "### Workspace rustdoc failure"
+              echo '```text'
+              tail -n 80 rustdoc.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            diagnostic=$(tail -n 60 rustdoc.log | tr '\n' ' ' | sed 's/%/%25/g; s/\r/%0D/g')
+            echo "::error title=Workspace rustdoc failed::$diagnostic"
+          fi
+          exit "$status"

@@ -3,20 +3,20 @@
 //! séparation `RL` de Langmuir.
 //!
 //! ```text
-//! Langmuir          q   = qm·K·C / (1 + K·C)                    [mol·kg⁻¹]
-//! Freundlich        q   = Kf·C^(1/n)                            [mol·kg⁻¹]
-//! bilan (1 étage)   m   = n_solute / q*                         [kg]
+//! Langmuir          q   = qm·K·C / (1 + K·C)                    `mol·kg⁻¹`
+//! Freundlich        q   = Kf·C^(1/n)                            `mol·kg⁻¹`
+//! bilan (1 étage)   m   = n_solute / q*                         `kg`
 //! facteur RL        RL  = 1 / (1 + K·C0)                        [-]
 //! ```
 //!
-//! `q` charge à l'équilibre (soluté adsorbé par masse d'adsorbant) [mol·kg⁻¹],
-//! `qm` charge maximale de la monocouche [mol·kg⁻¹], `K` constante d'affinité de
-//! **Langmuir** [m³·mol⁻¹], `C` concentration du soluté en phase fluide à
-//! l'équilibre [mol·m⁻³], `Kf` constante de **Freundlich** [mol·kg⁻¹·(m³·mol⁻¹)^(1/n)],
-//! `1/n` = `exponent` exposant d'hétérogénéité [sans dimension], `n_solute`
-//! quantité de soluté à retirer [mol], `m` masse d'adsorbant [kg], `C0`
-//! concentration d'alimentation [mol·m⁻³], `RL` facteur de séparation [sans
-//! dimension, `0 < RL < 1` favorable].
+//! `q` charge à l'équilibre (soluté adsorbé par masse d'adsorbant) `mol·kg⁻¹`,
+//! `qm` charge maximale de la monocouche `mol·kg⁻¹`, `K` constante d'affinité de
+//! **Langmuir** `m³·mol⁻¹`, `C` concentration du soluté en phase fluide à
+//! l'équilibre `mol·m⁻³`, `Kf` constante de **Freundlich** `mol·kg⁻¹·(m³·mol⁻¹)^(1/n)`,
+//! `1/n` = `exponent` exposant d'hétérogénéité `sans dimension`, `n_solute`
+//! quantité de soluté à retirer `mol`, `m` masse d'adsorbant `kg`, `C0`
+//! concentration d'alimentation `mol·m⁻³`, `RL` facteur de séparation `sans dimension`,
+//! `0 < RL < 1` favorable.
 //!
 //! **Limite honnête** : ces relations décrivent l'**adsorption à l'équilibre**.
 //! L'isotherme — paramètres de **Langmuir** (`qm`, `K`) ou de **Freundlich**
@@ -31,9 +31,9 @@
 
 /// Isotherme de **Langmuir** `q = qm·K·C / (1 + K·C)` (mol·kg⁻¹).
 ///
-/// `max_loading` (qm) charge maximale de la monocouche [mol·kg⁻¹] ;
-/// `langmuir_constant` (K) constante d'affinité [m³·mol⁻¹] ;
-/// `equilibrium_concentration` (C) concentration en phase fluide [mol·m⁻³].
+/// `max_loading` (qm) charge maximale de la monocouche `mol·kg⁻¹` ;
+/// `langmuir_constant` (K) constante d'affinité `m³·mol⁻¹` ;
+/// `equilibrium_concentration` (C) concentration en phase fluide `mol·m⁻³`.
 ///
 /// Panique si `max_loading < 0`, `langmuir_constant < 0` ou
 /// `equilibrium_concentration < 0`.
@@ -53,9 +53,9 @@ pub fn adsorb_langmuir(
 /// Isotherme de **Freundlich** `q = Kf·C^(1/n)` (mol·kg⁻¹), avec
 /// `exponent = 1/n` l'exposant d'hétérogénéité.
 ///
-/// `freundlich_constant` (Kf) constante de Freundlich [mol·kg⁻¹·(m³·mol⁻¹)^(1/n)] ;
-/// `exponent` (1/n) exposant [sans dimension, généralement `0 < 1/n ≤ 1`] ;
-/// `equilibrium_concentration` (C) concentration en phase fluide [mol·m⁻³].
+/// `freundlich_constant` (Kf) constante de Freundlich `mol·kg⁻¹·(m³·mol⁻¹)^(1/n)` ;
+/// `exponent` (1/n) exposant `sans dimension, généralement `0 < 1/n ≤ 1`` ;
+/// `equilibrium_concentration` (C) concentration en phase fluide `mol·m⁻³`.
 ///
 /// Panique si `freundlich_constant < 0`, `exponent <= 0` ou
 /// `equilibrium_concentration < 0`.
@@ -77,8 +77,8 @@ pub fn adsorb_freundlich(
 /// `K` (identique à [`adsorb_langmuir`], exposée pour la lisibilité des calculs
 /// de charge).
 ///
-/// `max_loading` (qm) [mol·kg⁻¹] ; `langmuir_constant` (K) [m³·mol⁻¹] ;
-/// `equilibrium_concentration` (C) [mol·m⁻³].
+/// `max_loading` (qm) `mol·kg⁻¹` ; `langmuir_constant` (K) `m³·mol⁻¹` ;
+/// `equilibrium_concentration` (C) `mol·m⁻³`.
 ///
 /// Panique si `max_loading < 0`, `langmuir_constant < 0` ou
 /// `equilibrium_concentration < 0`.
@@ -92,9 +92,9 @@ pub fn adsorb_langmuir_linearized_loading(
 
 /// Masse d'adsorbant requise par **bilan à une étage** `m = n_solute / q*` (kg).
 ///
-/// `solute_to_remove` (n_solute) quantité de soluté à retirer [mol] ;
+/// `solute_to_remove` (n_solute) quantité de soluté à retirer `mol` ;
 /// `equilibrium_loading` (q*) charge d'équilibre effectivement atteinte
-/// [mol·kg⁻¹].
+/// `mol·kg⁻¹`.
 ///
 /// Panique si `solute_to_remove < 0` ou `equilibrium_loading <= 0`.
 pub fn adsorb_mass_of_adsorbent(solute_to_remove: f64, equilibrium_loading: f64) -> f64 {
@@ -110,8 +110,8 @@ pub fn adsorb_mass_of_adsorbent(solute_to_remove: f64, equilibrium_loading: f64)
 /// avec `0 < RL < 1` = adsorption favorable, `RL = 1` linéaire, `RL > 1`
 /// défavorable.
 ///
-/// `langmuir_constant` (K) constante d'affinité [m³·mol⁻¹] ;
-/// `feed_concentration` (C0) concentration d'alimentation [mol·m⁻³].
+/// `langmuir_constant` (K) constante d'affinité `m³·mol⁻¹` ;
+/// `feed_concentration` (C0) concentration d'alimentation `mol·m⁻³`.
 ///
 /// Panique si `langmuir_constant < 0` ou `feed_concentration < 0`.
 pub fn adsorb_separation_factor(langmuir_constant: f64, feed_concentration: f64) -> f64 {

@@ -43,7 +43,7 @@ pub struct CostReport {
 impl CostReport {
     /// The worst-case cost, used for programs that cannot be statically
     /// evaluated. It is dominated by every genuine cost under the ordering in
-    /// [`super::population`].
+    /// `super::population`.
     pub fn unevaluable(total_instructions: usize) -> Self {
         Self {
             active_instructions: total_instructions,

@@ -4,25 +4,25 @@
 //!
 //! ```text
 //! vitesse de chute entravée (Richardson-Zaki)
-//!   v   = v_t · ε^n                                       [m·s⁻¹]
+//!   v   = v_t · ε^n                                       `m·s⁻¹`
 //! flux de solides par sédimentation
-//!   G_s = C · v                                           [kg·m⁻²·s⁻¹]
+//!   G_s = C · v                                           `kg·m⁻²·s⁻¹`
 //! aire d'un épaississeur (méthode du flux limite)
-//!   A   = M_s / G_s                                       [m²]
+//!   A   = M_s / G_s                                       `m²`
 //! concentration du sous-verse (bilan matière)
-//!   C_u = C_f · Q_f / Q_u                                 [kg·m⁻³]
+//!   C_u = C_f · Q_f / Q_u                                 `kg·m⁻³`
 //! ```
 //!
-//! `v_t` vitesse terminale de chute d'une particule **isolée** [m·s⁻¹], `ε`
+//! `v_t` vitesse terminale de chute d'une particule **isolée** `m·s⁻¹`, `ε`
 //! porosité (fraction volumique de liquide, ou fraction de vide) de la suspension
-//! [sans dimension, 0 < ε ≤ 1], `n` indice de Richardson-Zaki [sans dimension] ;
-//! `v` vitesse de chute **entravée** de la suspension [m·s⁻¹] ; `C` concentration
-//! en solides [kg·m⁻³], `G_s` flux de solides (débit massique de solides par unité
-//! de section) [kg·m⁻²·s⁻¹] ; `M_s` débit massique de solides à l'alimentation
-//! [kg·s⁻¹], `A` aire de la section horizontale de l'épaississeur [m²] ; `C_f`
-//! concentration de l'alimentation [kg·m⁻³], `Q_f` débit volumique d'alimentation
-//! [m³·s⁻¹], `Q_u` débit volumique du sous-verse (underflow) [m³·s⁻¹], `C_u`
-//! concentration du sous-verse [kg·m⁻³].
+//! `sans dimension, 0 < ε ≤ 1`, `n` indice de Richardson-Zaki `sans dimension` ;
+//! `v` vitesse de chute **entravée** de la suspension `m·s⁻¹` ; `C` concentration
+//! en solides `kg·m⁻³`, `G_s` flux de solides (débit massique de solides par unité
+//! de section) `kg·m⁻²·s⁻¹` ; `M_s` débit massique de solides à l'alimentation
+//! `kg·s⁻¹`, `A` aire de la section horizontale de l'épaississeur `m²` ; `C_f`
+//! concentration de l'alimentation `kg·m⁻³`, `Q_f` débit volumique d'alimentation
+//! `m³·s⁻¹`, `Q_u` débit volumique du sous-verse (underflow) `m³·s⁻¹`, `C_u`
+//! concentration du sous-verse `kg·m⁻³`.
 //!
 //! **Limite honnête** : modèle de sédimentation de particules à l'échelle des
 //! **opérations unitaires**, suspension supposée **homogène par zone**. La vitesse
@@ -38,9 +38,9 @@
 /// Vitesse de chute **entravée** d'une suspension par la corrélation de
 /// **Richardson-Zaki** `v = v_t · ε^n` (m·s⁻¹).
 ///
-/// `terminal_velocity` (v_t) vitesse terminale d'une particule isolée [m·s⁻¹],
-/// `voidage` (ε) porosité de la suspension [sans dimension], `richardson_zaki_index`
-/// (n) indice de Richardson-Zaki [sans dimension].
+/// `terminal_velocity` (v_t) vitesse terminale d'une particule isolée `m·s⁻¹`,
+/// `voidage` (ε) porosité de la suspension `sans dimension`, `richardson_zaki_index`
+/// (n) indice de Richardson-Zaki `sans dimension`.
 ///
 /// Panique si `v_t < 0`, si `ε` hors de `]0, 1]`, ou si `n < 0` (un indice négatif
 /// donnerait une vitesse croissante avec la concentration, non physique).
@@ -67,8 +67,8 @@ pub fn sed_hindered_settling_velocity(
 /// Flux de solides par sédimentation `G_s = C · v` (kg·m⁻²·s⁻¹), débit massique de
 /// solides transporté par unité de section horizontale.
 ///
-/// `concentration` (C) concentration en solides [kg·m⁻³], `settling_velocity` (v)
-/// vitesse de chute de la suspension [m·s⁻¹].
+/// `concentration` (C) concentration en solides `kg·m⁻³`, `settling_velocity` (v)
+/// vitesse de chute de la suspension `m·s⁻¹`.
 ///
 /// Panique si `C < 0` ou si `v < 0`.
 pub fn sed_solids_flux(concentration: f64, settling_velocity: f64) -> f64 {
@@ -86,8 +86,8 @@ pub fn sed_solids_flux(concentration: f64, settling_velocity: f64) -> f64 {
 /// Aire de la section horizontale d'un épaississeur par la **méthode du flux
 /// limite** `A = M_s / G_s` (m²).
 ///
-/// `solids_mass_flow` (M_s) débit massique de solides à l'alimentation [kg·s⁻¹],
-/// `solids_flux` (G_s) flux de solides limite (critique) [kg·m⁻²·s⁻¹].
+/// `solids_mass_flow` (M_s) débit massique de solides à l'alimentation `kg·s⁻¹`,
+/// `solids_flux` (G_s) flux de solides limite (critique) `kg·m⁻²·s⁻¹`.
 ///
 /// Panique si `M_s < 0` ou si `G_s ≤ 0` (flux limite strictement positif requis
 /// pour une aire finie).
@@ -103,9 +103,9 @@ pub fn sed_thickener_area(solids_mass_flow: f64, solids_flux: f64) -> f64 {
 /// Concentration du sous-verse d'un épaississeur par **bilan matière** sur les
 /// solides `C_u = C_f · Q_f / Q_u` (kg·m⁻³).
 ///
-/// `feed_concentration` (C_f) concentration de l'alimentation [kg·m⁻³],
-/// `feed_flow` (Q_f) débit volumique d'alimentation [m³·s⁻¹], `underflow_flow`
-/// (Q_u) débit volumique du sous-verse [m³·s⁻¹].
+/// `feed_concentration` (C_f) concentration de l'alimentation `kg·m⁻³`,
+/// `feed_flow` (Q_f) débit volumique d'alimentation `m³·s⁻¹`, `underflow_flow`
+/// (Q_u) débit volumique du sous-verse `m³·s⁻¹`.
 ///
 /// Panique si `C_f < 0`, si `Q_f < 0`, ou si `Q_u ≤ 0` (débit de sous-verse
 /// strictement positif requis).

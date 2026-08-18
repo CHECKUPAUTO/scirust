@@ -5,28 +5,28 @@
 //!
 //! ```text
 //! puissance hydraulique
-//!   Ph      = ρ · g · Q · H                                    [W]
+//!   Ph      = ρ · g · Q · H                                    `W`
 //! puissance à l'arbre
-//!   Pa      = Ph / η                                           [W]
+//!   Pa      = Ph / η                                           `W`
 //! NPSH disponible (hauteur nette d'aspiration)
-//!   NPSHa   = (P_atm − P_vap) / (ρ · g) + h_stat − h_pertes    [m]
+//!   NPSHa   = (P_atm − P_vap) / (ρ · g) + h_stat − h_pertes    `m`
 //! vitesse spécifique
 //!   Ns      = N · √Q / H^0.75                                  [unités]
 //! loi de similitude (affinité) sur le débit
-//!   Q₂      = Q₁ · N₂ / N₁                                     [m³·s⁻¹]
+//!   Q₂      = Q₁ · N₂ / N₁                                     `m³·s⁻¹`
 //! ```
 //!
-//! `ρ` masse volumique du liquide [kg·m⁻³], `g` accélération de la pesanteur
-//! [m·s⁻²], `Q` débit volumique [m³·s⁻¹], `H` hauteur manométrique
-//! (« head ») [m], `Ph` puissance hydraulique utile transmise au fluide [W],
-//! `η` rendement global de la pompe [sans dimension, 0 < η ≤ 1], `Pa`
-//! puissance mécanique à l'arbre [W] ; `P_atm` pression au plan d'aspiration
-//! [Pa], `P_vap` pression de vapeur saturante du liquide [Pa], `h_stat` charge
-//! statique d'aspiration [m] (positive en charge, négative en dépression),
-//! `h_pertes` pertes de charge de la conduite d'aspiration [m], `NPSHa` charge
-//! nette absolue à l'aspiration disponible [m] ; `N` vitesse de rotation
-//! [tr·min⁻¹ ou rad·s⁻¹ selon la convention retenue], `Ns` vitesse spécifique
-//! [unités dépendant de la convention de `N`, `Q`, `H`] ; les indices `₁` et
+//! `ρ` masse volumique du liquide (kg·m⁻³), `g` accélération de la pesanteur
+//! (m·s⁻²), `Q` débit volumique (m³·s⁻¹), `H` hauteur manométrique
+//! (« head ») (m), `Ph` puissance hydraulique utile transmise au fluide (W),
+//! `η` rendement global de la pompe (sans dimension, 0 < η ≤ 1), `Pa`
+//! puissance mécanique à l'arbre (W) ; `P_atm` pression au plan d'aspiration
+//! (Pa), `P_vap` pression de vapeur saturante du liquide (Pa), `h_stat` charge
+//! statique d'aspiration (m) (positive en charge, négative en dépression),
+//! `h_pertes` pertes de charge de la conduite d'aspiration (m), `NPSHa` charge
+//! nette absolue à l'aspiration disponible (m) ; `N` vitesse de rotation
+//! (tr·min⁻¹ ou rad·s⁻¹ selon la convention retenue), `Ns` vitesse spécifique
+//! (unités dépendant de la convention de `N`, `Q`, `H`) ; les indices `₁` et
 //! `₂` désignent deux régimes de rotation d'une même pompe.
 //!
 //! **Limite honnête** : modèle au niveau des **opérations unitaires**, sans
@@ -47,8 +47,8 @@
 /// Puissance hydraulique utile transmise au liquide
 /// `Ph = ρ · g · Q · H` (W).
 ///
-/// `density` (ρ) [kg·m⁻³], `gravity` (g) [m·s⁻²], `flow_rate` (Q) [m³·s⁻¹],
-/// `head` (H) [m].
+/// `density` (ρ) (kg·m⁻³), `gravity` (g) (m·s⁻²), `flow_rate` (Q) (m³·s⁻¹),
+/// `head` (H) (m).
 ///
 /// Panique si `ρ ≤ 0`, si `g ≤ 0`, si `Q < 0` ou si `H < 0` (grandeurs
 /// physiques d'un refoulement non physiques sinon).
@@ -64,8 +64,8 @@ pub fn pump_hydraulic_power(density: f64, gravity: f64, flow_rate: f64, head: f6
 /// rendement global
 /// `Pa = Ph / η` (W).
 ///
-/// `hydraulic_power` (Ph) [W], `efficiency` (η) rendement global
-/// [sans dimension].
+/// `hydraulic_power` (Ph) (W), `efficiency` (η) rendement global
+/// (sans dimension).
 ///
 /// Panique si `Ph < 0` ou si `η` hors de `]0, 1]` (rendement non physique ou
 /// division par zéro).
@@ -84,9 +84,9 @@ pub fn pump_shaft_power(hydraulic_power: f64, efficiency: f64) -> f64 {
 /// NPSH disponible (charge nette absolue à l'aspiration)
 /// `NPSHa = (P_atm − P_vap) / (ρ · g) + h_stat − h_pertes` (m).
 ///
-/// `atmospheric_pressure` (P_atm) [Pa], `vapor_pressure` (P_vap) [Pa],
-/// `density` (ρ) [kg·m⁻³], `gravity` (g) [m·s⁻²], `static_head` (h_stat) [m]
-/// (positif en charge, négatif en dépression), `friction_loss` (h_pertes) [m].
+/// `atmospheric_pressure` (P_atm) (Pa), `vapor_pressure` (P_vap) (Pa),
+/// `density` (ρ) (kg·m⁻³), `gravity` (g) (m·s⁻²), `static_head` (h_stat) (m)
+/// (positif en charge, négatif en dépression), `friction_loss` (h_pertes) (m).
 ///
 /// Panique si `ρ ≤ 0`, si `g ≤ 0`, si `P_atm < 0`, si `P_vap < 0`, si
 /// `P_vap > P_atm` (charge de pression absolue négative, non physique) ou si
@@ -124,8 +124,8 @@ pub fn pump_npsh_available(
 /// Vitesse spécifique de la pompe
 /// `Ns = N · √Q / H^0.75` (unités dépendant de la convention de `N`, `Q`, `H`).
 ///
-/// `rotation_speed` (N) [tr·min⁻¹ ou rad·s⁻¹], `flow_rate` (Q) [m³·s⁻¹],
-/// `head` (H) [m]. La valeur n'a de sens qu'à système d'unités fixé par
+/// `rotation_speed` (N) (tr·min⁻¹ ou rad·s⁻¹), `flow_rate` (Q) (m³·s⁻¹),
+/// `head` (H) (m). La valeur n'a de sens qu'à système d'unités fixé par
 /// l'appelant.
 ///
 /// Panique si `N < 0`, si `Q < 0` ou si `H ≤ 0` (élévation de `H` à une
@@ -140,8 +140,8 @@ pub fn pump_specific_speed(rotation_speed: f64, flow_rate: f64, head: f64) -> f6
 /// Débit homologue par la loi de similitude (affinité) à rendement constant
 /// `Q₂ = Q₁ · N₂ / N₁` (m³·s⁻¹).
 ///
-/// `flow_1` (Q₁) débit au régime 1 [m³·s⁻¹], `speed_1` (N₁) vitesse au
-/// régime 1 [même unité que `speed_2`], `speed_2` (N₂) vitesse au régime 2.
+/// `flow_1` (Q₁) débit au régime 1 (m³·s⁻¹), `speed_1` (N₁) vitesse au
+/// régime 1 (même unité que `speed_2`), `speed_2` (N₂) vitesse au régime 2.
 ///
 /// Panique si `Q₁ < 0`, si `N₁ ≤ 0` (division par zéro) ou si `N₂ < 0`. Valable
 /// uniquement à rendement constant entre points homologues d'une même roue.

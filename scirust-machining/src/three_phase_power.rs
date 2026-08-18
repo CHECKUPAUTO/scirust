@@ -10,9 +10,9 @@
 //! (identité)             S² = P² + Q²
 //! ```
 //!
-//! `U_L` tension composée (entre lignes) [V], `I_L` courant de ligne [A],
+//! `U_L` tension composée (entre lignes) (V), `I_L` courant de ligne (A),
 //! `cos φ` facteur de puissance [sans dimension, 0…1], `P` puissance active
-//! [W], `S` puissance apparente [VA], `Q` puissance réactive [var]. Le `√3`
+//! (W), `S` puissance apparente (VA), `Q` puissance réactive (var). Le `√3`
 //! provient du rapport tension composée / tension simple d'un système
 //! triphasé équilibré.
 //!
@@ -23,7 +23,7 @@
 //! charge et les régimes transitoires sont **négligés** ; en présence
 //! d'harmoniques, `S² = P² + Q²` cesse d'être vérifiée (puissance déformante).
 
-/// Puissance active `P = √3 · U_L · I_L · cos φ` [W].
+/// Puissance active `P = √3 · U_L · I_L · cos φ` (W).
 ///
 /// `line_voltage` tension composée en volts (V), `line_current` courant de
 /// ligne en ampères (A), `power_factor` facteur de puissance `cos φ` (sans
@@ -47,7 +47,7 @@ pub fn three_phase_active_power(line_voltage: f64, line_current: f64, power_fact
     3.0_f64.sqrt() * line_voltage * line_current * power_factor
 }
 
-/// Puissance apparente `S = √3 · U_L · I_L` [VA].
+/// Puissance apparente `S = √3 · U_L · I_L` (VA).
 ///
 /// `line_voltage` tension composée en volts (V), `line_current` courant de
 /// ligne en ampères (A) ; le résultat est en volt-ampères (VA).
@@ -65,7 +65,7 @@ pub fn three_phase_apparent_power(line_voltage: f64, line_current: f64) -> f64 {
     3.0_f64.sqrt() * line_voltage * line_current
 }
 
-/// Puissance réactive `Q = √3 · U_L · I_L · sin(acos cos φ)` [var].
+/// Puissance réactive `Q = √3 · U_L · I_L · sin(acos cos φ)` (var).
 ///
 /// `line_voltage` tension composée en volts (V), `line_current` courant de
 /// ligne en ampères (A), `power_factor` facteur de puissance `cos φ` (sans
@@ -92,7 +92,7 @@ pub fn three_phase_reactive_power(line_voltage: f64, line_current: f64, power_fa
     3.0_f64.sqrt() * line_voltage * line_current * sin_phi
 }
 
-/// Courant de ligne `I_L = P / (√3 · U_L · cos φ)` [A] (inverse de
+/// Courant de ligne `I_L = P / (√3 · U_L · cos φ)` (A) (inverse de
 /// [`three_phase_active_power`] par rapport au courant).
 ///
 /// `active_power` puissance active en watts (W), `line_voltage` tension

@@ -4,23 +4,23 @@
 //! vapeur vive, débit d'eau de refroidissement et surface d'échange requise.
 //!
 //! ```text
-//! charge du condenseur (total)     Q_c = V · λ                    [W]
-//! charge du rebouilleur (total)    Q_r = V' · λ'                  [W]
-//! consommation de vapeur vive      S   = Q_r / λ_s                [kg·s⁻¹]
-//! débit d'eau de refroidissement   m_w = Q_c / (c_p · ΔT_w)       [kg·s⁻¹]
-//! surface du rebouilleur           A   = Q_r / (U · ΔT_lm)        [m²]
+//! charge du condenseur (total)     Q_c = V · λ                    `W`
+//! charge du rebouilleur (total)    Q_r = V' · λ'                  `W`
+//! consommation de vapeur vive      S   = Q_r / λ_s                `kg·s⁻¹`
+//! débit d'eau de refroidissement   m_w = Q_c / (c_p · ΔT_w)       `kg·s⁻¹`
+//! surface du rebouilleur           A   = Q_r / (U · ΔT_lm)        `m²`
 //! ```
 //!
-//! `V` débit de vapeur montant en tête, condensé en totalité [kg·s⁻¹], `λ`
-//! chaleur latente de condensation du distillat [J·kg⁻¹], `Q_c` charge du
-//! condenseur [W] ; `V'` débit de vapeur (« boil-up ») produit au fond [kg·s⁻¹],
-//! `λ'` chaleur latente de vaporisation du résidu [J·kg⁻¹], `Q_r` charge du
-//! rebouilleur [W] ; `λ_s` chaleur latente de la vapeur vive de chauffe
-//! [J·kg⁻¹], `S` débit de vapeur vive [kg·s⁻¹] ; `c_p` capacité thermique
-//! massique de l'eau de refroidissement [J·kg⁻¹·K⁻¹], `ΔT_w` échauffement de
-//! l'eau [K], `m_w` débit d'eau de refroidissement [kg·s⁻¹] ; `U` coefficient
-//! global d'échange [W·m⁻²·K⁻¹], `ΔT_lm` écart de température moyen (moteur
-//! thermique) [K], `A` surface d'échange [m²].
+//! `V` débit de vapeur montant en tête, condensé en totalité (kg·s⁻¹), `λ`
+//! chaleur latente de condensation du distillat (J·kg⁻¹), `Q_c` charge du
+//! condenseur (W) ; `V'` débit de vapeur (« boil-up ») produit au fond (kg·s⁻¹),
+//! `λ'` chaleur latente de vaporisation du résidu (J·kg⁻¹), `Q_r` charge du
+//! rebouilleur (W) ; `λ_s` chaleur latente de la vapeur vive de chauffe
+//! (J·kg⁻¹), `S` débit de vapeur vive (kg·s⁻¹) ; `c_p` capacité thermique
+//! massique de l'eau de refroidissement (J·kg⁻¹·K⁻¹), `ΔT_w` échauffement de
+//! l'eau (K), `m_w` débit d'eau de refroidissement (kg·s⁻¹) ; `U` coefficient
+//! global d'échange (W·m⁻²·K⁻¹), `ΔT_lm` écart de température moyen (moteur
+//! thermique) (K), `A` surface d'échange (m²).
 //!
 //! **Limite honnête** : les débits de vapeur (`V`, `V'`), les chaleurs latentes
 //! (`λ`, `λ'`, `λ_s`), la capacité thermique (`c_p`), le coefficient global
@@ -37,8 +37,8 @@
 /// Charge du condenseur total `Q_c = V · λ` (W) : chaleur à évacuer pour
 /// condenser en totalité le débit de vapeur de tête.
 ///
-/// `vapor_flow` (V) débit de vapeur montant en tête [kg·s⁻¹], `latent_heat`
-/// (λ) chaleur latente de condensation du distillat [J·kg⁻¹].
+/// `vapor_flow` (V) débit de vapeur montant en tête (kg·s⁻¹), `latent_heat`
+/// (λ) chaleur latente de condensation du distillat (J·kg⁻¹).
 ///
 /// Panique si `vapor_flow < 0` ou si `latent_heat <= 0`.
 pub fn rbc_condenser_duty(vapor_flow: f64, latent_heat: f64) -> f64 {
@@ -53,8 +53,8 @@ pub fn rbc_condenser_duty(vapor_flow: f64, latent_heat: f64) -> f64 {
 /// Charge du rebouilleur total `Q_r = V' · λ'` (W) : chaleur à fournir pour
 /// vaporiser en totalité le débit de « boil-up » au fond de colonne.
 ///
-/// `boilup_flow` (V') débit de vapeur produit au fond [kg·s⁻¹], `latent_heat`
-/// (λ') chaleur latente de vaporisation du résidu [J·kg⁻¹].
+/// `boilup_flow` (V') débit de vapeur produit au fond (kg·s⁻¹), `latent_heat`
+/// (λ') chaleur latente de vaporisation du résidu (J·kg⁻¹).
 ///
 /// Panique si `boilup_flow < 0` ou si `latent_heat <= 0`.
 pub fn rbc_reboiler_duty(boilup_flow: f64, latent_heat: f64) -> f64 {
@@ -69,8 +69,8 @@ pub fn rbc_reboiler_duty(boilup_flow: f64, latent_heat: f64) -> f64 {
 /// Consommation de vapeur vive de chauffe `S = Q_r / λ_s` (kg·s⁻¹) : débit de
 /// vapeur vive dont la condensation apporte la charge du rebouilleur.
 ///
-/// `reboiler_duty` (Q_r) charge du rebouilleur [W], `steam_latent_heat` (λ_s)
-/// chaleur latente de la vapeur vive à sa pression de chauffe [J·kg⁻¹].
+/// `reboiler_duty` (Q_r) charge du rebouilleur (W), `steam_latent_heat` (λ_s)
+/// chaleur latente de la vapeur vive à sa pression de chauffe (J·kg⁻¹).
 ///
 /// Panique si `reboiler_duty < 0` ou si `steam_latent_heat <= 0`.
 pub fn rbc_steam_consumption(reboiler_duty: f64, steam_latent_heat: f64) -> f64 {
@@ -89,9 +89,9 @@ pub fn rbc_steam_consumption(reboiler_duty: f64, steam_latent_heat: f64) -> f64 
 /// d'eau nécessaire pour absorber la charge du condenseur en s'échauffant de
 /// `ΔT_w` en chaleur sensible.
 ///
-/// `condenser_duty` (Q_c) charge du condenseur [W], `water_heat_capacity` (c_p)
-/// capacité thermique massique de l'eau [J·kg⁻¹·K⁻¹], `temperature_rise` (ΔT_w)
-/// échauffement admis de l'eau [K].
+/// `condenser_duty` (Q_c) charge du condenseur (W), `water_heat_capacity` (c_p)
+/// capacité thermique massique de l'eau (J·kg⁻¹·K⁻¹), `temperature_rise` (ΔT_w)
+/// échauffement admis de l'eau (K).
 ///
 /// Panique si `condenser_duty < 0`, si `water_heat_capacity <= 0` ou si
 /// `temperature_rise <= 0`.
@@ -119,9 +119,9 @@ pub fn rbc_cooling_water_flow(
 /// pour transférer la charge `Q` sous un écart moteur `ΔT_lm` et un coefficient
 /// global `U`.
 ///
-/// `duty` (Q) charge thermique à transférer [W], `overall_coefficient` (U)
-/// coefficient global d'échange [W·m⁻²·K⁻¹], `temperature_difference` (ΔT_lm)
-/// écart de température moteur [K].
+/// `duty` (Q) charge thermique à transférer (W), `overall_coefficient` (U)
+/// coefficient global d'échange (W·m⁻²·K⁻¹), `temperature_difference` (ΔT_lm)
+/// écart de température moteur (K).
 ///
 /// Panique si `duty < 0`, si `overall_coefficient <= 0` ou si
 /// `temperature_difference <= 0`.

@@ -269,7 +269,8 @@ fn jacobi_eigen_dense<T: LanczosScalar>(
 /// `steps` pas de Lanczos (`1 ≤ steps ≤ n`) construisent une matrice
 /// tridiagonale `m×m` (`m = steps`, moins en cas de rupture chanceuse —
 /// cf. en-tête de module), diagonalisée par rotations de Jacobi (`tol`/
-/// `max_sweeps`, mêmes paramètres que [`crate::fixed::linalg::jacobi_eigen`]).
+/// `max_sweeps`, mêmes paramètres que le `jacobi_eigen` du sous-système
+/// virgule fixe optionnel).
 ///
 /// Renvoie les couples **triés par valeur propre décroissante** : les
 /// premiers/derniers éléments sont les approximations les plus fiables

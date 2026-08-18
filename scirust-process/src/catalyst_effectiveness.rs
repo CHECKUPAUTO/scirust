@@ -4,20 +4,20 @@
 //!
 //! ```text
 //! module de Thiele (réaction d'ordre 1)
-//!   φ = L · sqrt(k / D_e)                                      [sans dimension]
+//!   φ = L · sqrt(k / D_e)                                      `sans dimension`
 //! facteur d'efficacité d'une plaque (slab, ordre 1)
-//!   η = tanh(φ) / φ                                            [sans dimension]
+//!   η = tanh(φ) / φ                                            `sans dimension`
 //! facteur d'efficacité d'une sphère (ordre 1)
-//!   η = (3/φ) · (1/tanh(φ) − 1/φ) = (3/φ) · (coth(φ) − 1/φ)    [sans dimension]
+//!   η = (3/φ) · (1/tanh(φ) − 1/φ) = (3/φ) · (coth(φ) − 1/φ)    `sans dimension`
 //! vitesse observée
-//!   r_obs = η · r_int                                          [mol·m⁻³·s⁻¹]
+//!   r_obs = η · r_int                                          `mol·m⁻³·s⁻¹`
 //! ```
 //!
-//! `L` longueur caractéristique du grain (rapport volume/surface V/S) [m], `k`
-//! constante de vitesse intrinsèque d'ordre 1 [s⁻¹], `D_e` diffusivité effective
-//! dans le grain [m²·s⁻¹] ; `φ` module de Thiele [sans dimension] ; `η` facteur
-//! d'efficacité [sans dimension] ; `r_int` vitesse intrinsèque (sur grain sans
-//! limitation) [mol·m⁻³·s⁻¹] ; `r_obs` vitesse observée [mol·m⁻³·s⁻¹].
+//! `L` longueur caractéristique du grain (rapport volume/surface V/S) `m`, `k`
+//! constante de vitesse intrinsèque d'ordre 1 `s⁻¹`, `D_e` diffusivité effective
+//! dans le grain `m²·s⁻¹` ; `φ` module de Thiele `sans dimension` ; `η` facteur
+//! d'efficacité `sans dimension` ; `r_int` vitesse intrinsèque (sur grain sans
+//! limitation) `mol·m⁻³·s⁻¹` ; `r_obs` vitesse observée `mol·m⁻³·s⁻¹`.
 //!
 //! **Limite honnête** : grain de catalyseur **isotherme**, réaction d'**ordre 1**.
 //! La **diffusivité effective** `D_e`, la **constante de vitesse intrinsèque** `k`
@@ -32,9 +32,9 @@
 /// `φ = L · sqrt(k / D_e)` (sans dimension), rapport de la vitesse de réaction à
 /// la vitesse de diffusion dans le grain.
 ///
-/// `characteristic_length` (L) longueur caractéristique V/S [m], `rate_constant`
-/// (k) constante de vitesse intrinsèque d'ordre 1 [s⁻¹], `effective_diffusivity`
-/// (D_e) diffusivité effective [m²·s⁻¹].
+/// `characteristic_length` (L) longueur caractéristique V/S `m`, `rate_constant`
+/// (k) constante de vitesse intrinsèque d'ordre 1 `s⁻¹`, `effective_diffusivity`
+/// (D_e) diffusivité effective `m²·s⁻¹`.
 ///
 /// Panique si `L < 0`, si `k < 0`, ou si `D_e ≤ 0`.
 pub fn cateff_thiele_modulus_first_order(
@@ -61,7 +61,7 @@ pub fn cateff_thiele_modulus_first_order(
 /// `η = tanh(φ) / φ` (sans dimension) ; tend vers 1 quand `φ → 0` (pas de
 /// limitation diffusionnelle) et vers `1/φ` quand `φ` est grand.
 ///
-/// `thiele_modulus` (φ) module de Thiele [sans dimension].
+/// `thiele_modulus` (φ) module de Thiele `sans dimension`.
 ///
 /// Panique si `φ ≤ 0`.
 pub fn cateff_effectiveness_slab(thiele_modulus: f64) -> f64 {
@@ -76,7 +76,7 @@ pub fn cateff_effectiveness_slab(thiele_modulus: f64) -> f64 {
 /// `η = (3/φ) · (1/tanh(φ) − 1/φ)` (sans dimension), avec `1/tanh(φ) = coth(φ)` ;
 /// tend vers 1 quand `φ → 0` et vers `3/φ` quand `φ` est grand.
 ///
-/// `thiele_modulus` (φ) module de Thiele [sans dimension].
+/// `thiele_modulus` (φ) module de Thiele `sans dimension`.
 ///
 /// Panique si `φ ≤ 0`.
 pub fn cateff_effectiveness_sphere(thiele_modulus: f64) -> f64 {
@@ -90,11 +90,11 @@ pub fn cateff_effectiveness_sphere(thiele_modulus: f64) -> f64 {
 /// Vitesse observée sur le grain `r_obs = η · r_int` (mol·m⁻³·s⁻¹), vitesse
 /// intrinsèque pondérée par le facteur d'efficacité.
 ///
-/// `effectiveness_factor` (η) facteur d'efficacité [sans dimension], `intrinsic_rate`
-/// (r_int) vitesse intrinsèque [mol·m⁻³·s⁻¹].
+/// `effectiveness_factor` (η) facteur d'efficacité `sans dimension`, `intrinsic_rate`
+/// (r_int) vitesse intrinsèque `mol·m⁻³·s⁻¹`.
 ///
 /// Panique si `η < 0` ou si `η > 1` (le facteur d'efficacité isotherme d'ordre 1
-/// est borné à `[0, 1]`).
+/// est borné à ``0, 1``).
 pub fn cateff_observed_rate(effectiveness_factor: f64, intrinsic_rate: f64) -> f64 {
     assert!(
         (0.0..=1.0).contains(&effectiveness_factor),

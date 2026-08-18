@@ -2,21 +2,21 @@
 //! réacteur-séparateur-recyclage en **régime permanent**, avec purge.
 //!
 //! ```text
-//! taux de recyclage       R      = Ṙ / Ṗ_prod                          [sans dimension]
-//! conversion globale      X_ov   = X_sp / (1 − f·(1 − X_sp))           [sans dimension]
-//! débit entrée réacteur   Ḟ_réac = Ḟ_frais + Ṙ                         [mol/s ou kg/s]
-//! fraction de purge       y_purge = Ṗ / (Ṙ + Ṗ)                        [sans dimension]
+//! taux de recyclage       R      = Ṙ / Ṗ_prod                          `sans dimension`
+//! conversion globale      X_ov   = X_sp / (1 − f·(1 − X_sp))           `sans dimension`
+//! débit entrée réacteur   Ḟ_réac = Ḟ_frais + Ṙ                         `mol/s ou kg/s`
+//! fraction de purge       y_purge = Ṗ / (Ṙ + Ṗ)                        `sans dimension`
 //! ```
 //!
-//! `R` taux de recyclage [sans dimension], `Ṙ` débit recyclé [mol/s ou kg/s],
-//! `Ṗ_prod` débit de produit sortant de la boucle [mol/s ou kg/s], `X_ov`
-//! conversion globale (rapportée à l'alimentation fraîche) [sans dimension],
-//! `X_sp` conversion par passe dans le réacteur [sans dimension], `f` fraction
-//! des non-convertis effectivement recyclée après séparation [sans dimension],
-//! `Ḟ_réac` débit à l'entrée du réacteur [mol/s ou kg/s], `Ḟ_frais` débit
-//! d'alimentation fraîche [mol/s ou kg/s], `y_purge` fraction du courant
-//! recyclage-plus-purge qui part en purge [sans dimension], `Ṗ` débit de purge
-//! [mol/s ou kg/s].
+//! `R` taux de recyclage `sans dimension`, `Ṙ` débit recyclé `mol/s ou kg/s`,
+//! `Ṗ_prod` débit de produit sortant de la boucle `mol/s ou kg/s`, `X_ov`
+//! conversion globale (rapportée à l'alimentation fraîche) `sans dimension`,
+//! `X_sp` conversion par passe dans le réacteur `sans dimension`, `f` fraction
+//! des non-convertis effectivement recyclée après séparation `sans dimension`,
+//! `Ḟ_réac` débit à l'entrée du réacteur `mol/s ou kg/s`, `Ḟ_frais` débit
+//! d'alimentation fraîche `mol/s ou kg/s`, `y_purge` fraction du courant
+//! recyclage-plus-purge qui part en purge `sans dimension`, `Ṗ` débit de purge
+//! `mol/s ou kg/s`.
 //!
 //! **Limite honnête** : ces relations décrivent une **boucle
 //! réacteur-séparateur-recyclage en régime permanent** par simple **comptage
@@ -29,11 +29,11 @@
 //! constante cinétique, volatilité ou isotherme n'est inventée ici ; ce module
 //! ne **résout pas** le système d'équations couplé du schéma complet.
 
-/// Taux de recyclage `R = Ṙ / Ṗ_prod` [sans dimension].
+/// Taux de recyclage `R = Ṙ / Ṗ_prod` `sans dimension`.
 ///
 /// `recycle_flow` `Ṙ` débit du courant recyclé vers le réacteur
-/// [mol/s ou kg/s], `product_flow` `Ṗ_prod` débit du produit quittant la boucle
-/// [mol/s ou kg/s]. `R = 4` signifie qu'on recycle quatre fois le débit de
+/// `mol/s ou kg/s`, `product_flow` `Ṗ_prod` débit du produit quittant la boucle
+/// `mol/s ou kg/s`. `R = 4` signifie qu'on recycle quatre fois le débit de
 /// produit.
 ///
 /// Panique si `recycle_flow` est négatif ou non fini, ou si `product_flow`
@@ -51,17 +51,17 @@ pub fn recy_recycle_ratio(recycle_flow: f64, product_flow: f64) -> f64 {
 }
 
 /// Conversion globale d'une boucle avec séparation et recyclage des
-/// non-convertis `X_ov = X_sp / (1 − f·(1 − X_sp))` [sans dimension].
+/// non-convertis `X_ov = X_sp / (1 − f·(1 − X_sp))` `sans dimension`.
 ///
 /// `single_pass_conversion` `X_sp` conversion par passe dans le réacteur
-/// [sans dimension, dans `[0, 1]`], `fraction_unreacted_recycled` `f` fraction
-/// des non-convertis renvoyée au réacteur par le séparateur [sans dimension,
-/// dans `[0, 1]`]. La conversion globale est rapportée à l'alimentation
+/// `sans dimension, dans ``0, 1```, `fraction_unreacted_recycled` `f` fraction
+/// des non-convertis renvoyée au réacteur par le séparateur `sans dimension`,
+/// dans ``0, 1``. La conversion globale est rapportée à l'alimentation
 /// fraîche : `f = 0` (aucun recyclage) redonne `X_ov = X_sp`, tandis que
 /// `f = 1` (recyclage total des non-convertis) donne `X_ov = 1`.
 ///
 /// Panique si `single_pass_conversion` ou `fraction_unreacted_recycled` sort de
-/// `[0, 1]`, ou si le dénominateur `1 − f·(1 − X_sp)` n'est pas strictement
+/// ``0, 1``, ou si le dénominateur `1 − f·(1 − X_sp)` n'est pas strictement
 /// positif (cas dégénéré `X_sp = 0` et `f = 1`).
 pub fn recy_overall_conversion_with_separation(
     single_pass_conversion: f64,
@@ -84,11 +84,11 @@ pub fn recy_overall_conversion_with_separation(
 }
 
 /// Débit total à l'entrée du réacteur `Ḟ_réac = Ḟ_frais + Ṙ`
-/// [mol/s ou kg/s], somme de l'alimentation fraîche et du recyclage au nœud de
+/// `mol/s ou kg/s`, somme de l'alimentation fraîche et du recyclage au nœud de
 /// mélange.
 ///
-/// `fresh_feed` `Ḟ_frais` débit d'alimentation fraîche [mol/s ou kg/s],
-/// `recycle_flow` `Ṙ` débit recyclé rejoignant l'alimentation [mol/s ou kg/s].
+/// `fresh_feed` `Ḟ_frais` débit d'alimentation fraîche `mol/s ou kg/s`,
+/// `recycle_flow` `Ṙ` débit recyclé rejoignant l'alimentation `mol/s ou kg/s`.
 /// Le réacteur voit ce débit combiné, d'où une conversion par passe rapportée à
 /// `Ḟ_réac` et non à `Ḟ_frais`.
 ///
@@ -106,11 +106,11 @@ pub fn recy_reactor_feed(fresh_feed: f64, recycle_flow: f64) -> f64 {
 }
 
 /// Fraction du courant recyclage-plus-purge dérivée en purge
-/// `y_purge = Ṗ / (Ṙ + Ṗ)` [sans dimension].
+/// `y_purge = Ṗ / (Ṙ + Ṗ)` `sans dimension`.
 ///
-/// `purge_flow` `Ṗ` débit de purge [mol/s ou kg/s],
+/// `purge_flow` `Ṗ` débit de purge `mol/s ou kg/s`,
 /// `recycle_plus_purge_flow` `Ṙ + Ṗ` débit total avant séparation
-/// purge/recyclage [mol/s ou kg/s]. La purge évacue les inertes accumulés ;
+/// purge/recyclage `mol/s ou kg/s`. La purge évacue les inertes accumulés ;
 /// la fraction complémentaire `1 − y_purge` est recyclée.
 ///
 /// Panique si `recycle_plus_purge_flow` n'est pas strictement positif, si

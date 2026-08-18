@@ -10,7 +10,7 @@
 //!   dépassent le cache ([`scale_stream_f32`], [`axpy_prefetch_f32`]).
 //!
 //! La **quantification** (int8 VNNI/dotprod, bf16), qui est cross-arch, vit
-//! désormais dans [`crate::quant`].
+//! désormais dans le sous-système `quant` optionnel.
 //!
 //! Chaque entrée publique fait de la détection *runtime* et retombe sur une
 //! implémentation scalaire portable, donc l'appel est sûr sur n'importe quel

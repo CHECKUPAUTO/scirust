@@ -3,21 +3,21 @@
 //! diviseur de courant.
 //!
 //! ```text
-//! bilan global      ΔM = Σ(entrées) − Σ(sorties)             [kg/s ou mol/s]
-//! débit partiel     ṁᵢ = F·xᵢ − Σ(autres sorties du const.)  [kg/s ou mol/s]
-//! taux de recyclage R  = Ṙ / Ḟ                               [sans dimension]
-//! débit de purge    Ṗ  = (Ṙ+Ṗ) − Ṙ                          [kg/s ou mol/s]
-//! fraction de split φ  = ṁ_branche / ṁ_total                 [sans dimension]
+//! bilan global      ΔM = Σ(entrées) − Σ(sorties)             `kg/s ou mol/s`
+//! débit partiel     ṁᵢ = F·xᵢ − Σ(autres sorties du const.)  `kg/s ou mol/s`
+//! taux de recyclage R  = Ṙ / Ḟ                               `sans dimension`
+//! débit de purge    Ṗ  = (Ṙ+Ṗ) − Ṙ                          `kg/s ou mol/s`
+//! fraction de split φ  = ṁ_branche / ṁ_total                 `sans dimension`
 //! ```
 //!
 //! `ΔM` déséquilibre du bilan (nul à l'équilibre), `Σ(entrées)`/`Σ(sorties)`
-//! sommes des débits massiques ou molaires [kg/s ou mol/s], `F` débit d'entrée
-//! [kg/s ou mol/s], `xᵢ` fraction (massique ou molaire) du constituant dans
-//! l'entrée [sans dimension], `ṁᵢ` débit partiel du constituant obtenu par
-//! différence [kg/s ou mol/s], `Ṙ` débit de recyclage [kg/s ou mol/s], `Ḟ`
-//! débit d'alimentation fraîche [kg/s ou mol/s], `R` taux de recyclage [sans
-//! dimension], `Ṗ` débit de purge [kg/s ou mol/s], `φ` fraction dérivée par une
-//! branche d'un diviseur [sans dimension].
+//! sommes des débits massiques ou molaires `kg/s ou mol/s`, `F` débit d'entrée
+//! `kg/s ou mol/s`, `xᵢ` fraction (massique ou molaire) du constituant dans
+//! l'entrée `sans dimension`, `ṁᵢ` débit partiel du constituant obtenu par
+//! différence `kg/s ou mol/s`, `Ṙ` débit de recyclage `kg/s ou mol/s`, `Ḟ`
+//! débit d'alimentation fraîche `kg/s ou mol/s`, `R` taux de recyclage [sans
+//! dimension], `Ṗ` débit de purge `kg/s ou mol/s`, `φ` fraction dérivée par une
+//! branche d'un diviseur `sans dimension`.
 //!
 //! **Limite honnête** : ces relations traduisent la **conservation de la masse
 //! en régime permanent, sans accumulation ni réaction chimique** (un bilan de
@@ -29,7 +29,7 @@
 //! **résolvent pas** les systèmes d'équations couplés d'un schéma avec recyclage.
 
 /// Déséquilibre du bilan matière global `ΔM = Σ(entrées) − Σ(sorties)`
-/// [kg/s ou mol/s], **nul** en régime permanent conservatif.
+/// `kg/s ou mol/s`, **nul** en régime permanent conservatif.
 ///
 /// `inputs` débits entrants, `outputs` débits sortants (mêmes unités, kg/s ou
 /// mol/s). Une valeur positive signale un excès d'entrée (accumulation), une
@@ -50,16 +50,16 @@ pub fn massbal_overall_steady(inputs: &[f64], outputs: &[f64]) -> f64 {
 }
 
 /// Débit partiel d'un constituant obtenu **par différence**
-/// `ṁᵢ = F·xᵢ − Σ(autres sorties du constituant)` [kg/s ou mol/s].
+/// `ṁᵢ = F·xᵢ − Σ(autres sorties du constituant)` `kg/s ou mol/s`.
 ///
-/// `input_flow` `F` débit total d'entrée [kg/s ou mol/s], `input_fraction` `xᵢ`
-/// fraction (massique ou molaire) du constituant dans l'entrée [sans dimension,
-/// dans `[0, 1]`], `other_outputs_component` débits partiels **du même
-/// constituant** déjà connus dans les autres courants sortants [kg/s ou mol/s].
+/// `input_flow` `F` débit total d'entrée `kg/s ou mol/s`, `input_fraction` `xᵢ`
+/// fraction (massique ou molaire) du constituant dans l'entrée `sans dimension`,
+/// dans ``0, 1``, `other_outputs_component` débits partiels **du même
+/// constituant** déjà connus dans les autres courants sortants `kg/s ou mol/s`.
 /// Le résultat ferme le bilan du constituant sur le courant restant.
 ///
 /// Panique si `input_flow` est négatif ou non fini, si `input_fraction` sort de
-/// `[0, 1]`, ou si un débit partiel fourni est négatif ou non fini.
+/// ``0, 1``, ou si un débit partiel fourni est négatif ou non fini.
 pub fn massbal_component_output(
     input_flow: f64,
     input_fraction: f64,
@@ -84,10 +84,10 @@ pub fn massbal_component_output(
     input_flow * input_fraction - others
 }
 
-/// Taux de recyclage `R = Ṙ / Ḟ` [sans dimension].
+/// Taux de recyclage `R = Ṙ / Ḟ` `sans dimension`.
 ///
-/// `recycle_flow` `Ṙ` débit recyclé [kg/s ou mol/s], `fresh_feed_flow` `Ḟ` débit
-/// d'alimentation fraîche [kg/s ou mol/s]. `R = 2` signifie qu'on recycle deux
+/// `recycle_flow` `Ṙ` débit recyclé `kg/s ou mol/s`, `fresh_feed_flow` `Ḟ` débit
+/// d'alimentation fraîche `kg/s ou mol/s`. `R = 2` signifie qu'on recycle deux
 /// fois le débit frais.
 ///
 /// Panique si `recycle_flow` est négatif ou non fini, ou si `fresh_feed_flow`
@@ -104,12 +104,12 @@ pub fn massbal_recycle_ratio(recycle_flow: f64, fresh_feed_flow: f64) -> f64 {
     recycle_flow / fresh_feed_flow
 }
 
-/// Débit de purge `Ṗ = (Ṙ+Ṗ) − Ṙ` [kg/s ou mol/s], soustrait à un courant de
+/// Débit de purge `Ṗ = (Ṙ+Ṗ) − Ṙ` `kg/s ou mol/s`, soustrait à un courant de
 /// recyclage-plus-purge pour isoler la fraction purgée.
 ///
 /// `recycle_plus_purge_flow` `Ṙ+Ṗ` débit total avant séparation purge/recyclage
-/// [kg/s ou mol/s], `recycle_flow` `Ṙ` débit effectivement recyclé
-/// [kg/s ou mol/s]. Le reste part en purge.
+/// `kg/s ou mol/s`, `recycle_flow` `Ṙ` débit effectivement recyclé
+/// `kg/s ou mol/s`. Le reste part en purge.
 ///
 /// Panique si un débit est négatif ou non fini, ou si le débit recyclé dépasse
 /// le débit total (purge négative impossible).
@@ -130,10 +130,10 @@ pub fn massbal_purge_flow(recycle_plus_purge_flow: f64, recycle_flow: f64) -> f6
 }
 
 /// Fraction dérivée par une branche d'un diviseur de courant
-/// `φ = ṁ_branche / ṁ_total` [sans dimension].
+/// `φ = ṁ_branche / ṁ_total` `sans dimension`.
 ///
-/// `branch_flow` `ṁ_branche` débit de la branche considérée [kg/s ou mol/s],
-/// `total_flow` `ṁ_total` débit entrant dans le diviseur [kg/s ou mol/s]. Un
+/// `branch_flow` `ṁ_branche` débit de la branche considérée `kg/s ou mol/s`,
+/// `total_flow` `ṁ_total` débit entrant dans le diviseur `kg/s ou mol/s`. Un
 /// diviseur ne modifie pas la composition : `φ` s'applique identiquement à
 /// chaque constituant.
 ///

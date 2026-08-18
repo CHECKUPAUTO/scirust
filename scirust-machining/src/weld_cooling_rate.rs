@@ -23,7 +23,7 @@
 //! mince (régime 2D). L'apport linéique **net** `Q` (rendement d'arc compris),
 //! la conductivité `k` et la température de préchauffage `T0` sont **fournis par
 //! l'appelant** ; aucune valeur matériau ni rendement « par défaut » n'est
-//! inventé. Voir [`crate::weld_heat_input`] (calcul de `Q`) et
+//! inventé. Voir [`crate::weld_heat_input()`] (calcul de `Q`) et
 //! [`crate::weld_preheat`] (choix de `T0`).
 
 use core::f64::consts::PI;

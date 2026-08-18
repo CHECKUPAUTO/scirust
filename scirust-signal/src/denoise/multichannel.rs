@@ -112,7 +112,7 @@ const JACOBI_MAX_SWEEPS: usize = 64;
 /// `channels` is one `Vec<f64>` per channel, all of the same length `n`; sample `i`
 /// is the vector `x_i = (channels[0][i], …, channels[C-1][i])`. For every `i` the
 /// window of vectors `x_j`, `j ∈ [i−h, i+h]` (borders mirrored with
-/// [`super::mirror_index`], so border windows contain duplicated samples exactly like
+/// `super::mirror_index`, so border windows contain duplicated samples exactly like
 /// the scalar rank filters), is searched for the candidate minimizing the sum of
 /// Euclidean distances to the other window vectors — the *vector median*, the
 /// sample-restricted geometric median. The output at `i` is that entire input
@@ -230,7 +230,7 @@ pub fn vector_median(channels: &[Vec<f64>], half_window: usize) -> Vec<Vec<f64>>
 /// ## Estimator
 ///
 /// 1. Per-channel noise scale `σ_c` via the robust MAD rule of
-///    [`super::estimate_noise_std_helper`] → noise covariance `N = diag(σ_c²)`
+///    `super::estimate_noise_std_helper` → noise covariance `N = diag(σ_c²)`
 ///    (independent noise across channels is the model, matching the fixtures).
 /// 2. Total covariance `T` of the sample vectors around their per-channel means
 ///    (`n−1` denominator; symmetric by construction).

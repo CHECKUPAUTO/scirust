@@ -24,8 +24,8 @@
 //!    a [`RejectAll`](crate::TournamentDecision::RejectAll) deploys nothing and
 //!    issues no coverage certificate.
 //! 2. **Calibrate** — fit a conformal band on the selected estimator's
-//!    calibration residuals: marginal [`SplitConformal`](crate::SplitConformal),
-//!    or per-group [`MondrianConformal`](crate::MondrianConformal) when group
+//!    calibration residuals: marginal [`SplitConformal`],
+//!    or per-group [`MondrianConformal`] when group
 //!    labels are supplied.
 //! 3. **Certify** — measure the band's *empirical coverage on the held-out test
 //!    residuals* and assemble the certificate with an explicit list of guarantees

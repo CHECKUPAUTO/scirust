@@ -3,18 +3,18 @@
 //! temps mort de chargement/nettoyage.
 //!
 //! ```text
-//! ordre 0   t = C₀·X / k                                          [s]
-//! ordre 1   t = −ln(1 − X) / k                                    [s]
-//! ordre 2   t = X / (k·C₀·(1 − X))         (réactif unique)       [s]
-//! cycle     t_c = t_réaction + t_mort                             [s]
+//! ordre 0   t = C₀·X / k                                          `s`
+//! ordre 1   t = −ln(1 − X) / k                                    `s`
+//! ordre 2   t = X / (k·C₀·(1 − X))         (réactif unique)       `s`
+//! cycle     t_c = t_réaction + t_mort                             `s`
 //! ```
 //!
-//! `t` temps de réaction pour atteindre la conversion `X` [s], `X` taux de
-//! conversion du réactif limitant [sans dimension, 0 ≤ X < 1], `k` constante de
+//! `t` temps de réaction pour atteindre la conversion `X` `s`, `X` taux de
+//! conversion du réactif limitant `sans dimension, 0 ≤ X < 1`, `k` constante de
 //! vitesse [unité dépendant de l'ordre : s⁻¹ à l'ordre 1, mol⁻¹·m³·s⁻¹ à l'ordre 2,
 //! mol·m⁻³·s⁻¹ à l'ordre 0], `C₀` concentration initiale du réactif
-//! [mol·m⁻³, cohérente avec `k`], `t_c` temps de cycle [s], `t_mort` temps mort
-//! (chargement, vidange, nettoyage) [s].
+//! `mol·m⁻³, cohérente avec `k``, `t_c` temps de cycle `s`, `t_mort` temps mort
+//! (chargement, vidange, nettoyage) `s`.
 //!
 //! **Limite honnête** : ces relations décrivent un réacteur **discontinu à volume
 //! constant** et **isotherme**, avec un **ordre de réaction fourni** (0, 1 ou 2 ;
@@ -26,11 +26,11 @@
 //! réactions multiples ne sont **pas** traités.
 
 /// Temps requis en réacteur batch pour une réaction d'**ordre 0** :
-/// `t = C₀·X / k` [s].
+/// `t = C₀·X / k` `s`.
 ///
-/// `conversion` `X` taux de conversion [sans dimension, 0 ≤ X < 1],
-/// `rate_constant` `k` constante de vitesse d'ordre 0 [mol·m⁻³·s⁻¹],
-/// `initial_concentration` `C₀` concentration initiale du réactif [mol·m⁻³].
+/// `conversion` `X` taux de conversion `sans dimension, 0 ≤ X < 1`,
+/// `rate_constant` `k` constante de vitesse d'ordre 0 `mol·m⁻³·s⁻¹`,
+/// `initial_concentration` `C₀` concentration initiale du réactif `mol·m⁻³`.
 ///
 /// Panique si `conversion` n'est pas dans `[0, 1[`, ou si `rate_constant` /
 /// `initial_concentration` n'est pas fini ou n'est pas strictement positif.
@@ -55,10 +55,10 @@ pub fn batch_time_zero_order(
 }
 
 /// Temps requis en réacteur batch pour une réaction d'**ordre 1** :
-/// `t = −ln(1 − X) / k` [s].
+/// `t = −ln(1 − X) / k` `s`.
 ///
-/// `conversion` `X` taux de conversion [sans dimension, 0 ≤ X < 1],
-/// `rate_constant` `k` constante de vitesse d'ordre 1 [s⁻¹].
+/// `conversion` `X` taux de conversion `sans dimension, 0 ≤ X < 1`,
+/// `rate_constant` `k` constante de vitesse d'ordre 1 `s⁻¹`.
 ///
 /// Panique si `conversion` n'est pas dans `[0, 1[`, ou si `rate_constant`
 /// n'est pas fini ou n'est pas strictement positif.
@@ -75,11 +75,11 @@ pub fn batch_time_first_order(conversion: f64, rate_constant: f64) -> f64 {
 }
 
 /// Temps requis en réacteur batch pour une réaction d'**ordre 2** (réactif
-/// unique) : `t = X / (k·C₀·(1 − X))` [s].
+/// unique) : `t = X / (k·C₀·(1 − X))` `s`.
 ///
-/// `conversion` `X` taux de conversion [sans dimension, 0 ≤ X < 1],
-/// `rate_constant` `k` constante de vitesse d'ordre 2 [mol⁻¹·m³·s⁻¹],
-/// `initial_concentration` `C₀` concentration initiale du réactif [mol·m⁻³].
+/// `conversion` `X` taux de conversion `sans dimension, 0 ≤ X < 1`,
+/// `rate_constant` `k` constante de vitesse d'ordre 2 `mol⁻¹·m³·s⁻¹`,
+/// `initial_concentration` `C₀` concentration initiale du réactif `mol·m⁻³`.
 ///
 /// Panique si `conversion` n'est pas dans `[0, 1[`, ou si `rate_constant` /
 /// `initial_concentration` n'est pas fini ou n'est pas strictement positif.
@@ -103,10 +103,10 @@ pub fn batch_time_second_order(
     conversion / (rate_constant * initial_concentration * (1.0 - conversion))
 }
 
-/// Temps de **cycle** d'un réacteur batch : `t_c = t_réaction + t_mort` [s].
+/// Temps de **cycle** d'un réacteur batch : `t_c = t_réaction + t_mort` `s`.
 ///
-/// `reaction_time` `t_réaction` durée de réaction utile [s], `downtime`
-/// `t_mort` temps mort de chargement, vidange et nettoyage [s].
+/// `reaction_time` `t_réaction` durée de réaction utile `s`, `downtime`
+/// `t_mort` temps mort de chargement, vidange et nettoyage `s`.
 ///
 /// Panique si `reaction_time` ou `downtime` n'est pas fini ou est négatif.
 pub fn batch_cycle_time(reaction_time: f64, downtime: f64) -> f64 {

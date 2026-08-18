@@ -9,8 +9,8 @@
 //! to 50 % — is the number on the datasheet). Given a known PSF, an image blurred
 //! by the optics can be partly **restored** by deconvolution.
 //!
-//! This module works on the crate's [`Image`](crate::Image) and reuses its
-//! spatial [`convolve2d`](crate::convolve2d). The MTF is a direct DFT of the
+//! This module works on the crate's [`Image`] and reuses its
+//! spatial [`convolve2d`]. The MTF is a direct DFT of the
 //! line-spread function (no power-of-two constraint) and Richardson–Lucy
 //! deconvolution is purely spatial (convolutions only); the alternative
 //! **Wiener** deconvolution is frequency-domain, built on a separable 2-D FFT

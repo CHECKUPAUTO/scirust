@@ -696,7 +696,7 @@ impl NdLinear {
     }
 
     /// Load the parameters stored under `prefix`. Errors on a missing key or a
-    /// rank/shape mismatch (see [`take_state_dict_param`]).
+    /// rank/shape mismatch (see `take_state_dict_param`).
     pub fn load_state_dict_from(
         &mut self,
         prefix: &str,
@@ -1679,7 +1679,7 @@ const GATE_EXP_CLAMP: f32 = 40.0;
 /// `tanh` is built from the available `sigmoid` op via the exact identity
 /// `tanh(x) = 2σ(2x) − 1`. The full log-space stabiliser state `mₜ` is **omitted**:
 /// it cancels exactly in the ratio `cₜ/nₜ` (a pure numerical device). Instead the
-/// input-gate argument `ĩₜ` is defensively clamped (see [`clamp_gate_arg`]) so
+/// input-gate argument `ĩₜ` is defensively clamped (see `clamp_gate_arg`) so
 /// `exp` cannot overflow to `+inf` on an unbounded projection; the normaliser
 /// `nₜ ≥ iₜ = exp(ĩₜ) > 0` is
 /// provably positive so the division is always well-defined. Because `cₜ/nₜ` is a

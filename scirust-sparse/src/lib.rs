@@ -12,7 +12,7 @@
 //! * [`conjugate_gradient`] — the conjugate-gradient iteration for symmetric
 //!   positive-definite systems.
 //!
-//! Every fallible operation returns [`Result`](std::result::Result) with the
+//! Every fallible operation returns [`Result`] with the
 //! [`SparseError`] enum; malformed-but-well-typed input (out-of-range indices,
 //! dimension mismatches, singular matrices) never panics.
 //!

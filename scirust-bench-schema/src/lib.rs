@@ -1,9 +1,9 @@
 //! **Shared benchmark-result schema — the CANR §9 record, enforced as a type.**
 //!
-//! [CANR] (`docs/research/CANR_CERTIFIED_ADAPTIVE_REPRESENTATIONS_2026-07-16.md`
+//! `CANR` (`docs/research/CANR_CERTIFIED_ADAPTIVE_REPRESENTATIONS_2026-07-16.md`
 //! §9) proposed one machine-readable row shape for every benchmark in the
 //! workspace: `{kernel, dataset, method, seed, metric, value, ci, cert}`.
-//! [ANEE §3] (`docs/research/ANEE_ADAPTIVE_NUMERICAL_EXECUTION_ENGINE_2026-07-17.md`)
+//! `ANEE §3` (`docs/research/ANEE_ADAPTIVE_NUMERICAL_EXECUTION_ENGINE_2026-07-17.md`)
 //! then verified, one phase later, that the proposal was **never adopted**:
 //! every real harness (tdi-bench, `vst_bench`'s ad hoc `BenchRow`, ~16
 //! criterion targets) rolled its own incompatible output shape. The program's
@@ -83,7 +83,7 @@ pub struct ConfidenceInterval {
 
 /// A machine-checkable certificate attached to a measurement — e.g. the
 /// `κ_rt`-based round-trip bound of `scirust-core::certified_numerics`
-/// ([CANR §3.2]), or a determinism-level declaration ([CANR §6.1]).
+/// (`CANR §3.2`), or a determinism-level declaration (`CANR §6.1`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Certificate {
     /// What the certificate asserts (human-readable, stable).
@@ -91,7 +91,7 @@ pub struct Certificate {
     /// Certified bound in ulps, when the certificate is an error bound.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub bound_ulps: Option<f64>,
-    /// Declared determinism level (`"D0"`..`"D3"`, [CANR §6.1]), when the
+    /// Declared determinism level (`"D0"`..`"D3"`, `CANR §6.1`), when the
     /// certificate is a reproducibility claim.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub determinism: Option<String>,

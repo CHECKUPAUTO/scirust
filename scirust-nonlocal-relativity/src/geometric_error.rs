@@ -190,7 +190,7 @@ fn validated_timelike_norm<const D: usize>(
 /// This delegates to the reusable geometry-core primitive
 /// [`scirust_relativity::orthonormal_tetrad`] so the Gram-Schmidt construction
 /// lives in exactly one place; it maps that primitive's typed errors back to
-/// this crate's [`NonlocalRelativityError`] contract (see [`map_tetrad_error`]),
+/// this crate's [`NonlocalRelativityError`] contract (see `map_tetrad_error`),
 /// leaving the observable behaviour unchanged.
 ///
 /// The timelike leg is the normalized four-velocity; the spacelike legs are

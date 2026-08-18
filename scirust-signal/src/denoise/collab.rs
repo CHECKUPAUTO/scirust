@@ -65,7 +65,7 @@ fn prev_pow2(m: usize) -> usize {
 /// Haar case on thousands of tiny buffers — plain butterflies into a caller-provided
 /// scratch keep the inner loop allocation-free. The 1/√2 normalization makes every
 /// level exactly orthonormal, which is what keeps σ constant across scales and the
-/// `2.7·σ` threshold of [`HARD_THRESHOLD_FACTOR`] valid for every coefficient.
+/// `2.7·σ` threshold of `HARD_THRESHOLD_FACTOR` valid for every coefficient.
 fn haar_forward(buf: &mut [f64], scratch: &mut [f64]) {
     let mut len = buf.len();
     while len >= 2
@@ -110,7 +110,7 @@ fn haar_inverse(buf: &mut [f64], scratch: &mut [f64]) {
 ///
 /// 1. **References.** Reference patches of length `patch_len` start every
 ///    `patch_len/2` samples. Right-of-boundary patch samples come from a
-///    mirror-extended copy of the signal (built once with [`super::mirror_index`]
+///    mirror-extended copy of the signal (built once with `super::mirror_index`
 ///    rather than reflecting per index inside the hot matching loop), so every start
 ///    position in `0..n` yields a full patch; estimates that land on the extension are
 ///    discarded at aggregation time since they duplicate interior samples.
@@ -122,7 +122,7 @@ fn haar_inverse(buf: &mut [f64], scratch: &mut [f64]) {
 /// 3. **Collaborative shrinkage.** The group is stacked into a `(group × patch_len)`
 ///    block and analysed by a separable 2-D orthonormal Haar DWT: full depth along
 ///    each patch, then full depth along the group axis. Every coefficient is
-///    hard-thresholded at `2.7·σ` ([`HARD_THRESHOLD_FACTOR`]) **except the single
+///    hard-thresholded at `2.7·σ` (`HARD_THRESHOLD_FACTOR`) **except the single
 ///    (DC, DC) coefficient** — the group's mean level is never thresholded, so even a
 ///    weak but consistent baseline survives. Both transforms are then inverted.
 /// 4. **Aggregation.** Every filtered patch is written back to its origin with weight
@@ -150,7 +150,7 @@ fn haar_inverse(buf: &mut [f64], scratch: &mut [f64]) {
 ///   transform thresholding with overlapping aggregation.
 /// * `noise_std` — noise standard deviation σ. **`noise_std ≤ 0` estimates σ
 ///   automatically** with the robust MAD rule of
-///   [`super::estimate_noise_std_helper`].
+///   `super::estimate_noise_std_helper`.
 ///
 /// Complexity is **O(n · search_half)** for the matching (each of the `n/(patch_len/2)`
 /// references scans `2·search_half + 1` candidates at `patch_len` flops) plus
@@ -337,7 +337,7 @@ pub fn collab1d(
 
 /// [`collab1d`] with the recommended defaults: `patch_len = 16`, `search_half = 48`,
 /// `max_group = 16`, automatic noise scale (robust MAD,
-/// [`super::estimate_noise_std_helper`]). The first choice for strongly self-similar
+/// `super::estimate_noise_std_helper`). The first choice for strongly self-similar
 /// signals — periodic waveforms, repeated transients, piecewise-constant records —
 /// where filtering whole groups jointly out-denoises averaging patch centres.
 ///

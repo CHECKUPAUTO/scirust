@@ -4,25 +4,25 @@
 //!
 //! ```text
 //! masse volumique du mélange
-//!   ρ_m  = ρ_s · C_v + ρ_l · (1 − C_v)                          [kg·m⁻³]
+//!   ρ_m  = ρ_s · C_v + ρ_l · (1 − C_v)                          `kg·m⁻³`
 //! fraction volumique depuis la fraction massique
-//!   C_v  = (w/ρ_s) / [ (w/ρ_s) + (1 − w)/ρ_l ]                  [-]
+//!   C_v  = (w/ρ_s) / `(w/ρ_s) + (1 − w)/ρ_l`                  [-]
 //! vitesse critique de dépôt (Durand)
-//!   V_c  = F_L · sqrt( 2·g·D·(ρ_s − ρ_l)/ρ_l )                  [m·s⁻¹]
+//!   V_c  = F_L · sqrt( 2·g·D·(ρ_s − ρ_l)/ρ_l )                  `m·s⁻¹`
 //! excès relatif de perte de charge (Durand)
-//!   φ_D  = K · [ V_m² / ( g·D·((ρ_s − ρ_l)/ρ_l)·sqrt(C_D) ) ]^(−3/2)  [-]
+//!   φ_D  = K · `V_m² / ( g·D·((ρ_s − ρ_l)/ρ_l)·sqrt(C_D) )`^(−3/2)  [-]
 //! ```
 //!
-//! `ρ_s` masse volumique du solide [kg·m⁻³], `ρ_l` masse volumique du liquide
-//! porteur [kg·m⁻³], `C_v` fraction volumique en solides [sans dimension,
-//! 0 ≤ C_v ≤ 1], `w` fraction massique en solides [sans dimension, 0 ≤ w ≤ 1],
-//! `ρ_m` masse volumique du mélange (boue) [kg·m⁻³] ; `F_L` facteur empirique de
-//! Durand [sans dimension], `D` diamètre intérieur de conduite [m], `g`
-//! accélération de la pesanteur [m·s⁻²], `V_c` vitesse critique de dépôt
-//! [m·s⁻¹] ; `K` constante empirique de Durand [sans dimension], `V_m` vitesse
-//! moyenne (débitante) du mélange [m·s⁻¹], `C_D` coefficient de traînée de la
-//! particule [sans dimension], `φ_D` excès relatif de perte de charge du mélange
-//! par rapport à celle de l'eau claire [sans dimension].
+//! `ρ_s` masse volumique du solide `kg·m⁻³`, `ρ_l` masse volumique du liquide
+//! porteur `kg·m⁻³`, `C_v` fraction volumique en solides `sans dimension`,
+//! 0 ≤ C_v ≤ 1, `w` fraction massique en solides `sans dimension, 0 ≤ w ≤ 1`,
+//! `ρ_m` masse volumique du mélange (boue) `kg·m⁻³` ; `F_L` facteur empirique de
+//! Durand `sans dimension`, `D` diamètre intérieur de conduite `m`, `g`
+//! accélération de la pesanteur `m·s⁻²`, `V_c` vitesse critique de dépôt
+//! `m·s⁻¹` ; `K` constante empirique de Durand `sans dimension`, `V_m` vitesse
+//! moyenne (débitante) du mélange `m·s⁻¹`, `C_D` coefficient de traînée de la
+//! particule `sans dimension`, `φ_D` excès relatif de perte de charge du mélange
+//! par rapport à celle de l'eau claire `sans dimension`.
 //!
 //! **Limite honnête** : corrélations **empiriques** de Durand pour le transport
 //! de boue en conduite **horizontale**. Le facteur `F_L` et la constante `K`
@@ -40,10 +40,10 @@
 /// `ρ_m = ρ_s · C_v + ρ_l · (1 − C_v)` (kg·m⁻³), moyenne des masses volumiques
 /// pondérée par les fractions volumiques.
 ///
-/// `solid_density` (ρ_s) [kg·m⁻³], `liquid_density` (ρ_l) [kg·m⁻³],
-/// `solid_volume_fraction` (C_v) fraction volumique en solides [sans dimension].
+/// `solid_density` (ρ_s) `kg·m⁻³`, `liquid_density` (ρ_l) `kg·m⁻³`,
+/// `solid_volume_fraction` (C_v) fraction volumique en solides `sans dimension`.
 ///
-/// Panique si `ρ_s ≤ 0`, si `ρ_l ≤ 0`, ou si `C_v` hors de `[0, 1]`.
+/// Panique si `ρ_s ≤ 0`, si `ρ_l ≤ 0`, ou si `C_v` hors de ``0, 1``.
 pub fn slurry_mixture_density(
     solid_density: f64,
     liquid_density: f64,
@@ -65,12 +65,12 @@ pub fn slurry_mixture_density(
 }
 
 /// Fraction volumique en solides déduite de la fraction massique
-/// `C_v = (w/ρ_s) / [ (w/ρ_s) + (1 − w)/ρ_l ]` (sans dimension).
+/// `C_v = (w/ρ_s) / `(w/ρ_s) + (1 − w)/ρ_l`` (sans dimension).
 ///
-/// `mass_fraction` (w) fraction massique en solides [sans dimension],
-/// `solid_density` (ρ_s) [kg·m⁻³], `liquid_density` (ρ_l) [kg·m⁻³].
+/// `mass_fraction` (w) fraction massique en solides `sans dimension`,
+/// `solid_density` (ρ_s) `kg·m⁻³`, `liquid_density` (ρ_l) `kg·m⁻³`.
 ///
-/// Panique si `w` hors de `[0, 1]`, si `ρ_s ≤ 0`, ou si `ρ_l ≤ 0`.
+/// Panique si `w` hors de ``0, 1``, si `ρ_s ≤ 0`, ou si `ρ_l ≤ 0`.
 pub fn slurry_volume_fraction_from_mass(
     mass_fraction: f64,
     solid_density: f64,
@@ -97,9 +97,9 @@ pub fn slurry_volume_fraction_from_mass(
 /// dessous de laquelle les solides se déposent et forment un lit au fond de la
 /// conduite.
 ///
-/// `durand_factor` (F_L) facteur empirique de Durand [sans dimension],
-/// `pipe_diameter` (D) diamètre intérieur [m], `gravity` (g) [m·s⁻²],
-/// `solid_density` (ρ_s) [kg·m⁻³], `liquid_density` (ρ_l) [kg·m⁻³].
+/// `durand_factor` (F_L) facteur empirique de Durand `sans dimension`,
+/// `pipe_diameter` (D) diamètre intérieur `m`, `gravity` (g) `m·s⁻²`,
+/// `solid_density` (ρ_s) `kg·m⁻³`, `liquid_density` (ρ_l) `kg·m⁻³`.
 ///
 /// Panique si `F_L ≤ 0`, si `D ≤ 0`, si `g ≤ 0`, si `ρ_l ≤ 0`, ou si
 /// `ρ_s ≤ ρ_l` (aucune force motrice de sédimentation).
@@ -127,15 +127,15 @@ pub fn slurry_durand_critical_velocity(
 
 /// Excès relatif de perte de charge d'une boue en conduite horizontale
 /// (corrélation de Durand)
-/// `φ_D = K · [ V_m² / ( g·D·((ρ_s − ρ_l)/ρ_l)·sqrt(C_D) ) ]^(−3/2)`
+/// `φ_D = K · `V_m² / ( g·D·((ρ_s − ρ_l)/ρ_l)·sqrt(C_D) )`^(−3/2)`
 /// (sans dimension), rapport `(i_m − i_l)/(C_v · i_l)` de l'excès de gradient
 /// hydraulique de la boue sur celui de l'eau claire.
 ///
-/// `durand_constant` (K) constante empirique de Durand [sans dimension],
-/// `mixture_velocity` (V_m) vitesse débitante du mélange [m·s⁻¹],
-/// `pipe_diameter` (D) [m], `gravity` (g) [m·s⁻²], `solid_density` (ρ_s)
-/// [kg·m⁻³], `liquid_density` (ρ_l) [kg·m⁻³], `drag_coefficient` (C_D)
-/// coefficient de traînée de la particule [sans dimension].
+/// `durand_constant` (K) constante empirique de Durand `sans dimension`,
+/// `mixture_velocity` (V_m) vitesse débitante du mélange `m·s⁻¹`,
+/// `pipe_diameter` (D) `m`, `gravity` (g) `m·s⁻²`, `solid_density` (ρ_s)
+/// `kg·m⁻³`, `liquid_density` (ρ_l) `kg·m⁻³`, `drag_coefficient` (C_D)
+/// coefficient de traînée de la particule `sans dimension`.
 ///
 /// Panique si `K ≤ 0`, si `V_m ≤ 0`, si `D ≤ 0`, si `g ≤ 0`, si `ρ_l ≤ 0`, si
 /// `ρ_s ≤ ρ_l`, ou si `C_D ≤ 0`.
