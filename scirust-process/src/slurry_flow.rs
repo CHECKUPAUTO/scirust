@@ -15,7 +15,7 @@
 //!
 //! `ρ_s` masse volumique du solide `kg·m⁻³`, `ρ_l` masse volumique du liquide
 //! porteur `kg·m⁻³`, `C_v` fraction volumique en solides [sans dimension,
-//! 0 ≤ C_v ≤ 1], `w` fraction massique en solides [sans dimension, 0 ≤ w ≤ 1],
+//! 0 ≤ C_v ≤ 1], `w` fraction massique en solides `sans dimension, 0 ≤ w ≤ 1`,
 //! `ρ_m` masse volumique du mélange (boue) `kg·m⁻³` ; `F_L` facteur empirique de
 //! Durand `sans dimension`, `D` diamètre intérieur de conduite `m`, `g`
 //! accélération de la pesanteur `m·s⁻²`, `V_c` vitesse critique de dépôt

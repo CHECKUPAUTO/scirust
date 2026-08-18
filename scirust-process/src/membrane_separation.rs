@@ -18,7 +18,7 @@
 //! récupération (conversion) `sans dimension` ; `Q_p`/`Q_f` débits de
 //! perméat/alimentation `même unité, p. ex. m³·s⁻¹` ; `CF` facteur de
 //! concentration du rétentat `sans dimension` ; `π` pression osmotique `Pa` ;
-//! `i` facteur de van't Hoff [sans dimension, FOURNI] ; `c` concentration
+//! `i` facteur de van't Hoff `sans dimension, FOURNI` ; `c` concentration
 //! molaire de soluté `mol·m⁻³` ; `R_g` constante des gaz parfaits `J·mol⁻¹·K⁻¹` ;
 //! `T` température `K`.
 //!

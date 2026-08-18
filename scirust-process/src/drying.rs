@@ -63,7 +63,7 @@ pub fn drying_free_moisture(moisture_content: f64, equilibrium_moisture: f64) ->
 /// `dry_solid_mass` (M_s) masse de solide sec `kg`, `drying_area` (A) aire
 /// d'échange `m²`, `constant_rate` (N_c) flux de séchage `kg eau · m⁻² · s⁻¹`,
 /// `initial_free_moisture` (X_1) et `critical_free_moisture` (X_c) humidités
-/// libres initiale et critique [sans dimension, base sèche].
+/// libres initiale et critique `sans dimension, base sèche`.
 ///
 /// Panique si `dry_solid_mass <= 0`, `drying_area <= 0`, `constant_rate <= 0`,
 /// `critical_free_moisture < 0` ou `initial_free_moisture < critical_free_moisture`.
@@ -96,7 +96,7 @@ pub fn drying_constant_rate_time(
 /// `dry_solid_mass` (M_s) masse de solide sec `kg`, `drying_area` (A) aire
 /// d'échange `m²`, `constant_rate` (N_c) allure au point critique [kg eau ·
 /// m⁻² · s⁻¹], `critical_free_moisture` (X_c) et `final_free_moisture` (X_2)
-/// humidités libres critique et finale [sans dimension, base sèche].
+/// humidités libres critique et finale `sans dimension, base sèche`.
 ///
 /// Panique si `dry_solid_mass <= 0`, `drying_area <= 0`, `constant_rate <= 0`,
 /// `critical_free_moisture <= 0`, `final_free_moisture <= 0` ou

@@ -16,7 +16,7 @@
 //! ```
 //!
 //! `d` diamètre de l'orifice `m`, `D` diamètre intérieur de la conduite `m`,
-//! `β` rapport des diamètres [sans dimension, 0 < β < 1], `Cd` coefficient de
+//! `β` rapport des diamètres `sans dimension, 0 < β < 1`, `Cd` coefficient de
 //! décharge `sans dimension`, `A₀` section de l'orifice `m²`, `ρ` masse
 //! volumique du fluide `kg·m⁻³`, `ΔP` pression différentielle mesurée aux prises
 //! `Pa`, `ṁ` débit massique `kg·s⁻¹`, `Q` débit volumique `m³·s⁻¹`, `ω` fraction

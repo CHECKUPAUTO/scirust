@@ -10,7 +10,7 @@
 //! ```
 //!
 //! `V` volume utile du réacteur `m³`, `F_A0` débit molaire d'alimentation du
-//! réactif A `mol/s`, `X` taux de conversion de A [sans dimension, dans ``0, 1``],
+//! réactif A `mol/s`, `X` taux de conversion de A `sans dimension, dans ``0, 1```,
 //! `−r_A` vitesse de disparition de A **évaluée à la concentration de sortie**
 //! `mol/(m³·s)`, `v̇₀` débit volumétrique d'alimentation `m³/s`, `τ` temps de
 //! passage (space time) `s`, `k` constante cinétique du premier ordre `1/s`.
@@ -30,7 +30,7 @@
 /// `V = F_A0·X / (−r_A)` `m³`.
 ///
 /// `molar_feed_rate` `F_A0` débit molaire d'alimentation du réactif `mol/s`,
-/// `conversion` `X` taux de conversion visé [sans dimension, dans ``0, 1``],
+/// `conversion` `X` taux de conversion visé `sans dimension, dans ``0, 1```,
 /// `reaction_rate` `−r_A` vitesse de disparition **à la sortie** `mol/(m³·s)`.
 ///
 /// Panique si `molar_feed_rate` est négatif ou non fini, si `conversion` sort de

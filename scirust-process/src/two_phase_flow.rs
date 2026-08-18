@@ -22,7 +22,7 @@
 //! `C` constante de Chisholm `sans dimension`, `φ_L²` multiplicateur diphasique
 //! rapporté au gradient liquide seul `sans dimension`, `(dp/dz)_TP` gradient de
 //! pression de l'écoulement diphasique `Pa·m⁻¹`, `x` titre massique en vapeur
-//! (fraction massique de gaz) [sans dimension, 0 ≤ x ≤ 1], `ρ_L` masse
+//! (fraction massique de gaz) `sans dimension, 0 ≤ x ≤ 1`, `ρ_L` masse
 //! volumique du liquide `kg·m⁻³`, `ρ_G` masse volumique du gaz `kg·m⁻³`, `ρ_h`
 //! masse volumique du mélange homogène `kg·m⁻³`, `α` taux de vide (fraction
 //! volumique occupée par le gaz) `sans dimension`.

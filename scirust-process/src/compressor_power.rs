@@ -18,17 +18,17 @@
 //!
 //! `r` constante spécifique du gaz `r = R/M` `J·kg⁻¹·K⁻¹`, `T1` température
 //! d'aspiration `K`, `Π` (`pressure_ratio`) rapport de pression absolue
-//! refoulement/aspiration `p2/p1` [sans dimension, ≥ 1], `γ` (`gamma`) rapport
-//! des chaleurs massiques `cp/cv` [sans dimension, > 1], `n`
-//! (`polytropic_exponent`) exposant polytropique [sans dimension, > 1] ; `w_s`
+//! refoulement/aspiration `p2/p1` `sans dimension, ≥ 1`, `γ` (`gamma`) rapport
+//! des chaleurs massiques `cp/cv` `sans dimension, > 1`, `n`
+//! (`polytropic_exponent`) exposant polytropique `sans dimension, > 1` ; `w_s`
 //! travail réversible isentropique massique et `w_p` travail polytropique
 //! massique `J·kg⁻¹` ; `T2` température de refoulement isentropique `K` ; `ṁ`
 //! (`mass_flow`) débit massique `kg·s⁻¹`, `w` (`specific_work`) travail massique
 //! réversible `J·kg⁻¹`, `η` (`isentropic_efficiency`) rendement isentropique (ou
-//! polytropique selon le travail fourni) [sans dimension, 0 < η ≤ 1], `P`
+//! polytropique selon le travail fourni) `sans dimension, 0 < η ≤ 1`, `P`
 //! puissance mécanique à l'arbre `W` ; `Π_g` (`overall_ratio`) rapport de
-//! pression global [sans dimension, ≥ 1], `N` (`stages`) nombre d'étages
-//! [sans dimension, ≥ 1], `Π_e` rapport par étage `sans dimension`.
+//! pression global `sans dimension, ≥ 1`, `N` (`stages`) nombre d'étages
+//! `sans dimension, ≥ 1`, `Π_e` rapport par étage `sans dimension`.
 //!
 //! **Limite honnête** : le gaz est supposé **PARFAIT** (loi des gaz parfaits,
 //! facteur de compressibilité `Z = 1`) ; les gaz réels ne sont **pas** traités.

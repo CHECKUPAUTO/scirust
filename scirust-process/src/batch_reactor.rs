@@ -10,7 +10,7 @@
 //! ```
 //!
 //! `t` temps de réaction pour atteindre la conversion `X` `s`, `X` taux de
-//! conversion du réactif limitant [sans dimension, 0 ≤ X < 1], `k` constante de
+//! conversion du réactif limitant `sans dimension, 0 ≤ X < 1`, `k` constante de
 //! vitesse [unité dépendant de l'ordre : s⁻¹ à l'ordre 1, mol⁻¹·m³·s⁻¹ à l'ordre 2,
 //! mol·m⁻³·s⁻¹ à l'ordre 0], `C₀` concentration initiale du réactif
 //! `mol·m⁻³, cohérente avec `k``, `t_c` temps de cycle `s`, `t_mort` temps mort
@@ -28,7 +28,7 @@
 /// Temps requis en réacteur batch pour une réaction d'**ordre 0** :
 /// `t = C₀·X / k` `s`.
 ///
-/// `conversion` `X` taux de conversion [sans dimension, 0 ≤ X < 1],
+/// `conversion` `X` taux de conversion `sans dimension, 0 ≤ X < 1`,
 /// `rate_constant` `k` constante de vitesse d'ordre 0 `mol·m⁻³·s⁻¹`,
 /// `initial_concentration` `C₀` concentration initiale du réactif `mol·m⁻³`.
 ///
@@ -57,7 +57,7 @@ pub fn batch_time_zero_order(
 /// Temps requis en réacteur batch pour une réaction d'**ordre 1** :
 /// `t = −ln(1 − X) / k` `s`.
 ///
-/// `conversion` `X` taux de conversion [sans dimension, 0 ≤ X < 1],
+/// `conversion` `X` taux de conversion `sans dimension, 0 ≤ X < 1`,
 /// `rate_constant` `k` constante de vitesse d'ordre 1 `s⁻¹`.
 ///
 /// Panique si `conversion` n'est pas dans `[0, 1[`, ou si `rate_constant`
@@ -77,7 +77,7 @@ pub fn batch_time_first_order(conversion: f64, rate_constant: f64) -> f64 {
 /// Temps requis en réacteur batch pour une réaction d'**ordre 2** (réactif
 /// unique) : `t = X / (k·C₀·(1 − X))` `s`.
 ///
-/// `conversion` `X` taux de conversion [sans dimension, 0 ≤ X < 1],
+/// `conversion` `X` taux de conversion `sans dimension, 0 ≤ X < 1`,
 /// `rate_constant` `k` constante de vitesse d'ordre 2 `mol⁻¹·m³·s⁻¹`,
 /// `initial_concentration` `C₀` concentration initiale du réactif `mol·m⁻³`.
 ///

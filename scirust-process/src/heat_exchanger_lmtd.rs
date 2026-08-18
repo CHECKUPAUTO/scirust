@@ -18,7 +18,7 @@
 //! `ΔT₁`, `ΔT₂` écarts de température aux deux extrémités de l'échangeur `K`,
 //! `DTLM` différence de température logarithmique moyenne `K`, `U` coefficient
 //! global d'échange rapporté à l'aire `A` `W·m⁻²·K⁻¹`, `A` aire de transfert
-//! `m²`, `F` facteur de correction de configuration [sans dimension, 0 < F ≤ 1],
+//! `m²`, `F` facteur de correction de configuration `sans dimension, 0 < F ≤ 1`,
 //! `Q` puissance thermique échangée `W`, `T_in`/`T_out` températures d'entrée et
 //! de sortie du courant `K`, `m` débit massique du courant `kg·s⁻¹`, `c_p`
 //! capacité thermique massique `J·kg⁻¹·K⁻¹`.
@@ -67,7 +67,7 @@ pub fn lmtd_log_mean(delta_t_1: f64, delta_t_2: f64) -> f64 {
 ///
 /// `overall_coefficient` (U) coefficient global d'échange `W·m⁻²·K⁻¹`, `area`
 /// (A) aire de transfert `m²`, `log_mean_delta` (DTLM) `K`, `correction_factor`
-/// (F) facteur de correction [sans dimension, 0 < F ≤ 1].
+/// (F) facteur de correction `sans dimension, 0 < F ≤ 1`.
 ///
 /// Panique si `U < 0`, si `A < 0`, si `DTLM < 0`, ou si `F` hors de `]0, 1]`.
 pub fn lmtd_duty(
@@ -98,7 +98,7 @@ pub fn lmtd_duty(
 ///
 /// `duty` (Q) puissance à échanger `W`, `overall_coefficient` (U)
 /// `W·m⁻²·K⁻¹`, `log_mean_delta` (DTLM) `K`, `correction_factor` (F)
-/// facteur de correction [sans dimension, 0 < F ≤ 1].
+/// facteur de correction `sans dimension, 0 < F ≤ 1`.
 ///
 /// Panique si `Q < 0`, si `U ≤ 0`, si `DTLM ≤ 0`, ou si `F` hors de `]0, 1]`.
 pub fn lmtd_required_area(

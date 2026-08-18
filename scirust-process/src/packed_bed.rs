@@ -14,7 +14,7 @@
 //!   ΔP = (dP/L) · L                                              `Pa`
 //! ```
 //!
-//! `ε` porosité (fraction de vide) du lit [sans dimension, 0 < ε < 1], `μ`
+//! `ε` porosité (fraction de vide) du lit `sans dimension, 0 < ε < 1`, `μ`
 //! viscosité dynamique du fluide `Pa·s`, `U` vitesse **superficielle** (en fût
 //! vide) `m·s⁻¹`, `d_p` diamètre de particule `m`, `ρ` masse volumique du fluide
 //! `kg·m⁻³`, `L` hauteur (épaisseur) du lit `m` ; `dP/L` gradient de pression

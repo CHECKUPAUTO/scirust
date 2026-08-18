@@ -33,7 +33,7 @@
 ///
 /// `rate_constant` `k` constante de vitesse [unité cohérente avec l'ordre],
 /// `concentration` `C` concentration du réactif `mol·m⁻³ ou unité cohérente`,
-/// `order` `n` ordre de réaction [sans dimension, fourni]. L'ordre peut être non
+/// `order` `n` ordre de réaction `sans dimension, fourni`. L'ordre peut être non
 /// entier (cinétique apparente).
 ///
 /// Panique si `rate_constant` ou `concentration` est négatif ou non fini, ou si

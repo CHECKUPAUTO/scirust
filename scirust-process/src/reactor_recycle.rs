@@ -54,7 +54,7 @@ pub fn recy_recycle_ratio(recycle_flow: f64, product_flow: f64) -> f64 {
 /// non-convertis `X_ov = X_sp / (1 − f·(1 − X_sp))` `sans dimension`.
 ///
 /// `single_pass_conversion` `X_sp` conversion par passe dans le réacteur
-/// [sans dimension, dans ``0, 1``], `fraction_unreacted_recycled` `f` fraction
+/// `sans dimension, dans ``0, 1```, `fraction_unreacted_recycled` `f` fraction
 /// des non-convertis renvoyée au réacteur par le séparateur [sans dimension,
 /// dans ``0, 1``]. La conversion globale est rapportée à l'alimentation
 /// fraîche : `f = 0` (aucun recyclage) redonne `X_ov = X_sp`, tandis que

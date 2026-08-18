@@ -20,7 +20,7 @@
 //! `c*` concentration finale à **saturation** de la liqueur mère `kg·kg⁻¹` ;
 //! `M_hydrate`/`M_anhydre` masses molaires du cristal **hydraté**/du sel
 //! **anhydre** `kg·mol⁻¹ ou g·mol⁻¹, même unité`, `R` rapport molaire
-//! d'hydratation [sans dimension, `R ≥ 1`] ; `Y`/`Y_h` masses de cristaux
+//! d'hydratation `sans dimension, `R ≥ 1`` ; `Y`/`Y_h` masses de cristaux
 //! anhydres/hydratés déposées `kg`.
 //!
 //! **Limite honnête** : ces relations décrivent une cristallisation **à

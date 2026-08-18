@@ -17,7 +17,7 @@
 //! dimension], `L` débit molaire de liquide (solvant) `mol·s⁻¹`, `G` débit
 //! molaire de gaz porteur `mol·s⁻¹`, `K` constante d'équilibre de la droite
 //! `y = K·x` `sans dimension`, `N` nombre d'étages théoriques [sans dimension,
-//! réel], `φ_A` fraction du soluté absorbée [sans dimension, 0 ≤ φ_A ≤ 1],
+//! réel], `φ_A` fraction du soluté absorbée `sans dimension, 0 ≤ φ_A ≤ 1`,
 //! `y_in`/`y_out` fractions molaires du soluté dans le gaz à l'entrée/à la
 //! sortie `sans dimension`, `y* = K·x_in` composition du gaz en équilibre avec
 //! le liquide entrant `sans dimension`, `Lₘ` débit molaire de liquide minimal
@@ -143,7 +143,7 @@ pub fn krem_stages_required(
 ///
 /// `gas_flow` (G) débit molaire de gaz `mol·s⁻¹` ; `equilibrium_constant` (K)
 /// pente de la droite d'équilibre `sans dimension` ; `recovery_fraction` (φ_A)
-/// fraction de soluté à récupérer [sans dimension, 0 < φ_A ≤ 1]. Un débit réel
+/// fraction de soluté à récupérer `sans dimension, 0 < φ_A ≤ 1`. Un débit réel
 /// `L > Lₘ` (facteur `A > A_min`) est ensuite **fourni** pour dimensionner un
 /// nombre fini d'étages.
 ///
