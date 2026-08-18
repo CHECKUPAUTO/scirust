@@ -13,7 +13,7 @@ raw_file="${SCIAGENT_OPT_RUN_DIR}/agent-${SCIAGENT_OPT_ITERATION}-${stage}-raw.t
 patch_file="${SCIAGENT_OPT_RUN_DIR}/agent-${SCIAGENT_OPT_ITERATION}-${stage}.patch"
 source_limit="${SCIAGENT_OPT_SOURCE_BYTES:-48000}"
 
-python3 - "$SCIAGENT_OPT_CONTEXT" "$SCIAGENT_OPT_SKILL_PATH" "$prompt_file" "$source_limit" <<'PY'
+python3 - "$SCIAGENT_OPT_CONTEXT" "$SCIAGENT_OPT_SKILL_PATH" "$prompt_file" "$source_limit" "$SCIAGENT_OPT_RUN_DIR" <<'PY'
 import json
 import pathlib
 import sys
@@ -22,6 +22,8 @@ context_path = pathlib.Path(sys.argv[1])
 skill_path = pathlib.Path(sys.argv[2])
 prompt_path = pathlib.Path(sys.argv[3])
 source_limit = max(1024, int(sys.argv[4]))
+run_dir = pathlib.Path(sys.argv[5])
+evidence_limit = min(source_limit, 16000)
 ctx = json.loads(context_path.read_text())
 
 parts = []
@@ -29,8 +31,43 @@ parts.append("You are running one SCIAGENT evidence-driven optimization iteratio
 parts.append(skill_path.read_text())
 parts.append("\n\n# Machine-readable iteration context\n")
 parts.append(json.dumps(ctx, indent=2, sort_keys=True))
-parts.append("\n\n# Allowed implementation sources\n")
 
+
+def append_artifact(title, path, limit=evidence_limit):
+    path = pathlib.Path(path)
+    if not path.is_file():
+        return
+    data = path.read_bytes()
+    if len(data) > limit:
+        data = data[-limit:]
+        prefix = "[artifact tail; earlier bytes omitted]\n"
+    else:
+        prefix = ""
+    text = data.decode(errors="replace")
+    parts.append(f"\n## {title}: {path}\n```text\n{prefix}{text}\n```\n")
+
+
+parts.append("\n\n# Prior failure evidence\n")
+for failure in ctx.get("failures", [])[-8:]:
+    parts.append(json.dumps(failure, sort_keys=True) + "\n")
+    log_path = failure.get("log_path")
+    if log_path:
+        append_artifact(f"failure log ({failure.get('stage', 'unknown')})", log_path)
+
+parts.append("\n\n# Latest verification, benchmark, and profiling evidence\n")
+artifacts = [run_dir / "verify.json", run_dir / "candidate.json"]
+artifacts.extend(sorted(run_dir.glob("profile-*.log"))[-4:])
+artifacts.extend(sorted(run_dir.glob("profile-*.note"))[-4:])
+artifacts.extend(sorted(run_dir.glob("profile-*.stats.log"))[-4:])
+seen = set()
+for artifact in artifacts:
+    key = str(artifact)
+    if key in seen:
+        continue
+    seen.add(key)
+    append_artifact("evidence", artifact)
+
+parts.append("\n\n# Allowed implementation sources\n")
 for raw in ctx.get("allowed_paths", []):
     path = pathlib.Path(raw)
     if path.is_file():
