@@ -18,7 +18,7 @@
 //! `mol·m⁻³`, `H_ref` constante de Henry à la température de référence [même
 //! unité que `H`], `ΔH_sol` enthalpie de dissolution du gaz `J·mol⁻¹`, `R`
 //! constante des gaz parfaits `J·mol⁻¹·K⁻¹`, `T`/`T_ref` température et
-//! température de référence [**K**].
+//! température de référence `**K**`.
 //!
 //! **Limite honnête** : la loi de Henry n'est valable que pour des **solutions
 //! DILUÉES**, **loin de la saturation** ; au-delà (fractions élevées, proximité
@@ -85,7 +85,7 @@ pub fn henry_concentration_from_pressure(
 /// `henry_ref` (H_ref) constante de Henry à `T_ref` [même unité que le résultat] ;
 /// `enthalpy_of_dissolution` (ΔH_sol) enthalpie de dissolution [J·mol⁻¹, signe
 /// quelconque] ; `gas_constant` (R) constante des gaz parfaits `J·mol⁻¹·K⁻¹` ;
-/// `temperature_ref` (T_ref) et `temperature` (T) températures [**K**].
+/// `temperature_ref` (T_ref) et `temperature` (T) températures `**K**`.
 ///
 /// Panique si `henry_ref <= 0`, `gas_constant <= 0`, `temperature_ref <= 0` ou
 /// `temperature <= 0`.
