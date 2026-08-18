@@ -13,56 +13,75 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   optimization-loop:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: feat/sciagent-optimization-loop
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
-          toolchain: "1.89.0"
+          toolchain: nightly-2026-07-02
           components: rustfmt
 
-      - name: Apply hardening patch and canonical formatting
-        run: |
-          python3 scripts/.sciagent-opt-hardening.py
-          rm scripts/.sciagent-opt-hardening.py
-          cargo fmt --all
-          git diff --check
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add scirust-sciagent/src/optimization_agent/mod.rs scripts/.sciagent-opt-hardening.py
-          git commit -m "fix(sciagent): keep optimization rewrites evidence-driven"
-          git push origin HEAD:feat/sciagent-optimization-loop
+      - name: Check formatting
+        run: rustup run nightly-2026-07-02 cargo fmt --all -- --check
 
       - name: Build optimization CLI
-        run: cargo check -p scirust-sciagent --bin sciagent-optimize
+        run: rustup run nightly-2026-07-02 cargo check -p scirust-sciagent --bin sciagent-optimize
 
       - name: Run optimization-agent unit tests
-        run: cargo test -p scirust-sciagent optimization_agent
+        run: rustup run nightly-2026-07-02 cargo test -p scirust-sciagent optimization_agent
 
-      - name: Validate smoke manifest
+      - name: Validate optimization manifests
         run: |
-          cargo run -p scirust-sciagent --bin sciagent-optimize -- \
-            plan \
-            --manifest scirust-sciagent/examples/optimization_tasks/smoke.json \
-            --json > /tmp/sciagent-opt-plan.json
-          test -s /tmp/sciagent-opt-plan.json
+          set -euo pipefail
+          for manifest in \
+            scirust-sciagent/examples/optimization_tasks/smoke.json \
+            scirust-sciagent/examples/optimization_tasks/smoke_recovery.json \
+            scirust-sciagent/examples/optimization_tasks/i250_cuda_decode.json; do
+            rustup run nightly-2026-07-02 cargo run -q -p scirust-sciagent --bin sciagent-optimize -- \
+              plan --manifest "$manifest" --json > /tmp/sciagent-opt-plan.json
+            test -s /tmp/sciagent-opt-plan.json
+          done
 
       - name: Run end-to-end optimization smoke test
         run: |
-          cargo run -p scirust-sciagent --bin sciagent-optimize -- \
+          set -euo pipefail
+          rustup run nightly-2026-07-02 cargo run -q -p scirust-sciagent --bin sciagent-optimize -- \
             run \
             --manifest scirust-sciagent/examples/optimization_tasks/smoke.json \
             --workspace . \
             --run-root target/sciagent-opt-smoke \
             --json > /tmp/sciagent-opt-report.json
-          grep -q '"final_decision": "promote"' /tmp/sciagent-opt-report.json
-          grep -q '"speedup": 1.25' /tmp/sciagent-opt-report.json
+          python3 - <<'PY'
+          import json
+          report = json.load(open('/tmp/sciagent-opt-report.json'))
+          assert report['final_decision'] == 'promote', report
+          assert abs(report['iterations'][-1]['speedup'] - 1.25) < 1e-12, report
+          assert report['failures'] == [], report
+          PY
+
+      - name: Prove compile and correctness recovery
+        run: |
+          set -euo pipefail
+          rustup run nightly-2026-07-02 cargo run -q -p scirust-sciagent --bin sciagent-optimize -- \
+            run \
+            --manifest scirust-sciagent/examples/optimization_tasks/smoke_recovery.json \
+            --workspace . \
+            --run-root target/sciagent-opt-recovery \
+            --json > /tmp/sciagent-opt-recovery.json
+          python3 - <<'PY'
+          import json
+          report = json.load(open('/tmp/sciagent-opt-recovery.json'))
+          assert report['final_decision'] == 'promote', report
+          assert report['iterations'][-1]['iteration'] == 3, report
+          failures = {(item['iteration'], item['stage']) for item in report['failures']}
+          assert (1, 'compile') in failures, report
+          assert (2, 'verify') in failures, report
+          assert not any(item['stage'] == 'benchmark' for item in report['failures']), report
+          PY
