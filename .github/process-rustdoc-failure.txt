@@ -3,29 +3,14 @@ Temporary strict rustdoc diagnostic for scirust-process.
 [1m[92m    Updating[0m crates.io index
 [1m[92m    Updating[0m git repository `https://github.com/Memorithm/FLAT-ATTENTION`
 [1m[92m Documenting[0m scirust-process v0.1.0 (/home/runner/work/scirust/scirust/scirust-process)
-[1m[91merror[0m[1m: unresolved link to `**K**`[0m
-  [1m[94m--> [0mscirust-process/src/henry_solubility.rs:21:31
-   [1m[94m|[0m
-[1m[94m21[0m [1m[94m|[0m //! température de référence [**K**].
-   [1m[94m|[0m                               [1m[91m^^^^^[0m [1m[91mno item named `**K**` in scope[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-   [1m[94m= [0m[1mnote[0m: `-D rustdoc::broken-intra-doc-links` implied by `-D warnings`
-   [1m[94m= [0m[1mhelp[0m: to override `-D warnings` add `#[allow(rustdoc::broken_intra_doc_links)]`
-
-[1m[91merror[0m[1m: unresolved link to `**K**`[0m
-  [1m[94m--> [0mscirust-process/src/henry_solubility.rs:88:66
-   [1m[94m|[0m
-[1m[94m88[0m [1m[94m|[0m /// `temperature_ref` (T_ref) et `temperature` (T) températures [**K**].
-   [1m[94m|[0m                                                                  [1m[91m^^^^^[0m [1m[91mno item named `**K**` in scope[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mhelp[0m: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
-
 [1m[91merror[0m[1m: unresolved link to `K, > 0`[0m
   [1m[94m--> [0mscirust-process/src/pinch_analysis.rs:71:61
    [1m[94m|[0m
 [1m[94m71[0m [1m[94m|[0m /// `actual_temperature` (T) température réelle du courant [K, > 0],
    [1m[94m|[0m                                                             [1m[91m^^^^^^[0m [1m[91munbalanced angle brackets[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mnote[0m: `-D rustdoc::broken-intra-doc-links` implied by `-D warnings`
+   [1m[94m= [0m[1mhelp[0m: to override `-D warnings` add `#[allow(rustdoc::broken_intra_doc_links)]`
 
 [1m[91merror[0m[1m: unresolved link to `K, > 0`[0m
   [1m[94m--> [0mscirust-process/src/pinch_analysis.rs:91:61
