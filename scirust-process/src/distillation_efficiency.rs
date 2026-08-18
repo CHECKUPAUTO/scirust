@@ -4,7 +4,7 @@
 //!
 //! ```text
 //! Murphree (vapeur)   E_M = (yₙ − yₙ₊₁) / (yₙ* − yₙ₊₁)                 [-]
-//! plateaux réels      N_r = N_th / E_o                                 [plateaux]
+//! plateaux réels      N_r = N_th / E_o                                 `plateaux`
 //! Lewis (global)      E_o = ln[1 + E_M·(λ − 1)] / ln(λ)               [-]
 //! hauteur colonne     H   = N_r · h_t                                  `m`
 //! ```
@@ -15,8 +15,8 @@
 //! plateau `sans dimension`, `yₙ*` fraction molaire vapeur qui serait à l'équilibre
 //! avec le liquide du plateau `sans dimension`, `E_o` rendement global de la colonne
 //! `sans dimension, dans ``0, 1]` en pratique], `N_th` nombre de plateaux
-//! **théoriques** (étages d'équilibre) [plateaux], `N_r` nombre de plateaux
-//! **réels** [plateaux], `λ` facteur d'entraînement (stripping factor) `m·V̇/L̇`
+//! **théoriques** (étages d'équilibre) `plateaux`, `N_r` nombre de plateaux
+//! **réels** `plateaux`, `λ` facteur d'entraînement (stripping factor) `m·V̇/L̇`
 //! `sans dimension, strictement positif`, `H` hauteur de la partie à plateaux de la
 //! colonne `m`, `h_t` espacement entre plateaux (tray spacing) `m`.
 //!
@@ -59,7 +59,7 @@ pub fn deff_murphree_vapor(actual_vapor_change: f64, equilibrium_vapor_change: f
     actual_vapor_change / equilibrium_vapor_change
 }
 
-/// Nombre de plateaux **réels** `N_r = N_th / E_o` [plateaux].
+/// Nombre de plateaux **réels** `N_r = N_th / E_o` `plateaux`.
 ///
 /// Convertit le nombre de plateaux théoriques (étages d'équilibre) en plateaux
 /// réels via le **rendement global** de la colonne.
