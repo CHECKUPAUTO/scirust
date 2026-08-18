@@ -395,11 +395,15 @@ mod imp {
 
 #[cfg(not(target_os = "linux"))]
 mod imp {
-    use super::{SandboxMode, Support};
+    use super::{SandboxEnforcement, SandboxMode, Support};
     use std::path::Path;
     use std::process::Command;
 
     pub(super) fn probe() -> Option<Support> {
+        // Landlock has no provider off Linux, but keeping the honest partial
+        // strength constructed here preserves the shared enforcement
+        // vocabulary without pretending that a backend exists.
+        let _ = SandboxEnforcement::Partial;
         None
     }
 
