@@ -1,0 +1,52 @@
+name: Temporary scirust-process rustdoc probe
+
+on:
+  push:
+    branches: [codex/gate-workspace-rustdoc]
+    paths:
+      - .github/workflows/tmp-process-rustdoc.yml
+
+permissions:
+  contents: write
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUSTDOCFLAGS: "-D warnings"
+
+jobs:
+  probe:
+    name: Strict scirust-process rustdoc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: stable
+      - name: Probe and persist diagnostic
+        shell: bash
+        run: |
+          set +e
+          cargo +stable doc -p scirust-process --no-deps --locked > /tmp/process-rustdoc.log 2>&1
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            {
+              echo "Temporary strict rustdoc diagnostic for scirust-process."
+              echo
+              tail -n 220 /tmp/process-rustdoc.log
+            } > .github/process-rustdoc-failure.txt
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/process-rustdoc-failure.txt
+            git commit -m "ci: capture scirust-process rustdoc failure" || true
+            git push
+            cat /tmp/process-rustdoc.log
+            exit "$status"
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f .github/process-rustdoc-failure.txt .github/workflows/tmp-process-rustdoc.yml
+          git add -A .github/process-rustdoc-failure.txt .github/workflows/tmp-process-rustdoc.yml
+          git commit -m "ci: remove scirust-process rustdoc probe"
+          git push
