@@ -1,4 +1,5 @@
 pub mod guard;
+#[allow(dead_code)]
 mod landlock;
 mod sandbox;
 pub mod tool_runtime;
