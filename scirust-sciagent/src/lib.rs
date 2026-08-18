@@ -39,6 +39,9 @@ pub mod gpu;
 pub mod inference;
 pub mod model;
 pub mod norm;
+// The orchestration helper passes frozen task/run evidence explicitly instead of
+// hiding it in ambient mutable state; keep that trade-off local to this module.
+#[allow(clippy::too_many_arguments)]
 pub mod optimization_agent;
 pub mod planning;
 pub mod quantize;
