@@ -2,9 +2,7 @@ pub mod guard;
 pub mod tool_runtime;
 pub mod tools;
 pub use guard::{ConformalGuard, GuardVerdict};
-pub use tool_runtime::{
-    AllowAllPolicy, ToolCall, ToolPolicy, ToolRuntime, ToolRuntimeError,
-};
+pub use tool_runtime::{AllowAllPolicy, ToolCall, ToolPolicy, ToolRuntime, ToolRuntimeError};
 pub use tools::Tool;
 pub use tools::ToolResult;
 
