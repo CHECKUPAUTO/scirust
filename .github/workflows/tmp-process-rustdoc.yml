@@ -36,12 +36,13 @@ jobs:
               'K', 'W', 'kW', 'MW', 'J', 'kJ', 'MJ', 'N', 'V', 'A', 'Hz',
               'L', 'rad', 'Wb', 'T', 'Ω', '°C', '°F', 'm²', 'm³', 's⁻¹',
           }
+          prose_labels = {'sans dimension', 'dimensionless', 'étages', 'effets'}
           unit_tokens = ('m', 's', 'kg', 'g', 'mol', 'Pa', 'bar', 'K', 'W', 'J',
                          'N', 'V', 'A', 'Hz', 'L', 'rad', 'Wb', 'T', 'Ω')
 
           def unit_like(text: str) -> bool:
               t = text.strip()
-              if t in simple_units or t.lower() in {'sans dimension', 'dimensionless', 'étages'}:
+              if t in simple_units or t.lower() in prose_labels:
                   return True
               if re.fullmatch(r'[+−-]?\d+(?:[.,]\d+)?\s*(?:[,;:]\s*[+−-]?\d+(?:[.,]\d+)?)?', t):
                   return True
