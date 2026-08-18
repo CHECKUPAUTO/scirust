@@ -1,7 +1,12 @@
+pub mod approval;
 pub mod guard;
 mod sandbox;
 pub mod tool_runtime;
 pub mod tools;
+pub use approval::{
+    require_one_shot_approval, ApprovalError, ApprovalOutcome, ApprovalRequest, ApprovalService,
+    NoApprovalService, SandboxPermission,
+};
 pub use guard::{ConformalGuard, GuardVerdict};
 pub use tool_runtime::{AllowAllPolicy, ToolCall, ToolPolicy, ToolRuntime, ToolRuntimeError};
 pub use tools::Tool;
