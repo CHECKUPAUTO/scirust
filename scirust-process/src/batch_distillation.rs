@@ -76,7 +76,7 @@ pub fn bdist_rayleigh_constant_volatility(
 /// `L₂ = L₁·exp(ln(L₂/L₁))` avec le logarithme donné par
 /// [`bdist_rayleigh_constant_volatility`].
 ///
-/// `initial_moles` `L₁` charge initiale [mol, strictement positive],
+/// `initial_moles` `L₁` charge initiale `mol, strictement positive`,
 /// `initial_fraction` `x₁` et `final_fraction` `x₂` fractions molaires du léger
 /// `sans dimension, dans ``0, 1[`], `relative_volatility` `α` volatilité relative
 /// **fournie** `sans dimension, strictement positive et différente de 1`.
@@ -119,8 +119,8 @@ pub fn bdist_remaining_moles(
 
 /// Quantité totale distillée par bilan matière global `D = L₁ − L₂` `mol`.
 ///
-/// `initial_moles` `L₁` charge initiale [mol, strictement positive],
-/// `remaining_moles` `L₂` charge restante [mol, positive et au plus égale à `L₁`].
+/// `initial_moles` `L₁` charge initiale `mol, strictement positive`,
+/// `remaining_moles` `L₂` charge restante `mol, positive et au plus égale à `L₁``.
 ///
 /// Panique si l'une des charges n'est pas finie ou est négative, ou si
 /// `remaining_moles` dépasse `initial_moles` (distillat négatif impossible).
@@ -185,8 +185,8 @@ pub fn bdist_average_distillate_fraction(
 /// `R = n_{D} / n_{0}` `sans dimension`.
 ///
 /// `distillate_moles_component` `n_D` moles du constituant passées au distillat
-/// [mol, positives], `initial_moles_component` `n₀` moles initiales de ce
-/// constituant dans la charge [mol, strictement positives]. Pour le constituant
+/// `mol, positives`, `initial_moles_component` `n₀` moles initiales de ce
+/// constituant dans la charge `mol, strictement positives`. Pour le constituant
 /// léger, `n_D = L₁·x₁ − L₂·x₂` et `n₀ = L₁·x₁`.
 ///
 /// Panique si `initial_moles_component` n'est pas fini ou n'est pas strictement
