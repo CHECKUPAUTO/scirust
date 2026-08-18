@@ -1,6 +1,6 @@
 //! Générateur pseudo-aléatoire déterministe minimal (SplitMix64, domaine
 //! public, S. Vigna) — pour germer les matrices de test de la SVD
-//! aléatoire ([`super::randomized_svd`]) sans dépendre de la crate `rand`
+//! aléatoire ([`super::randomized_svd()`]) sans dépendre de la crate `rand`
 //! ni d'un moteur PRNG d'une autre crate du workspace (évite la dépendance
 //! circulaire que `scirust-solvers` évite déjà avec `scirust-core`, voir
 //! le commentaire de tête de `linalg/mod.rs`). Même graine ⇒ sortie

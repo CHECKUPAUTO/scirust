@@ -19,7 +19,7 @@
 //! de contact** `R` (dynamique, dépendant de l'état de surface, de la pression
 //! d'électrode et de la température) est **fournie par l'appelant** ; aucune
 //! valeur « par défaut » n'est inventée. La force d'électrode n'admet pas de
-//! formule simple et n'est pas modélisée ici. Voir [`crate::weld_heat_input`]
+//! formule simple et n'est pas modélisée ici. Voir [`crate::weld_heat_input()`]
 //! (soudage à l'arc) et [`crate::thermal`].
 
 /// Chaleur de Joule totale `Q = I²·R·t` (J).

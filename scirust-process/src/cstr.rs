@@ -3,18 +3,18 @@
 //! densité constante.
 //!
 //! ```text
-//! volume            V  = F_A0·X / (−r_A)            [m³]
-//! temps de passage  τ  = V / v̇₀                     [s]
-//! conversion ordre 1 X = k·τ / (1 + k·τ)            [sans dimension]
-//! τ requis (ordre 1) τ = X / (k·(1 − X))            [s]
+//! volume            V  = F_A0·X / (−r_A)            `m³`
+//! temps de passage  τ  = V / v̇₀                     `s`
+//! conversion ordre 1 X = k·τ / (1 + k·τ)            `sans dimension`
+//! τ requis (ordre 1) τ = X / (k·(1 − X))            `s`
 //! ```
 //!
-//! `V` volume utile du réacteur [m³], `F_A0` débit molaire d'alimentation du
-//! réactif A [mol/s], `X` taux de conversion de A [sans dimension, dans `[0, 1]`],
+//! `V` volume utile du réacteur `m³`, `F_A0` débit molaire d'alimentation du
+//! réactif A `mol/s`, `X` taux de conversion de A `sans dimension, dans ``0, 1```,
 //! `−r_A` vitesse de disparition de A **évaluée à la concentration de sortie**
-//! [mol/(m³·s)], `v̇₀` débit volumétrique d'alimentation [m³/s], `τ` temps de
-//! passage (space time) [s], `k` constante cinétique du premier ordre [1/s].
-//! Le groupe `k·τ` est le nombre de Damköhler `Da` [sans dimension].
+//! `mol/(m³·s)`, `v̇₀` débit volumétrique d'alimentation `m³/s`, `τ` temps de
+//! passage (space time) `s`, `k` constante cinétique du premier ordre `1/s`.
+//! Le groupe `k·τ` est le nombre de Damköhler `Da` `sans dimension`.
 //!
 //! **Limite honnête** : le CSTR est supposé **parfaitement agité** (composition
 //! uniforme, donc égale à celle de la sortie), en **régime permanent** ; les
@@ -27,14 +27,14 @@
 //! bilan thermique (élévation de température, retrait de chaleur) est séparé.
 
 /// Volume utile d'un CSTR par l'équation de dimensionnement
-/// `V = F_A0·X / (−r_A)` [m³].
+/// `V = F_A0·X / (−r_A)` `m³`.
 ///
-/// `molar_feed_rate` `F_A0` débit molaire d'alimentation du réactif [mol/s],
-/// `conversion` `X` taux de conversion visé [sans dimension, dans `[0, 1]`],
-/// `reaction_rate` `−r_A` vitesse de disparition **à la sortie** [mol/(m³·s)].
+/// `molar_feed_rate` `F_A0` débit molaire d'alimentation du réactif `mol/s`,
+/// `conversion` `X` taux de conversion visé `sans dimension, dans ``0, 1```,
+/// `reaction_rate` `−r_A` vitesse de disparition **à la sortie** `mol/(m³·s)`.
 ///
 /// Panique si `molar_feed_rate` est négatif ou non fini, si `conversion` sort de
-/// `[0, 1]`, ou si `reaction_rate` n'est pas strictement positif (division).
+/// ``0, 1``, ou si `reaction_rate` n'est pas strictement positif (division).
 pub fn cstr_volume(molar_feed_rate: f64, conversion: f64, reaction_rate: f64) -> f64 {
     assert!(
         molar_feed_rate.is_finite() && molar_feed_rate >= 0.0,
@@ -51,10 +51,10 @@ pub fn cstr_volume(molar_feed_rate: f64, conversion: f64, reaction_rate: f64) ->
     molar_feed_rate * conversion / reaction_rate
 }
 
-/// Temps de passage (space time) `τ = V / v̇₀` [s].
+/// Temps de passage (space time) `τ = V / v̇₀` `s`.
 ///
-/// `volume` `V` volume utile du réacteur [m³], `volumetric_flow` `v̇₀` débit
-/// volumétrique d'alimentation [m³/s]. `τ` est le temps moyen nominal de séjour
+/// `volume` `V` volume utile du réacteur `m³`, `volumetric_flow` `v̇₀` débit
+/// volumétrique d'alimentation `m³/s`. `τ` est le temps moyen nominal de séjour
 /// à densité constante.
 ///
 /// Panique si `volume` est négatif ou non fini, ou si `volumetric_flow` n'est pas
@@ -72,10 +72,10 @@ pub fn cstr_space_time(volume: f64, volumetric_flow: f64) -> f64 {
 }
 
 /// Conversion d'une réaction d'**ordre 1** à densité constante dans un CSTR
-/// `X = k·τ / (1 + k·τ)` [sans dimension].
+/// `X = k·τ / (1 + k·τ)` `sans dimension`.
 ///
-/// `rate_constant` `k` constante cinétique du premier ordre [1/s], `space_time`
-/// `τ` temps de passage [s]. Le produit `k·τ = Da` est le nombre de Damköhler ;
+/// `rate_constant` `k` constante cinétique du premier ordre `1/s`, `space_time`
+/// `τ` temps de passage `s`. Le produit `k·τ = Da` est le nombre de Damköhler ;
 /// `X → 1` quand `Da → ∞`.
 ///
 /// Panique si `rate_constant` ou `space_time` est négatif ou non fini.
@@ -93,10 +93,10 @@ pub fn cstr_first_order_conversion(rate_constant: f64, space_time: f64) -> f64 {
 }
 
 /// Temps de passage **requis** pour atteindre une conversion donnée en ordre 1
-/// `τ = X / (k·(1 − X))` [s] — réciproque de [`cstr_first_order_conversion`].
+/// `τ = X / (k·(1 − X))` `s` — réciproque de [`cstr_first_order_conversion`].
 ///
 /// `conversion` `X` conversion visée [sans dimension, dans `[0, 1[`],
-/// `rate_constant` `k` constante cinétique du premier ordre [1/s]. `τ → ∞` quand
+/// `rate_constant` `k` constante cinétique du premier ordre `1/s`. `τ → ∞` quand
 /// `X → 1` : la conversion complète exige un réacteur infini.
 ///
 /// Panique si `conversion` sort de `[0, 1[` (la borne 1 fait diverger la

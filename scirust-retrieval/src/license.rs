@@ -18,7 +18,7 @@
 //! (`scirust-license`) — no FFI, no network, no clock beyond the `now` the caller
 //! passes to `verify_license`.
 //!
-//! The example brings its own embeddings via a trivial [`Encoder`](crate::Encoder),
+//! The example brings its own embeddings via a trivial [`Encoder`],
 //! so it works in the pure (`default-features = false`) build too. With the
 //! default `learned` feature you could pass `scirust_core::embed::EmbeddingEngine`
 //! instead.

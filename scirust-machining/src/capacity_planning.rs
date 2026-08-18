@@ -11,7 +11,7 @@
 //!
 //! `C_disp` (`capacity_available_capacity`) capacité disponible [heure-machine],
 //! `n` nombre de machines (comptage, sans unité), `h` heures d'ouverture par
-//! machine sur la période [h], `A` disponibilité effective de chaque machine
+//! machine sur la période (h), `A` disponibilité effective de chaque machine
 //! (fraction sans dimension dans `[0, 1]`, tenant compte des arrêts). `C_req`
 //! (`capacity_required_capacity`) capacité requise [heure-machine], `D` demande à
 //! produire sur la période (comptage d'unités, sans unité), `CT` temps de cycle

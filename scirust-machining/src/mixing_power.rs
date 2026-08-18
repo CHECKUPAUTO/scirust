@@ -11,7 +11,7 @@
 //! `Np` nombre de puissance (turbulent) [sans dimension], `Kp` constante de
 //! régime laminaire [sans dimension], `ρ` masse volumique du liquide [kg/m³],
 //! `μ` viscosité dynamique [Pa·s], `N` vitesse de rotation [tr/s], `D` diamètre
-//! du mobile [m], `P` puissance dissipée à l'arbre [W], `v` vitesse en bout de
+//! du mobile (m), `P` puissance dissipée à l'arbre (W), `v` vitesse en bout de
 //! pale [m/s], `Re` nombre de Reynolds d'agitation [sans dimension].
 //!
 //! **Limite honnête** : le nombre de puissance `Np` (régime turbulent) et la
@@ -55,7 +55,7 @@ pub fn mixing_reynolds(
     density * rotational_speed * impeller_diameter.powi(2) / dynamic_viscosity
 }
 
-/// Puissance dissipée en régime turbulent `P = Np·ρ·N³·D⁵` [W].
+/// Puissance dissipée en régime turbulent `P = Np·ρ·N³·D⁵` (W).
 ///
 /// `power_number` `Np` (sans dimension, fourni par l'appelant), `density` `ρ`
 /// en kg/m³, `rotational_speed` `N` en tr/s, `impeller_diameter` `D` en m ; la
@@ -87,7 +87,7 @@ pub fn mixing_power_turbulent(
     power_number * density * rotational_speed.powi(3) * impeller_diameter.powi(5)
 }
 
-/// Puissance dissipée en régime laminaire `P = Kp·μ·N²·D³` [W], où
+/// Puissance dissipée en régime laminaire `P = Kp·μ·N²·D³` (W), où
 /// `Np = Kp/Re` (le nombre de puissance varie en `1/Re`).
 ///
 /// `laminar_constant` `Kp` (sans dimension, fourni par l'appelant),

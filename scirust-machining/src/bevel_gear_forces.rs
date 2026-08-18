@@ -10,14 +10,14 @@
 //!
 //! `P` puissance transmise (W), `v` vitesse au cercle primitif moyen (m/s),
 //! `Ft`/`Fr`/`Fa` efforts tangentiel/radial/axial (N), `α` angle de pression
-//! (rad), `γ` angle de cône primitif (rad, voir [`bevel_worm_gears`]).
+//! (rad), `γ` angle de cône primitif (rad, voir [`crate::bevel_worm_gears`]).
 //!
 //! **Convention** : unités SI (W, m/s, N, rad). **Limite honnête** : denture
 //! conique **droite**, effort supposé appliqué au **rayon moyen**, frottement
 //! **négligé**. L'angle de pression `α`, l'angle de cône `γ`, la puissance et la
 //! vitesse sont **fournis par l'appelant** ; aucune valeur « par défaut » de
 //! matériau, de procédé ou de géométrie n'est inventée ici. Complète
-//! [`bevel_worm_gears`] qui fournit les angles de cône.
+//! [`crate::bevel_worm_gears`] qui fournit les angles de cône.
 
 /// Effort **tangentiel** (utile) au rayon moyen `Ft = P/v` (N).
 ///

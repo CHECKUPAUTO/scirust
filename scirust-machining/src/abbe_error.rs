@@ -20,7 +20,7 @@
 //!
 //! **Limite honnête** : modèle d'erreur du **premier ordre** dû au seul
 //! non-respect du principe d'Abbe (axe de mesure non colinéaire) pour un petit
-//! défaut angulaire ; distinct de l'erreur cosinus [`crate::cosine_error`]
+//! défaut angulaire ; distinct de l'erreur cosinus [`crate::cosine_error()`]
 //! (désalignement de l'axe de palpage). Aucun budget d'erreur, aucun décalage
 //! ni aucun défaut angulaire « par défaut » n'est imposé : toutes ces valeurs
 //! sont **fournies par l'appelant**.

@@ -186,7 +186,7 @@ pub trait VerifiableTask {
 }
 
 /// Adapter turning a [`Generator`] + a [`VerifiableTask`] into a STaR
-/// [`BootstrapTask`](crate::star::BootstrapTask).
+/// [`BootstrapTask`].
 ///
 /// The "model" STaR improves is the set of **verified `(problem, answer)`
 /// examples** accumulated so far; each round they are fed back as few-shot

@@ -20,7 +20,7 @@
 //! sécurité choisi), aucune valeur « par défaut » n'est inventée. On ne combine
 //! **pas** flexion et torsion (dimensionnement ASME/Soderberg à la charge de
 //! l'appelant) et on néglige les concentrations de contrainte (gorges, épaulements,
-//! rainures de clavette). Voir [`crate::torque`] et [`crate::stress`].
+//! rainures de clavette). Voir [`crate::shafts`] et [`crate::combined_stress`].
 
 use core::f64::consts::PI;
 

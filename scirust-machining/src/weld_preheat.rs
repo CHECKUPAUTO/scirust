@@ -21,7 +21,7 @@
 //! valeur « par défaut » n'est inventée). Le résultat est une **borne
 //! indicative** : l'apport d'hydrogène du métal d'apport, le procédé, le bridage,
 //! l'apport de chaleur et la vitesse de refroidissement ne sont **pas** pris en
-//! compte. Voir [`crate::weld_heat_input`] et [`crate::welds`].
+//! compte. Voir [`crate::weld_heat_input()`] et [`crate::welds`].
 
 /// Température de préchauffage `Tp = 350·√(CEt − 0,25)` (°C), avec correction
 /// d'épaisseur de Séférian `CEt = CE·(1 + 0,005·e)`.

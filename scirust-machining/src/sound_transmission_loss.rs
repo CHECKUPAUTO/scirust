@@ -9,12 +9,12 @@
 //! coefficient depuis TL   τ    = 10^(−TL / 10)              [sans dimension]
 //! ```
 //!
-//! `m` masse surfacique de la paroi [kg·m⁻²], `f` fréquence [Hz], `ρ` masse
+//! `m` masse surfacique de la paroi (kg·m⁻²), `f` fréquence (Hz), `ρ` masse
 //! volumique de l'air (ou du fluide) [kg·m⁻³], `c` célérité du son dans ce
-//! fluide [m·s⁻¹], `TL_n` affaiblissement en incidence normale [dB], `TL_d`
-//! affaiblissement en champ diffus [dB], `S_i` aire de l'élément `i` [m²],
+//! fluide (m·s⁻¹), `TL_n` affaiblissement en incidence normale (dB), `TL_d`
+//! affaiblissement en champ diffus (dB), `S_i` aire de l'élément `i` (m²),
 //! `τ_i` coefficient de transmission de l'élément `i` [sans dimension, 0 < τ ≤ 1],
-//! `TL_c` affaiblissement global de la paroi composite [dB], `τ` coefficient de
+//! `TL_c` affaiblissement global de la paroi composite (dB), `τ` coefficient de
 //! transmission équivalent [sans dimension].
 //!
 //! **Limite honnête** : les constantes physiques du fluide (`ρ`, `c`), la masse
@@ -31,11 +31,11 @@
 use core::f64::consts::PI;
 
 /// Affaiblissement en incidence normale par la loi de masse
-/// `TL_n = 20·log10(π·m·f / (ρ·c))` [dB].
+/// `TL_n = 20·log10(π·m·f / (ρ·c))` (dB).
 ///
-/// `surface_mass` masse surfacique `m` [kg·m⁻²], `frequency` fréquence `f` [Hz],
+/// `surface_mass` masse surfacique `m` (kg·m⁻²), `frequency` fréquence `f` (Hz),
 /// `air_density` masse volumique `ρ` [kg·m⁻³], `speed_of_sound` célérité `c`
-/// [m·s⁻¹] ; le résultat est en dB.
+/// (m·s⁻¹) ; le résultat est en dB.
 ///
 /// Panique si l'un des arguments est négatif ou nul.
 pub fn stl_mass_law(
@@ -63,7 +63,7 @@ pub fn stl_mass_law(
     20.0 * (PI * surface_mass * frequency / (air_density * speed_of_sound)).log10()
 }
 
-/// Affaiblissement en champ diffus par la loi de masse `TL_d = TL_n − 5` [dB]
+/// Affaiblissement en champ diffus par la loi de masse `TL_d = TL_n − 5` (dB)
 /// (correction empirique usuelle de −5 dB par rapport à l'incidence normale).
 ///
 /// Mêmes arguments et mêmes unités que [`stl_mass_law`] ; le résultat est en dB.
@@ -79,10 +79,10 @@ pub fn stl_mass_law_field(
 }
 
 /// Affaiblissement global d'une paroi composite
-/// `TL_c = 10·log10( Σ S_i / Σ (S_i·τ_i) )` [dB] : le **maillon faible** (aire
+/// `TL_c = 10·log10( Σ S_i / Σ (S_i·τ_i) )` (dB) : le **maillon faible** (aire
 /// mal isolée, τ élevé) domine l'affaiblissement de l'ensemble.
 ///
-/// `areas` aires `S_i` des éléments [m²], `transmission_coefficients` leurs
+/// `areas` aires `S_i` des éléments (m²), `transmission_coefficients` leurs
 /// coefficients de transmission `τ_i` [sans dimension, 0 < τ ≤ 1] ; le résultat
 /// est en dB.
 ///
@@ -119,7 +119,7 @@ pub fn stl_composite_transmission(areas: &[f64], transmission_coefficients: &[f6
 /// Coefficient de transmission depuis l'affaiblissement `τ = 10^(−TL / 10)`
 /// [sans dimension] (inverse de `TL = −10·log10(τ)`).
 ///
-/// `transmission_loss_db` affaiblissement `TL` [dB] ; le résultat est sans
+/// `transmission_loss_db` affaiblissement `TL` (dB) ; le résultat est sans
 /// dimension et appartient à `]0, 1]` pour `TL ≥ 0`.
 ///
 /// Panique si `transmission_loss_db` n'est pas fini.
