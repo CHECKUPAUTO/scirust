@@ -46,6 +46,8 @@ jobs:
               low = plain.lower()
               if plain in simple_units or low in prose_labels or low.startswith('sans dimension,'):
                   return True
+              if any(plain.startswith(unit + ',') or plain.startswith(unit + ';') or plain.startswith(unit + ':') for unit in simple_units):
+                  return True
               if re.fullmatch(r'[+−-]?\d+(?:[.,]\d+)?\s*(?:[,;:]\s*[+−-]?\d+(?:[.,]\d+)?)?', plain):
                   return True
               if any(ch in plain for ch in ('·', '⁻', '⁺', '²', '³', '⁴', '°', 'µ', 'μ', '/')):
