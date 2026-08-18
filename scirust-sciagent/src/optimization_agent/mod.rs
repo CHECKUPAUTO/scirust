@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
-use std::fs;
+use std::fs::{self, File};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -284,6 +284,8 @@ impl VerificationMeasurement {
 #[serde(rename_all = "kebab-case")]
 pub enum OptimizationDecision {
     Promote,
+    RetryGeneration,
+    RewriteForCompilation,
     RewriteForCorrectness,
     RewriteForPerformance,
     BudgetExhausted,
@@ -300,6 +302,14 @@ pub struct IterationRecord {
     pub decision: OptimizationDecision,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OptimizationFailure {
+    pub iteration: usize,
+    pub stage: String,
+    pub message: String,
+    pub log_path: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OptimizationReport {
     pub schema_version: u32,
@@ -308,6 +318,7 @@ pub struct OptimizationReport {
     pub baseline: TimingMeasurement,
     pub target_speedup: f64,
     pub iterations: Vec<IterationRecord>,
+    pub failures: Vec<OptimizationFailure>,
     pub final_decision: OptimizationDecision,
     pub best_verified_speedup: Option<f64>,
 }
@@ -326,6 +337,7 @@ struct OptimizationContext {
     max_rel_error: f64,
     baseline_median_ns: f64,
     previous_iterations: Vec<IterationRecord>,
+    failures: Vec<OptimizationFailure>,
 }
 
 #[derive(Debug)]
@@ -446,6 +458,7 @@ impl OptimizationRunner {
             baseline: baseline.clone(),
             target_speedup: task.budget.min_speedup,
             iterations: Vec::new(),
+            failures: Vec::new(),
             final_decision: OptimizationDecision::BudgetExhausted,
             best_verified_speedup: None,
         };
@@ -470,67 +483,67 @@ impl OptimizationRunner {
                     max_rel_error: task.budget.max_rel_error,
                     baseline_median_ns: baseline.median_ns,
                     previous_iterations: report.iterations.clone(),
+                    failures: report.failures.clone(),
                 },
             )?;
             remove_if_exists(&verify_path)?;
             remove_if_exists(&candidate_path)?;
 
-            self.execute_stage(
-                if iteration == 1
-                {
-                    "generate"
-                }
-                else
-                {
-                    "rewrite"
-                },
-                if iteration == 1
-                {
-                    &task.commands.generate
-                }
-                else
-                {
+            let (generation_stage, generation_command) = if iteration == 1
+            {
+                ("generate", &task.commands.generate)
+            }
+            else
+            {
+                (
+                    "rewrite",
                     task.commands
                         .rewrite
                         .as_ref()
-                        .unwrap_or(&task.commands.generate)
-                },
+                        .unwrap_or(&task.commands.generate),
+                )
+            };
+            if !self.execute_or_record(
+                generation_stage,
+                generation_command,
                 task,
                 iteration,
                 &workspace,
                 &run_dir,
-            )?;
-            self.execute_stage(
+                OptimizationDecision::RetryGeneration,
+                &mut report,
+            )?
+            {
+                continue;
+            }
+            if !self.execute_or_record(
                 "compile",
                 &task.commands.compile,
                 task,
                 iteration,
                 &workspace,
                 &run_dir,
-            )?;
-            self.execute_stage(
+                OptimizationDecision::RewriteForCompilation,
+                &mut report,
+            )?
+            {
+                continue;
+            }
+            if !self.execute_or_record(
                 "verify",
                 &task.commands.verify,
                 task,
                 iteration,
                 &workspace,
                 &run_dir,
-            )?;
+                OptimizationDecision::RewriteForCorrectness,
+                &mut report,
+            )?
+            {
+                continue;
+            }
             let verification: VerificationMeasurement = read_json(&verify_path)?;
             verification.validate()?;
-
-            self.execute_stage(
-                "benchmark",
-                &task.commands.benchmark,
-                task,
-                iteration,
-                &workspace,
-                &run_dir,
-            )?;
-            let timing: TimingMeasurement = read_json(&candidate_path)?;
-            timing.validate("candidate")?;
-
-            let speedup = baseline.median_ns / timing.median_ns;
             let correctness_gate = verification.passed
                 && verification
                     .max_abs_error
@@ -538,6 +551,42 @@ impl OptimizationRunner {
                 && verification
                     .max_rel_error
                     .is_none_or(|value| value <= task.budget.max_rel_error);
+            if !correctness_gate
+            {
+                report.failures.push(OptimizationFailure {
+                    iteration,
+                    stage: "verify".to_string(),
+                    message: format!(
+                        "verification rejected candidate: passed={}, max_abs_error={:?}, max_rel_error={:?}",
+                        verification.passed,
+                        verification.max_abs_error,
+                        verification.max_rel_error,
+                    ),
+                    log_path: stage_log_path(&run_dir, iteration, "verify")
+                        .to_string_lossy()
+                        .into_owned(),
+                });
+                report.final_decision = OptimizationDecision::RewriteForCorrectness;
+                write_json(&run_dir.join("report.json"), &report)?;
+                continue;
+            }
+            if !self.execute_or_record(
+                "benchmark",
+                &task.commands.benchmark,
+                task,
+                iteration,
+                &workspace,
+                &run_dir,
+                OptimizationDecision::RewriteForPerformance,
+                &mut report,
+            )?
+            {
+                continue;
+            }
+            let timing: TimingMeasurement = read_json(&candidate_path)?;
+            timing.validate("candidate")?;
+
+            let speedup = baseline.median_ns / timing.median_ns;
             let performance_gate = speedup >= task.budget.min_speedup;
             let decision = if correctness_gate && performance_gate
             {
@@ -581,7 +630,16 @@ impl OptimizationRunner {
             {
                 if let Some(profile) = &task.commands.profile
                 {
-                    self.execute_stage("profile", profile, task, iteration, &workspace, &run_dir)?;
+                    let _ = self.execute_or_record(
+                        "profile",
+                        profile,
+                        task,
+                        iteration,
+                        &workspace,
+                        &run_dir,
+                        OptimizationDecision::RewriteForPerformance,
+                        &mut report,
+                    )?;
                 }
             }
         }
@@ -589,6 +647,37 @@ impl OptimizationRunner {
         report.final_decision = OptimizationDecision::BudgetExhausted;
         write_json(&run_dir.join("report.json"), &report)?;
         Ok(report)
+    }
+
+    fn execute_or_record(
+        &self,
+        stage: &str,
+        spec: &CommandSpec,
+        task: &OptimizationTask,
+        iteration: usize,
+        workspace: &Path,
+        run_dir: &Path,
+        decision: OptimizationDecision,
+        report: &mut OptimizationReport,
+    ) -> Result<bool, OptimizationError> {
+        match self.execute_stage(stage, spec, task, iteration, workspace, run_dir)
+        {
+            Ok(()) => Ok(true),
+            Err(error) =>
+            {
+                report.failures.push(OptimizationFailure {
+                    iteration,
+                    stage: stage.to_string(),
+                    message: error.to_string(),
+                    log_path: stage_log_path(run_dir, iteration, stage)
+                        .to_string_lossy()
+                        .into_owned(),
+                });
+                report.final_decision = decision;
+                write_json(&run_dir.join("report.json"), report)?;
+                Ok(false)
+            },
+        }
     }
 
     fn execute_stage(
@@ -632,6 +721,19 @@ impl OptimizationRunner {
             "SCIAGENT_OPT_SKILL_PATH",
             Path::new(env!("CARGO_MANIFEST_DIR")).join("SKILL_OPTIMIZATION.md"),
         );
+
+        let log_path = stage_log_path(run_dir, iteration, stage);
+        let stdout = File::create(&log_path).map_err(|source| OptimizationError::Io {
+            path: log_path.clone(),
+            source,
+        })?;
+        let stderr = stdout.try_clone().map_err(|source| OptimizationError::Io {
+            path: log_path.clone(),
+            source,
+        })?;
+        command
+            .stdout(Stdio::from(stdout))
+            .stderr(Stdio::from(stderr));
 
         let mut child = command
             .spawn()
@@ -721,6 +823,10 @@ pub fn load_task(path: impl AsRef<Path>) -> Result<OptimizationTask, Optimizatio
     let task: OptimizationTask = read_json(path)?;
     task.validate()?;
     Ok(task)
+}
+
+fn stage_log_path(run_dir: &Path, iteration: usize, stage: &str) -> PathBuf {
+    run_dir.join(format!("{iteration:02}-{stage}.log"))
 }
 
 fn canonicalize_existing(path: &Path) -> Result<PathBuf, OptimizationError> {
