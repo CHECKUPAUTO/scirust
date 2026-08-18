@@ -35,6 +35,7 @@ jobs:
               'm', 's', 'kg', 'g', 'mol', 'kmol', 'Pa', 'kPa', 'MPa', 'bar',
               'K', 'W', 'kW', 'MW', 'J', 'kJ', 'MJ', 'N', 'V', 'A', 'Hz',
               'L', 'rad', 'Wb', 'T', 'Ω', '°C', '°F', 'm²', 'm³', 's⁻¹',
+              'an', 'ans', 'year', 'years',
           }
           prose_labels = {'sans dimension', 'dimensionless', 'étages', 'effets', 'cohérentes', 'plateaux'}
           unit_tokens = ('m', 's', 'kg', 'g', 'mol', 'Pa', 'bar', 'K', 'W', 'J',
