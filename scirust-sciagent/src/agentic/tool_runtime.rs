@@ -90,6 +90,7 @@ impl ToolRuntime<AllowAllPolicy> {
     pub fn builtins() -> Self {
         let mut tools = Tool::builtins();
         super::sandbox::install_process_sandbox(&mut tools);
+        super::landlock::install_fallback_if_needed(&mut tools);
         Self::new(tools, AllowAllPolicy).expect("built-in SciAgent tool contracts must be valid")
     }
 }
