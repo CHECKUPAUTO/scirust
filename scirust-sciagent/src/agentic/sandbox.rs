@@ -1,3 +1,5 @@
+mod landlock;
+
 use super::tools::Tool;
 use command_group::{CommandGroup, GroupChild};
 use std::collections::HashMap;
@@ -10,6 +12,7 @@ use std::time::{Duration, Instant};
 
 const MAX_TOOL_OUTPUT_BYTES: usize = 64 * 1024;
 const TOOL_TIMEOUT: Duration = Duration::from_secs(30);
+const BWRAP_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 const REAP_GRACE: Duration = Duration::from_secs(2);
 const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const SANDBOX_UNAVAILABLE: &str = "SANDBOX_UNAVAILABLE";
@@ -74,12 +77,14 @@ impl SandboxMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SandboxEnforcement {
     Full,
+    Partial,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum SandboxBackend {
     Direct,
     Bubblewrap(PathBuf),
+    Landlock(landlock::Support),
 }
 
 #[derive(Debug, Clone)]
@@ -104,14 +109,35 @@ impl SandboxConfig {
         Ok(Self { mode, bwrap })
     }
 
-    fn backend(&self) -> Result<(SandboxBackend, Option<SandboxEnforcement>), String> {
-        select_backend(self.mode, self.bwrap.clone(), cfg!(target_os = "linux"))
+    fn backend(&self, root: &Path) -> Result<(SandboxBackend, Option<SandboxEnforcement>), String> {
+        if !self.mode.is_confined()
+        {
+            return select_backend(self.mode, None, None, cfg!(target_os = "linux"));
+        }
+        if !cfg!(target_os = "linux")
+        {
+            return select_backend(self.mode, None, None, false);
+        }
+
+        let bwrap = self
+            .bwrap
+            .clone()
+            .filter(|candidate| bubblewrap_usable(candidate, root));
+        let landlock = if bwrap.is_none()
+        {
+            landlock::probe()
+        }
+        else
+        {
+            None
+        };
+        select_backend(self.mode, bwrap, landlock, true)
     }
 }
 
 fn sandbox_unavailable(mode: SandboxMode, detail: impl AsRef<str>) -> String {
     format!(
-        "[{SANDBOX_UNAVAILABLE}] sandbox mode {:?} was requested but no usable bubblewrap backend is available; refusing to run the command unconfined. {}",
+        "[{SANDBOX_UNAVAILABLE}] sandbox mode {:?} was requested but no usable Linux sandbox backend is available; refusing to run the command unconfined. {}",
         mode.label(),
         detail.as_ref()
     )
@@ -120,6 +146,7 @@ fn sandbox_unavailable(mode: SandboxMode, detail: impl AsRef<str>) -> String {
 fn select_backend(
     mode: SandboxMode,
     bwrap: Option<PathBuf>,
+    landlock: Option<landlock::Support>,
     linux: bool,
 ) -> Result<(SandboxBackend, Option<SandboxEnforcement>), String> {
     if !mode.is_confined()
@@ -130,18 +157,23 @@ fn select_backend(
     {
         return Err(sandbox_unavailable(
             mode,
-            "This P0 slice provides the Linux bubblewrap rung; Landlock and other platform rungs follow separately.",
+            "Confined process sandboxes currently require Linux.",
         ));
     }
-    let bwrap = bwrap.ok_or_else(|| {
-        sandbox_unavailable(
-            mode,
-            "Install `bwrap` or configure SCIAGENT_BWRAP. The next sandbox slice adds the Linux Landlock fallback.",
-        )
-    })?;
-    Ok((
-        SandboxBackend::Bubblewrap(bwrap),
-        Some(SandboxEnforcement::Full),
+    if let Some(bwrap) = bwrap
+    {
+        return Ok((
+            SandboxBackend::Bubblewrap(bwrap),
+            Some(SandboxEnforcement::Full),
+        ));
+    }
+    if let Some(support) = landlock
+    {
+        return Ok((SandboxBackend::Landlock(support), Some(support.enforcement)));
+    }
+    Err(sandbox_unavailable(
+        mode,
+        "bubblewrap is absent or failed its functional probe, and Landlock is unsupported or disabled by this kernel.",
     ))
 }
 
@@ -150,6 +182,45 @@ fn find_bwrap_on_path() -> Option<PathBuf> {
     std::env::split_paths(&path)
         .map(|directory| directory.join("bwrap"))
         .find(|candidate| candidate.is_file())
+}
+
+fn bubblewrap_usable(bwrap: &Path, root: &Path) -> bool {
+    let mut command = bubblewrap_command(bwrap, SandboxMode::ReadOnly, root, root, "true", &[]);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let Ok(mut child) = spawn_process_group(&mut command)
+    else
+    {
+        return false;
+    };
+    let deadline = Instant::now() + BWRAP_PROBE_TIMEOUT;
+    loop
+    {
+        match child.try_wait()
+        {
+            Ok(Some(status)) =>
+            {
+                drop(child);
+                return status.success();
+            },
+            Ok(None) =>
+            {},
+            Err(_) =>
+            {
+                let _ = child.kill();
+                return false;
+            },
+        }
+        if Instant::now() >= deadline
+        {
+            let _ = child.kill();
+            let _ = child.inner().wait();
+            return false;
+        }
+        std::thread::sleep(PROCESS_POLL_INTERVAL);
+    }
 }
 
 pub(crate) fn install_process_sandbox(tools: &mut [Tool]) {
@@ -519,8 +590,14 @@ fn run_sandboxed_with_config(
     timeout: Duration,
 ) -> Result<LimitedOutput, String> {
     let root = canonical_workspace_root()?;
-    let (backend, _enforcement) = config.backend()?;
+    let (backend, _enforcement) = config.backend(&root)?;
     let confined_mode = config.mode.is_confined();
+    let backend_label = match &backend
+    {
+        SandboxBackend::Direct => "direct",
+        SandboxBackend::Bubblewrap(_) => "bubblewrap",
+        SandboxBackend::Landlock(_) => "landlock",
+    };
     let mut command = match &backend
     {
         SandboxBackend::Direct =>
@@ -533,6 +610,15 @@ fn run_sandboxed_with_config(
         {
             bubblewrap_command(bwrap, config.mode, &root, cwd, program, args)
         },
+        SandboxBackend::Landlock(support) =>
+        {
+            let mut command = Command::new(program);
+            command.args(args).current_dir(cwd);
+            landlock::configure_command(&mut command, config.mode, &root, *support).map_err(
+                |error| sandbox_unavailable(config.mode, format!("Landlock setup failed: {error}")),
+            )?;
+            command
+        },
     };
 
     for variable in SECRET_ENV_VARS
@@ -543,7 +629,10 @@ fn run_sandboxed_with_config(
     let mut child = spawn_process_group(&mut command).map_err(|error| {
         if confined_mode
         {
-            sandbox_unavailable(config.mode, format!("bubblewrap spawn failed: {error}"))
+            sandbox_unavailable(
+                config.mode,
+                format!("{backend_label} spawn or pre-exec enforcement failed: {error}"),
+            )
         }
         else
         {
@@ -588,12 +677,15 @@ fn run_sandboxed_with_config(
     let status = exit_status.expect("completed process group has an exit status");
     let stdout = stdout.finish();
     let stderr = stderr.finish();
-    if confined_mode && !status.success() && bwrap_runner_failed(&stderr)
+    if matches!(backend, SandboxBackend::Bubblewrap(_))
+        && confined_mode
+        && !status.success()
+        && bwrap_runner_failed(&stderr)
     {
         return Err(sandbox_unavailable(
             config.mode,
             format!(
-                "bubblewrap refused the profile: {}",
+                "bubblewrap refused the profile after its probe: {}",
                 String::from_utf8_lossy(&stderr).trim()
             ),
         ));
@@ -662,6 +754,10 @@ mod tests {
     use super::*;
     use std::ffi::OsStr;
 
+    fn landlock_support(abi: u32, enforcement: SandboxEnforcement) -> landlock::Support {
+        landlock::Support { abi, enforcement }
+    }
+
     #[test]
     fn sandbox_mode_parser_matches_harness_vocabulary() {
         assert_eq!(
@@ -688,36 +784,58 @@ mod tests {
     fn confined_modes_fail_closed_without_backend() {
         for mode in [SandboxMode::ReadOnly, SandboxMode::WorkspaceWrite]
         {
-            let error = select_backend(mode, None, true).unwrap_err();
+            let error = select_backend(mode, None, None, true).unwrap_err();
             assert!(error.contains(SANDBOX_UNAVAILABLE));
         }
-        let error = select_backend(SandboxMode::ReadOnly, None, false).unwrap_err();
+        let error = select_backend(SandboxMode::ReadOnly, None, None, false).unwrap_err();
         assert!(error.contains(SANDBOX_UNAVAILABLE));
     }
 
     #[test]
     fn danger_full_access_is_the_only_direct_mode() {
         assert_eq!(
-            select_backend(SandboxMode::DangerFullAccess, None, false).unwrap(),
+            select_backend(SandboxMode::DangerFullAccess, None, None, false).unwrap(),
             (SandboxBackend::Direct, None)
         );
         assert_eq!(
-            select_backend(SandboxMode::DangerFullAccess, None, true).unwrap(),
+            select_backend(SandboxMode::DangerFullAccess, None, None, true).unwrap(),
             (SandboxBackend::Direct, None)
         );
     }
 
     #[test]
-    fn bubblewrap_confined_backend_reports_full_enforcement() {
+    fn bubblewrap_is_preferred_and_reports_full_enforcement() {
+        let landlock = landlock_support(4, SandboxEnforcement::Partial);
         assert_eq!(
             select_backend(
                 SandboxMode::WorkspaceWrite,
                 Some(PathBuf::from("/usr/bin/bwrap")),
+                Some(landlock),
                 true,
             )
             .unwrap(),
             (
                 SandboxBackend::Bubblewrap(PathBuf::from("/usr/bin/bwrap")),
+                Some(SandboxEnforcement::Full)
+            )
+        );
+    }
+
+    #[test]
+    fn landlock_is_the_linux_fallback_and_preserves_enforcement_strength() {
+        let partial = landlock_support(4, SandboxEnforcement::Partial);
+        assert_eq!(
+            select_backend(SandboxMode::ReadOnly, None, Some(partial), true).unwrap(),
+            (
+                SandboxBackend::Landlock(partial),
+                Some(SandboxEnforcement::Partial)
+            )
+        );
+        let full = landlock_support(5, SandboxEnforcement::Full);
+        assert_eq!(
+            select_backend(SandboxMode::WorkspaceWrite, None, Some(full), true).unwrap(),
+            (
+                SandboxBackend::Landlock(full),
                 Some(SandboxEnforcement::Full)
             )
         );
