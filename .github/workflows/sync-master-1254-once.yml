@@ -1,0 +1,31 @@
+name: Sync PR 1254 with master once
+
+on:
+  push:
+    branches: [feat/sciagent-optimization-loop]
+    paths:
+      - .github/workflows/sync-master-1254-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: feat/sciagent-optimization-loop
+          fetch-depth: 0
+      - name: Merge current master
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git fetch origin master
+          git merge --no-edit origin/master
+          rm .github/workflows/sync-master-1254-once.yml
+          git add -A
+          git commit --amend --no-edit
+          git push origin HEAD:feat/sciagent-optimization-loop
