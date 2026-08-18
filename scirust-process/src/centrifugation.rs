@@ -5,25 +5,25 @@
 //!
 //! ```text
 //! facteur de séparation (nombre de « g »)
-//!   g_c = ω²·r / g                                              [sans dimension]
+//!   g_c = ω²·r / g                                              `sans dimension`
 //! vitesse de migration radiale (régime de Stokes)
-//!   u_r = d²·Δρ·ω²·r / (18·μ)                                   [m·s⁻¹]
+//!   u_r = d²·Δρ·ω²·r / (18·μ)                                   `m·s⁻¹`
 //! facteur Sigma d'une centrifugeuse tubulaire (forme retenue)
-//!   Σ   = V·ω²·(r_o + r_i) / (2·g·|ln(r_o − r_i)|)              [m²]
+//!   Σ   = V·ω²·(r_o + r_i) / (2·g·|ln(r_o − r_i)|)              `m²`
 //! diamètre de coupure à 50 %
-//!   d_c = √( 18·μ·Q / (2·Δρ·g·Σ) )                              [m]
+//!   d_c = √( 18·μ·Q / (2·Δρ·g·Σ) )                              `m`
 //! ```
 //!
-//! `ω` vitesse angulaire du bol [rad·s⁻¹], `r` rayon de rotation [m], `g`
-//! accélération de la pesanteur (ou de référence) [m·s⁻²] ; `g_c` facteur de
-//! séparation, rapport de l'accélération centrifuge à `g` [sans dimension] ; `d`
-//! diamètre de la particule [m], `Δρ` différence de masse volumique entre la
-//! particule et le liquide [kg·m⁻³], `μ` viscosité dynamique du liquide [Pa·s],
-//! `u_r` vitesse de migration radiale [m·s⁻¹] ; `V` volume de liquide retenu dans
-//! le bol [m³], `r_o` rayon externe (paroi du bol) [m], `r_i` rayon interne
-//! (surface libre du liquide) [m], `Σ` facteur Sigma, aire d'un décanteur
-//! gravitaire équivalent [m²] ; `Q` débit volumique d'alimentation [m³·s⁻¹], `d_c`
-//! diamètre de coupure (50 % de capture) [m].
+//! `ω` vitesse angulaire du bol `rad·s⁻¹`, `r` rayon de rotation `m`, `g`
+//! accélération de la pesanteur (ou de référence) `m·s⁻²` ; `g_c` facteur de
+//! séparation, rapport de l'accélération centrifuge à `g` `sans dimension` ; `d`
+//! diamètre de la particule `m`, `Δρ` différence de masse volumique entre la
+//! particule et le liquide `kg·m⁻³`, `μ` viscosité dynamique du liquide `Pa·s`,
+//! `u_r` vitesse de migration radiale `m·s⁻¹` ; `V` volume de liquide retenu dans
+//! le bol `m³`, `r_o` rayon externe (paroi du bol) `m`, `r_i` rayon interne
+//! (surface libre du liquide) `m`, `Σ` facteur Sigma, aire d'un décanteur
+//! gravitaire équivalent `m²` ; `Q` débit volumique d'alimentation `m³·s⁻¹`, `d_c`
+//! diamètre de coupure (50 % de capture) `m`.
 //!
 //! **Limite honnête** : modèle de séparation centrifuge à l'échelle des
 //! **opérations unitaires**, en **régime de Stokes** (particules fines, nombre de
@@ -42,8 +42,8 @@
 /// Facteur de séparation centrifuge `g_c = ω²·r / g` (sans dimension), soit le
 /// nombre de fois la pesanteur ressenti par une particule dans le champ centrifuge.
 ///
-/// `angular_velocity` (ω) vitesse angulaire [rad·s⁻¹], `radius` (r) rayon de
-/// rotation [m], `gravity` (g) accélération de référence [m·s⁻²].
+/// `angular_velocity` (ω) vitesse angulaire `rad·s⁻¹`, `radius` (r) rayon de
+/// rotation `m`, `gravity` (g) accélération de référence `m·s⁻²`.
 ///
 /// Panique si `r < 0` ou si `g ≤ 0` (accélération de référence strictement
 /// positive requise).
@@ -56,10 +56,10 @@ pub fn centf_g_factor(angular_velocity: f64, radius: f64, gravity: f64) -> f64 {
 /// Vitesse de migration radiale d'une particule en **régime de Stokes**
 /// `u_r = d²·Δρ·ω²·r / (18·μ)` (m·s⁻¹) dans un champ centrifuge.
 ///
-/// `particle_diameter` (d) diamètre de la particule [m], `density_difference` (Δρ)
-/// différence de masse volumique particule − liquide [kg·m⁻³], `angular_velocity`
-/// (ω) vitesse angulaire [rad·s⁻¹], `radius` (r) rayon de rotation [m], `viscosity`
-/// (μ) viscosité dynamique du liquide [Pa·s].
+/// `particle_diameter` (d) diamètre de la particule `m`, `density_difference` (Δρ)
+/// différence de masse volumique particule − liquide `kg·m⁻³`, `angular_velocity`
+/// (ω) vitesse angulaire `rad·s⁻¹`, `radius` (r) rayon de rotation `m`, `viscosity`
+/// (μ) viscosité dynamique du liquide `Pa·s`.
 ///
 /// Panique si `d < 0`, si `r < 0`, ou si `μ ≤ 0` (viscosité strictement positive
 /// requise). `Δρ` peut être négatif (particule plus légère : migration vers l'axe).
@@ -89,10 +89,10 @@ pub fn centf_terminal_velocity(
 /// `Σ = V·ω²·(r_o + r_i) / (2·g·|ln(r_o − r_i)|)` (m²), aire d'un décanteur
 /// gravitaire équivalent servant à la mise à l'échelle géométrique.
 ///
-/// `volume` (V) volume de liquide retenu dans le bol [m³], `gravity` (g)
-/// accélération de référence [m·s⁻²], `angular_velocity` (ω) vitesse angulaire
-/// [rad·s⁻¹], `outer_radius` (r_o) rayon externe [m], `inner_radius` (r_i) rayon
-/// interne [m].
+/// `volume` (V) volume de liquide retenu dans le bol `m³`, `gravity` (g)
+/// accélération de référence `m·s⁻²`, `angular_velocity` (ω) vitesse angulaire
+/// `rad·s⁻¹`, `outer_radius` (r_o) rayon externe `m`, `inner_radius` (r_i) rayon
+/// interne `m`.
 ///
 /// Le logarithme est borné par `max(|ln(r_o − r_i)|, 1e-9)` afin d'éviter une
 /// division par zéro lorsque `r_o − r_i` approche 1.
@@ -122,10 +122,10 @@ pub fn centf_sigma_factor(
 /// Diamètre de coupure à 50 % `d_c = √( 18·μ·Q / (2·Δρ·g·Σ) )` (m) : diamètre de
 /// la particule capturée à 50 % pour un débit et un facteur Sigma donnés.
 ///
-/// `flow_rate` (Q) débit volumique d'alimentation [m³·s⁻¹], `sigma_factor` (Σ)
-/// facteur Sigma de la machine [m²], `density_difference` (Δρ) différence de masse
-/// volumique particule − liquide [kg·m⁻³], `viscosity` (μ) viscosité dynamique
-/// [Pa·s], `gravity` (g) accélération de référence [m·s⁻²].
+/// `flow_rate` (Q) débit volumique d'alimentation `m³·s⁻¹`, `sigma_factor` (Σ)
+/// facteur Sigma de la machine `m²`, `density_difference` (Δρ) différence de masse
+/// volumique particule − liquide `kg·m⁻³`, `viscosity` (μ) viscosité dynamique
+/// `Pa·s`, `gravity` (g) accélération de référence `m·s⁻²`.
 ///
 /// Panique si `Q < 0`, si `Σ ≤ 0`, si `Δρ ≤ 0`, si `μ ≤ 0`, ou si `g ≤ 0` (le
 /// radicande doit être positif : particule plus dense que le liquide requise).

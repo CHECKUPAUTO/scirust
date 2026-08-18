@@ -3,23 +3,23 @@
 //! effet, et élévation ébullioscopique par la règle de Dühring.
 //!
 //! ```text
-//! eau évaporée (bilan solides)    V   = F · (1 − x_F / x_P)          [kg·s⁻¹]
+//! eau évaporée (bilan solides)    V   = F · (1 − x_F / x_P)          `kg·s⁻¹`
 //! économie de vapeur              E   = V / S                        [-]
-//! élévation ébullioscopique       ΔT  = k · (T_b − T_ref)            [K]
+//! élévation ébullioscopique       ΔT  = k · (T_b − T_ref)            `K`
 //!   (règle de Dühring)
 //! économie multiple effet         E_N = N · E_1                      [-]
 //! ```
 //!
-//! `F` débit d'alimentation [kg·s⁻¹], `x_F`/`x_P` fractions massiques de solides
+//! `F` débit d'alimentation `kg·s⁻¹`, `x_F`/`x_P` fractions massiques de solides
 //! **non volatils** dans l'alimentation / le produit concentré [sans dimension,
-//! 0 ≤ x ≤ 1], `V` débit d'eau (solvant) évaporée [kg·s⁻¹] ; `S` débit de vapeur
-//! vive consommée [kg·s⁻¹], `E` économie de vapeur [sans dimension, kg évaporé
-//! par kg de vapeur vive] ; `k` pente de la droite de Dühring [sans dimension],
+//! 0 ≤ x ≤ 1], `V` débit d'eau (solvant) évaporée `kg·s⁻¹` ; `S` débit de vapeur
+//! vive consommée `kg·s⁻¹`, `E` économie de vapeur [sans dimension, kg évaporé
+//! par kg de vapeur vive] ; `k` pente de la droite de Dühring `sans dimension`,
 //! `T_b` température d'ébullition du **solvant pur** à la pression de l'effet
-//! [K], `T_ref` température d'ébullition de référence [K], `ΔT` élévation du point
-//! d'ébullition de la solution au-dessus du solvant pur [K] ; `N` nombre d'effets
-//! [effets], `E_1` économie moyenne par effet [sans dimension], `E_N` économie
-//! approchée de la batterie [sans dimension].
+//! `K`, `T_ref` température d'ébullition de référence `K`, `ΔT` élévation du point
+//! d'ébullition de la solution au-dessus du solvant pur `K` ; `N` nombre d'effets
+//! [effets], `E_1` économie moyenne par effet `sans dimension`, `E_N` économie
+//! approchée de la batterie `sans dimension`.
 //!
 //! **Limite honnête** : le bilan matière porte sur les **solides non volatils**
 //! (supposés entièrement retenus dans le produit, aucun entraînement) et suppose
@@ -38,11 +38,11 @@
 /// `V = F · (1 − x_F / x_P)` (kg·s⁻¹), où le débit de produit concentré vaut
 /// `P = F · x_F / x_P` par conservation des solides `F · x_F = P · x_P`.
 ///
-/// `feed_flow` (F) débit d'alimentation [kg·s⁻¹], `feed_solids_fraction` (x_F)
+/// `feed_flow` (F) débit d'alimentation `kg·s⁻¹`, `feed_solids_fraction` (x_F)
 /// et `product_solids_fraction` (x_P) fractions massiques de solides non volatils
-/// [sans dimension]. La concentration augmentant, on exige `x_P ≥ x_F`.
+/// `sans dimension`. La concentration augmentant, on exige `x_P ≥ x_F`.
 ///
-/// Panique si `feed_flow < 0`, si `x_F` hors de `[0, 1]`, si `x_P` hors de
+/// Panique si `feed_flow < 0`, si `x_F` hors de ``0, 1``, si `x_P` hors de
 /// `]0, 1]`, ou si `x_P < x_F` (le produit ne peut être moins concentré).
 pub fn evap_water_evaporated(
     feed_flow: f64,
@@ -68,8 +68,8 @@ pub fn evap_water_evaporated(
 /// Économie de vapeur `E = V / S` (sans dimension), masse de solvant évaporée par
 /// masse de vapeur vive consommée (~0,8 par effet en simple effet).
 ///
-/// `water_evaporated` (V) débit d'eau évaporée [kg·s⁻¹], `steam_consumed` (S)
-/// débit de vapeur vive [kg·s⁻¹], exprimés dans la **même unité cohérente**.
+/// `water_evaporated` (V) débit d'eau évaporée `kg·s⁻¹`, `steam_consumed` (S)
+/// débit de vapeur vive `kg·s⁻¹`, exprimés dans la **même unité cohérente**.
 ///
 /// Panique si `water_evaporated < 0` ou si `steam_consumed <= 0`.
 pub fn evap_steam_economy(water_evaporated: f64, steam_consumed: f64) -> f64 {
@@ -82,9 +82,9 @@ pub fn evap_steam_economy(water_evaporated: f64, steam_consumed: f64) -> f64 {
 /// `ΔT = k · (T_b − T_ref)` (K), forme linéaire où la pente `k` traduit la droite
 /// de Dühring propre au produit et à sa concentration.
 ///
-/// `duhring_slope` (k) pente de Dühring [sans dimension], `solvent_boiling_point`
-/// (T_b) température d'ébullition du solvant pur à la pression de l'effet [K],
-/// `reference_boiling_point` (T_ref) température d'ébullition de référence [K].
+/// `duhring_slope` (k) pente de Dühring `sans dimension`, `solvent_boiling_point`
+/// (T_b) température d'ébullition du solvant pur à la pression de l'effet `K`,
+/// `reference_boiling_point` (T_ref) température d'ébullition de référence `K`.
 ///
 /// Panique si `duhring_slope < 0`, si `T_b <= 0`, si `T_ref <= 0`, ou si
 /// `T_b < T_ref` (l'élévation ébullioscopique serait négative).
@@ -114,7 +114,7 @@ pub fn evap_boiling_point_elevation_duhring(
 /// d'économie moyenne `E_1` chacun.
 ///
 /// `number_of_effects` (N) nombre d'effets [entier ≥ 1], `economy_per_effect`
-/// (E_1) économie moyenne par effet [sans dimension].
+/// (E_1) économie moyenne par effet `sans dimension`.
 ///
 /// Panique si `number_of_effects == 0` ou si `economy_per_effect < 0`.
 pub fn evap_multiple_effect_economy(number_of_effects: u32, economy_per_effect: f64) -> f64 {

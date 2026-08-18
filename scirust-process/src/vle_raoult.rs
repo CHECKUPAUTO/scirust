@@ -3,22 +3,22 @@
 //! vapeur d'un binaire, volatilité relative.
 //!
 //! ```text
-//! loi de Raoult      pᵢ = xᵢ·P_sat,ᵢ                              [Pa]
-//! constante d'équil. Kᵢ = P_sat,ᵢ / P                             [sans dimension]
-//! pression de bulle  P_bulle = x₁·P_sat,1 + (1 − x₁)·P_sat,2      [Pa]  (binaire)
-//! composition vapeur y₁ = x₁·P_sat,1 / P_bulle                    [sans dimension]
-//! volatilité relative α = P_sat,1 / P_sat,2                       [sans dimension]
+//! loi de Raoult      pᵢ = xᵢ·P_sat,ᵢ                              `Pa`
+//! constante d'équil. Kᵢ = P_sat,ᵢ / P                             `sans dimension`
+//! pression de bulle  P_bulle = x₁·P_sat,1 + (1 − x₁)·P_sat,2      `Pa`  (binaire)
+//! composition vapeur y₁ = x₁·P_sat,1 / P_bulle                    `sans dimension`
+//! volatilité relative α = P_sat,1 / P_sat,2                       `sans dimension`
 //! ```
 //!
 //! `xᵢ` fraction molaire du constituant dans le liquide [sans dimension, dans
-//! `[0, 1]`], `yᵢ` fraction molaire dans la vapeur [sans dimension, dans `[0, 1]`],
-//! `pᵢ` pression partielle du constituant [Pa], `P_sat,ᵢ` pression de vapeur
+//! ``0, 1``], `yᵢ` fraction molaire dans la vapeur [sans dimension, dans ``0, 1``],
+//! `pᵢ` pression partielle du constituant `Pa`, `P_sat,ᵢ` pression de vapeur
 //! saturante du corps pur à la température considérée [Pa, strictement positive],
 //! `P` pression totale du système [Pa, strictement positive], `P_bulle` pression de
-//! bulle du mélange (pression totale au point de bulle) [Pa], `Kᵢ = yᵢ/xᵢ`
-//! coefficient de partage (constante d'équilibre) du constituant [sans dimension],
+//! bulle du mélange (pression totale au point de bulle) `Pa`, `Kᵢ = yᵢ/xᵢ`
+//! coefficient de partage (constante d'équilibre) du constituant `sans dimension`,
 //! `α` volatilité relative du constituant 1 par rapport au constituant 2
-//! [sans dimension].
+//! `sans dimension`.
 //!
 //! **Limite honnête** : ces relations supposent un **mélange idéal** (loi de Raoult,
 //! phase vapeur assimilée à un gaz parfait, absence d'interactions spécifiques). Les
@@ -32,13 +32,13 @@
 //! résolution de la boucle bulle/rosée ni les bilans enthalpiques.
 
 /// Pression partielle d'un constituant selon la loi de Raoult `pᵢ = xᵢ·P_sat,ᵢ`
-/// [Pa].
+/// `Pa`.
 ///
 /// `liquid_fraction` `xᵢ` fraction molaire dans le liquide [sans dimension, dans
-/// `[0, 1]`], `vapor_pressure_pure` `P_sat,ᵢ` pression de vapeur saturante du corps
+/// ``0, 1``], `vapor_pressure_pure` `P_sat,ᵢ` pression de vapeur saturante du corps
 /// pur **fournie** [Pa, strictement positive].
 ///
-/// Panique si `liquid_fraction` sort de `[0, 1]` ou si `vapor_pressure_pure` n'est
+/// Panique si `liquid_fraction` sort de ``0, 1`` ou si `vapor_pressure_pure` n'est
 /// pas fini et strictement positif.
 pub fn vle_partial_pressure_raoult(liquid_fraction: f64, vapor_pressure_pure: f64) -> f64 {
     assert!(
@@ -53,7 +53,7 @@ pub fn vle_partial_pressure_raoult(liquid_fraction: f64, vapor_pressure_pure: f6
 }
 
 /// Constante d'équilibre (coefficient de partage) d'un constituant en mélange idéal
-/// `Kᵢ = P_sat,ᵢ / P` [sans dimension].
+/// `Kᵢ = P_sat,ᵢ / P` `sans dimension`.
 ///
 /// `vapor_pressure_pure` `P_sat,ᵢ` pression de vapeur saturante du corps pur
 /// **fournie** [Pa, strictement positive], `total_pressure` `P` pression totale du
@@ -74,17 +74,17 @@ pub fn vle_equilibrium_ratio(vapor_pressure_pure: f64, total_pressure: f64) -> f
 }
 
 /// Pression de bulle d'un mélange binaire idéal
-/// `P_bulle = x₁·P_sat,1 + (1 − x₁)·P_sat,2` [Pa].
+/// `P_bulle = x₁·P_sat,1 + (1 − x₁)·P_sat,2` `Pa`.
 ///
 /// C'est la somme des pressions partielles des deux constituants ; elle donne la
 /// pression totale à laquelle le liquide de composition `x₁` commence à bouillir.
 ///
 /// `liquid_fraction_1` `x₁` fraction molaire du constituant 1 dans le liquide
-/// [sans dimension, dans `[0, 1]`], `vapor_pressure_1` `P_sat,1` et
+/// [sans dimension, dans ``0, 1``], `vapor_pressure_1` `P_sat,1` et
 /// `vapor_pressure_2` `P_sat,2` pressions de vapeur saturantes des corps purs
 /// **fournies** [Pa, strictement positives].
 ///
-/// Panique si `liquid_fraction_1` sort de `[0, 1]` ou si l'une des pressions de
+/// Panique si `liquid_fraction_1` sort de ``0, 1`` ou si l'une des pressions de
 /// vapeur n'est pas finie et strictement positive.
 pub fn vle_bubble_pressure_binary(
     liquid_fraction_1: f64,
@@ -107,20 +107,20 @@ pub fn vle_bubble_pressure_binary(
 }
 
 /// Fraction molaire du constituant 1 dans la vapeur d'un binaire idéal
-/// `y₁ = x₁·P_sat,1 / P_bulle` [sans dimension].
+/// `y₁ = x₁·P_sat,1 / P_bulle` `sans dimension`.
 ///
 /// Au point de bulle, la pression totale vaut `P_bulle` ; cette relation équivaut
 /// donc à `y₁ = K₁·x₁` avec `K₁ = P_sat,1/P_bulle`. Le résultat appartient à
-/// `[0, 1]` dès lors que `P_bulle ≥ x₁·P_sat,1`, ce qui est garanti pour un binaire
+/// ``0, 1`` dès lors que `P_bulle ≥ x₁·P_sat,1`, ce qui est garanti pour un binaire
 /// idéal cohérent (`P_bulle` issu de [`vle_bubble_pressure_binary`]).
 ///
 /// `liquid_fraction_1` `x₁` fraction molaire du constituant 1 dans le liquide
-/// [sans dimension, dans `[0, 1]`], `vapor_pressure_1` `P_sat,1` pression de vapeur
+/// [sans dimension, dans ``0, 1``], `vapor_pressure_1` `P_sat,1` pression de vapeur
 /// saturante du corps pur 1 **fournie** [Pa, strictement positive],
 /// `bubble_pressure` `P_bulle` pression de bulle du mélange [Pa, strictement
 /// positive].
 ///
-/// Panique si `liquid_fraction_1` sort de `[0, 1]`, ou si `vapor_pressure_1` ou
+/// Panique si `liquid_fraction_1` sort de ``0, 1``, ou si `vapor_pressure_1` ou
 /// `bubble_pressure` n'est pas fini et strictement positif.
 pub fn vle_vapor_fraction_binary(
     liquid_fraction_1: f64,
@@ -143,7 +143,7 @@ pub fn vle_vapor_fraction_binary(
 }
 
 /// Volatilité relative du constituant 1 par rapport au constituant 2 en mélange
-/// idéal `α = P_sat,1 / P_sat,2` [sans dimension].
+/// idéal `α = P_sat,1 / P_sat,2` `sans dimension`.
 ///
 /// `vapor_pressure_1` `P_sat,1` et `vapor_pressure_2` `P_sat,2` pressions de vapeur
 /// saturantes des corps purs **fournies** [Pa, strictement positives]. Une valeur

@@ -4,24 +4,24 @@
 //! d'appoint (*make-up*) et cycles de concentration.
 //!
 //! ```text
-//! plage de refroidissement   range = T_hot − T_cold                        [K]
-//! approche (temp. humide)    approach = T_cold − T_wb                       [K]
+//! plage de refroidissement   range = T_hot − T_cold                        `K`
+//! approche (temp. humide)    approach = T_cold − T_wb                       `K`
 //! efficacité                 ε = range / (range + approach)                 [-]
-//! pertes par évaporation     E = ṁ_w·c_p·range / λ                          [kg·s⁻¹]
-//! eau d'appoint totale       M = E + D + B                                  [kg·s⁻¹]
+//! pertes par évaporation     E = ṁ_w·c_p·range / λ                          `kg·s⁻¹`
+//! eau d'appoint totale       M = E + D + B                                  `kg·s⁻¹`
 //! cycles de concentration    C = M / B                                      [-]
 //! ```
 //!
-//! `T_hot` température de l'eau chaude en entrée de tour [K], `T_cold` température
-//! de l'eau froide en sortie (bassin) [K], `T_wb` température humide de l'air
-//! ambiant [K], `range` plage de refroidissement [K], `approach` approche par
-//! rapport à la température humide [K], `ε` efficacité de la tour
+//! `T_hot` température de l'eau chaude en entrée de tour `K`, `T_cold` température
+//! de l'eau froide en sortie (bassin) `K`, `T_wb` température humide de l'air
+//! ambiant `K`, `range` plage de refroidissement `K`, `approach` approche par
+//! rapport à la température humide `K`, `ε` efficacité de la tour
 //! [sans dimension, 0 ≤ ε ≤ 1], `ṁ_w` débit massique d'eau en circulation
-//! [kg·s⁻¹], `c_p` capacité thermique massique de l'eau [J·kg⁻¹·K⁻¹], `λ` chaleur
-//! latente de vaporisation de l'eau [J·kg⁻¹], `E` pertes par évaporation
-//! [kg·s⁻¹], `D` pertes par entraînement (*drift*) [kg·s⁻¹], `B` purge de
-//! déconcentration (*blowdown*) [kg·s⁻¹], `M` débit d'eau d'appoint [kg·s⁻¹],
-//! `C` cycles de concentration [sans dimension].
+//! `kg·s⁻¹`, `c_p` capacité thermique massique de l'eau `J·kg⁻¹·K⁻¹`, `λ` chaleur
+//! latente de vaporisation de l'eau `J·kg⁻¹`, `E` pertes par évaporation
+//! `kg·s⁻¹`, `D` pertes par entraînement (*drift*) `kg·s⁻¹`, `B` purge de
+//! déconcentration (*blowdown*) `kg·s⁻¹`, `M` débit d'eau d'appoint `kg·s⁻¹`,
+//! `C` cycles de concentration `sans dimension`.
 //!
 //! **Limite honnête** : la **température humide** `T_wb`, la **chaleur latente**
 //! `λ` et la **capacité thermique** `c_p` de l'eau sont **FOURNIES par
@@ -36,7 +36,7 @@
 //! `scirust-thermo` (propriétés d'état, cycles) ni `scirust-fluids` (mécanique
 //! des fluides fondamentale).
 
-/// Plage de refroidissement `range = T_hot − T_cold` [K] : chute de température
+/// Plage de refroidissement `range = T_hot − T_cold` `K` : chute de température
 /// de l'eau à travers la tour.
 ///
 /// `hot_water_temperature` `T_hot` température de l'eau chaude en entrée [K, > 0],
@@ -62,7 +62,7 @@ pub fn ctwr_range(hot_water_temperature: f64, cold_water_temperature: f64) -> f6
     hot_water_temperature - cold_water_temperature
 }
 
-/// Approche `approach = T_cold − T_wb` [K] : écart entre l'eau froide et la
+/// Approche `approach = T_cold − T_wb` `K` : écart entre l'eau froide et la
 /// température humide de l'air, mesure de la finesse d'approche de la tour.
 ///
 /// `cold_water_temperature` `T_cold` température de l'eau froide en sortie
@@ -114,15 +114,15 @@ pub fn ctwr_effectiveness(range: f64, approach: f64) -> f64 {
     range / (range + approach)
 }
 
-/// Pertes par évaporation `E = ṁ_w·c_p·range / λ` [kg·s⁻¹] par bilan
+/// Pertes par évaporation `E = ṁ_w·c_p·range / λ` `kg·s⁻¹` par bilan
 /// enthalpique : la chaleur sensible cédée par l'eau est évacuée par
 /// vaporisation d'une fraction du débit en circulation.
 ///
-/// `water_flow` `ṁ_w` débit massique d'eau en circulation [kg·s⁻¹, ≥ 0],
+/// `water_flow` `ṁ_w` débit massique d'eau en circulation `kg·s⁻¹, ≥ 0`,
 /// `range` plage de refroidissement [K, ≥ 0], `latent_heat` `λ` chaleur latente
-/// de vaporisation de l'eau [J·kg⁻¹, > 0 ; FOURNIE par l'appelant],
+/// de vaporisation de l'eau `J·kg⁻¹, > 0 ; FOURNIE par l'appelant`,
 /// `water_heat_capacity` `c_p` capacité thermique massique de l'eau
-/// [J·kg⁻¹·K⁻¹, > 0 ; FOURNIE par l'appelant].
+/// `J·kg⁻¹·K⁻¹, > 0 ; FOURNIE par l'appelant`.
 ///
 /// Panique si `water_flow` ou `range` n'est pas fini ou est négatif, ou si
 /// `latent_heat` ou `water_heat_capacity` n'est pas fini ou n'est pas strictement
@@ -152,12 +152,12 @@ pub fn ctwr_evaporation_loss(
     water_flow * water_heat_capacity * range / latent_heat
 }
 
-/// Eau d'appoint totale `M = E + D + B` [kg·s⁻¹] : elle compense l'ensemble des
+/// Eau d'appoint totale `M = E + D + B` `kg·s⁻¹` : elle compense l'ensemble des
 /// pertes en eau de la tour (évaporation, entraînement, purge).
 ///
-/// `evaporation_loss` `E` pertes par évaporation [kg·s⁻¹, ≥ 0], `drift_loss` `D`
-/// pertes par entraînement de gouttelettes [kg·s⁻¹, ≥ 0], `blowdown` `B` purge
-/// de déconcentration [kg·s⁻¹, ≥ 0].
+/// `evaporation_loss` `E` pertes par évaporation `kg·s⁻¹, ≥ 0`, `drift_loss` `D`
+/// pertes par entraînement de gouttelettes `kg·s⁻¹, ≥ 0`, `blowdown` `B` purge
+/// de déconcentration `kg·s⁻¹, ≥ 0`.
 ///
 /// Panique si l'un des trois débits n'est pas fini ou est négatif.
 pub fn ctwr_makeup_water(evaporation_loss: f64, drift_loss: f64, blowdown: f64) -> f64 {
@@ -176,12 +176,12 @@ pub fn ctwr_makeup_water(evaporation_loss: f64, drift_loss: f64, blowdown: f64) 
     evaporation_loss + drift_loss + blowdown
 }
 
-/// Cycles de concentration `C = M / B` [sans dimension] : rapport entre le débit
+/// Cycles de concentration `C = M / B` `sans dimension` : rapport entre le débit
 /// d'appoint et la purge, mesurant l'enrichissement en sels de l'eau en
 /// circulation par rapport à l'eau d'appoint.
 ///
-/// `makeup` `M` débit d'eau d'appoint [kg·s⁻¹, ≥ 0], `blowdown` `B` purge de
-/// déconcentration [kg·s⁻¹, > 0].
+/// `makeup` `M` débit d'eau d'appoint `kg·s⁻¹, ≥ 0`, `blowdown` `B` purge de
+/// déconcentration `kg·s⁻¹, > 0`.
 ///
 /// Panique si `makeup` n'est pas fini ou est négatif, ou si `blowdown` n'est pas
 /// fini ou n'est pas strictement positif (division par la purge).

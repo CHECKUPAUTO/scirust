@@ -4,11 +4,11 @@
 //! vapeur vive, débit d'eau de refroidissement et surface d'échange requise.
 //!
 //! ```text
-//! charge du condenseur (total)     Q_c = V · λ                    [W]
-//! charge du rebouilleur (total)    Q_r = V' · λ'                  [W]
-//! consommation de vapeur vive      S   = Q_r / λ_s                [kg·s⁻¹]
-//! débit d'eau de refroidissement   m_w = Q_c / (c_p · ΔT_w)       [kg·s⁻¹]
-//! surface du rebouilleur           A   = Q_r / (U · ΔT_lm)        [m²]
+//! charge du condenseur (total)     Q_c = V · λ                    `W`
+//! charge du rebouilleur (total)    Q_r = V' · λ'                  `W`
+//! consommation de vapeur vive      S   = Q_r / λ_s                `kg·s⁻¹`
+//! débit d'eau de refroidissement   m_w = Q_c / (c_p · ΔT_w)       `kg·s⁻¹`
+//! surface du rebouilleur           A   = Q_r / (U · ΔT_lm)        `m²`
 //! ```
 //!
 //! `V` débit de vapeur montant en tête, condensé en totalité (kg·s⁻¹), `λ`

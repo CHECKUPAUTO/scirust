@@ -5,15 +5,15 @@
 //!
 //! ```text
 //! puissance hydraulique
-//!   Ph      = ρ · g · Q · H                                    [W]
+//!   Ph      = ρ · g · Q · H                                    `W`
 //! puissance à l'arbre
-//!   Pa      = Ph / η                                           [W]
+//!   Pa      = Ph / η                                           `W`
 //! NPSH disponible (hauteur nette d'aspiration)
-//!   NPSHa   = (P_atm − P_vap) / (ρ · g) + h_stat − h_pertes    [m]
+//!   NPSHa   = (P_atm − P_vap) / (ρ · g) + h_stat − h_pertes    `m`
 //! vitesse spécifique
 //!   Ns      = N · √Q / H^0.75                                  [unités]
 //! loi de similitude (affinité) sur le débit
-//!   Q₂      = Q₁ · N₂ / N₁                                     [m³·s⁻¹]
+//!   Q₂      = Q₁ · N₂ / N₁                                     `m³·s⁻¹`
 //! ```
 //!
 //! `ρ` masse volumique du liquide (kg·m⁻³), `g` accélération de la pesanteur

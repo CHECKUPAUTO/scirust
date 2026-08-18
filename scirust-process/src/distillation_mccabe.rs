@@ -5,24 +5,24 @@
 //! ```text
 //! volatilité relative   α  = K_L / K_H                                       [-]
 //! équilibre y-x         y  = α·x / (1 + (α − 1)·x)                           [-]
-//! Fenske (reflux total) Nₘ = ln[(d_L/d_H)·(b_H/b_L)] / ln(α)                [étages]
+//! Fenske (reflux total) Nₘ = ln`(d_L/d_H)·(b_H/b_L)` / ln(α)                [étages]
 //! pente rectification   s  = R / (R + 1)                                     [-]
 //! reflux minimal        Rₘ = (x_D − y*) / (y* − z_F)                         [-]
 //! ```
 //!
-//! `α` volatilité relative du constituant léger sur le lourd [sans dimension],
+//! `α` volatilité relative du constituant léger sur le lourd `sans dimension`,
 //! `K_L`, `K_H` constantes d'équilibre (coefficients de partage vapeur/liquide)
-//! des constituants léger et lourd [sans dimension], `x` fraction molaire du léger
+//! des constituants léger et lourd `sans dimension`, `x` fraction molaire du léger
 //! en phase liquide [sans dimension, 0 ≤ x ≤ 1], `y` fraction molaire du léger en
-//! phase vapeur à l'équilibre [sans dimension], `Nₘ` nombre minimal d'étages
+//! phase vapeur à l'équilibre `sans dimension`, `Nₘ` nombre minimal d'étages
 //! théoriques au reflux total [étages], `d_L`, `d_H` débits molaires du léger et
-//! du lourd dans le distillat [mol·s⁻¹], `b_L`, `b_H` débits molaires du léger et
-//! du lourd dans le résidu de pied [mol·s⁻¹], `s` pente de la droite opératoire de
-//! rectification [sans dimension], `R` taux de reflux L/D [sans dimension],
-//! `Rₘ` taux de reflux minimal [sans dimension], `x_D` fraction molaire du léger
-//! au distillat [sans dimension], `y*` fraction vapeur d'équilibre à la composition
-//! d'alimentation [sans dimension], `z_F` fraction molaire du léger à
-//! l'alimentation [sans dimension].
+//! du lourd dans le distillat `mol·s⁻¹`, `b_L`, `b_H` débits molaires du léger et
+//! du lourd dans le résidu de pied `mol·s⁻¹`, `s` pente de la droite opératoire de
+//! rectification `sans dimension`, `R` taux de reflux L/D `sans dimension`,
+//! `Rₘ` taux de reflux minimal `sans dimension`, `x_D` fraction molaire du léger
+//! au distillat `sans dimension`, `y*` fraction vapeur d'équilibre à la composition
+//! d'alimentation `sans dimension`, `z_F` fraction molaire du léger à
+//! l'alimentation `sans dimension`.
 //!
 //! **Limite honnête** : ces relations valent pour une **distillation binaire** à
 //! **volatilité relative constante FOURNIE par l'appelant** (jamais inventée ;
@@ -37,10 +37,10 @@
 //! **pas** calculés ici.
 
 /// Volatilité relative `α = K_L / K_H` à partir des constantes d'équilibre
-/// (coefficients de partage vapeur/liquide) [sans dimension].
+/// (coefficients de partage vapeur/liquide) `sans dimension`.
 ///
-/// `k_light` `K_L` constante d'équilibre du constituant léger [sans dimension],
-/// `k_heavy` `K_H` constante d'équilibre du constituant lourd [sans dimension].
+/// `k_light` `K_L` constante d'équilibre du constituant léger `sans dimension`,
+/// `k_heavy` `K_H` constante d'équilibre du constituant lourd `sans dimension`.
 ///
 /// Panique si `k_light` ou `k_heavy` n'est pas fini ou n'est pas strictement
 /// positif.
@@ -57,13 +57,13 @@ pub fn dist_relative_volatility(k_light: f64, k_heavy: f64) -> f64 {
 }
 
 /// Fraction molaire vapeur à l'équilibre pour un binaire à volatilité relative
-/// constante : `y = α·x / (1 + (α − 1)·x)` [sans dimension].
+/// constante : `y = α·x / (1 + (α − 1)·x)` `sans dimension`.
 ///
 /// `liquid_fraction` `x` fraction molaire du léger en phase liquide
 /// [sans dimension, 0 ≤ x ≤ 1], `relative_volatility` `α` volatilité relative
-/// du léger sur le lourd [sans dimension].
+/// du léger sur le lourd `sans dimension`.
 ///
-/// Panique si `liquid_fraction` n'est pas dans `[0, 1]`, ou si
+/// Panique si `liquid_fraction` n'est pas dans ``0, 1``, ou si
 /// `relative_volatility` n'est pas fini ou n'est pas strictement positif.
 pub fn dist_equilibrium_vapor(liquid_fraction: f64, relative_volatility: f64) -> f64 {
     assert!(
@@ -78,13 +78,13 @@ pub fn dist_equilibrium_vapor(liquid_fraction: f64, relative_volatility: f64) ->
 }
 
 /// Nombre minimal d'étages théoriques au **reflux total** (équation de Fenske) :
-/// `Nₘ = ln[(d_L/d_H)·(b_H/b_L)] / ln(α)` [étages].
+/// `Nₘ = ln`(d_L/d_H)·(b_H/b_L)` / ln(α)` [étages].
 ///
 /// `distillate_light` `d_L` et `distillate_heavy` `d_H` débits molaires des
-/// constituants léger et lourd dans le distillat [mol·s⁻¹], `bottoms_light` `b_L`
+/// constituants léger et lourd dans le distillat `mol·s⁻¹`, `bottoms_light` `b_L`
 /// et `bottoms_heavy` `b_H` débits molaires des constituants léger et lourd dans
-/// le résidu de pied [mol·s⁻¹], `relative_volatility` `α` volatilité relative
-/// [sans dimension].
+/// le résidu de pied `mol·s⁻¹`, `relative_volatility` `α` volatilité relative
+/// `sans dimension`.
 ///
 /// Panique si un des quatre débits n'est pas fini ou n'est pas strictement
 /// positif, ou si `relative_volatility` n'est pas fini, pas strictement positif,
@@ -121,10 +121,10 @@ pub fn dist_fenske_minimum_stages(
 }
 
 /// Pente de la droite opératoire de **rectification** : `s = R / (R + 1)`
-/// [sans dimension], où `R` est le taux de reflux `L/D`.
+/// `sans dimension`, où `R` est le taux de reflux `L/D`.
 ///
 /// `reflux_ratio` `R` taux de reflux (rapport du reflux liquide au débit de
-/// distillat) [sans dimension].
+/// distillat) `sans dimension`.
 ///
 /// Panique si `reflux_ratio` n'est pas fini ou est négatif.
 pub fn dist_rectifying_operating_slope(reflux_ratio: f64) -> f64 {
@@ -136,7 +136,7 @@ pub fn dist_rectifying_operating_slope(reflux_ratio: f64) -> f64 {
 }
 
 /// Taux de reflux **minimal** par la méthode du point de pincement, alimentation
-/// liquide bouillante : `Rₘ = (x_D − y*) / (y* − z_F)` [sans dimension].
+/// liquide bouillante : `Rₘ = (x_D − y*) / (y* − z_F)` `sans dimension`.
 ///
 /// `distillate_fraction` `x_D` fraction molaire du léger au distillat
 /// [sans dimension, 0 ≤ x_D ≤ 1], `feed_vapor_fraction_equilibrium` `y*` fraction
@@ -144,7 +144,7 @@ pub fn dist_rectifying_operating_slope(reflux_ratio: f64) -> f64 {
 /// 0 ≤ y* ≤ 1], `feed_fraction` `z_F` fraction molaire du léger à l'alimentation
 /// [sans dimension, 0 ≤ z_F ≤ 1].
 ///
-/// Panique si l'une des trois fractions n'est pas dans `[0, 1]`, ou si
+/// Panique si l'une des trois fractions n'est pas dans ``0, 1``, ou si
 /// `feed_vapor_fraction_equilibrium` n'est pas strictement supérieure à
 /// `feed_fraction` (dénominateur nul ou négatif : pincement non physique).
 pub fn dist_minimum_reflux_ratio(

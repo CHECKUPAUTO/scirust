@@ -3,12 +3,12 @@
 //! pression de vapeur au point de rosée et volume spécifique de l'air humide.
 //!
 //! ```text
-//! humidité absolue       W   = 0.622·pv/(P − pv)                    [kg/kg air sec]
+//! humidité absolue       W   = 0.622·pv/(P − pv)                    `kg/kg air sec`
 //! humidité relative      phi = pv/psat                              [-]
-//! pression partielle     pv  = W·P/(0.622 + W)                      [Pa]
-//! enthalpie (réf 0 °C)   h   = 1.006·t + W·(2501 + 1.86·t)          [kJ/kg air sec]
-//! pression au pt de rosée pd  = W·P/(0.622 + W)                     [Pa]
-//! volume spécifique      v   = R_a·T·(1 + 1.608·W)/P                [m³/kg air sec]
+//! pression partielle     pv  = W·P/(0.622 + W)                      `Pa`
+//! enthalpie (réf 0 °C)   h   = 1.006·t + W·(2501 + 1.86·t)          `kJ/kg air sec`
+//! pression au pt de rosée pd  = W·P/(0.622 + W)                     `Pa`
+//! volume spécifique      v   = R_a·T·(1 + 1.608·W)/P                `m³/kg air sec`
 //! ```
 //!
 //! `pv` pression partielle de vapeur d'eau (Pa), `P` pression totale (Pa),

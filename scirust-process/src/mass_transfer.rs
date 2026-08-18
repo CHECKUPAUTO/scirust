@@ -4,22 +4,22 @@
 //! **Sherwood** et de **Schmidt**.
 //!
 //! ```text
-//! flux molaire              N   = k_c · ΔC                              [mol·m⁻²·s⁻¹]
-//! coeff. global gaz (série) 1/K_G = 1/k_G + m/k_L   ⇒  K_G              [m·s⁻¹]
-//! force motrice log. moy.   ΔC_lm = (ΔC₁ − ΔC₂) / ln(ΔC₁/ΔC₂)          [mol·m⁻³]
+//! flux molaire              N   = k_c · ΔC                              `mol·m⁻²·s⁻¹`
+//! coeff. global gaz (série) 1/K_G = 1/k_G + m/k_L   ⇒  K_G              `m·s⁻¹`
+//! force motrice log. moy.   ΔC_lm = (ΔC₁ − ΔC₂) / ln(ΔC₁/ΔC₂)          `mol·m⁻³`
 //! nombre de Sherwood        Sh  = k_c · L / D                           [-]
 //! nombre de Schmidt         Sc  = ν / D                                 [-]
 //! ```
 //!
-//! `N` densité de flux molaire [mol·m⁻²·s⁻¹], `k_c` coefficient de transfert de
-//! matière (film) [m·s⁻¹], `ΔC` force motrice en concentration [mol·m⁻³],
-//! `K_G` coefficient global de transfert côté gaz [m·s⁻¹], `k_G`/`k_L`
-//! coefficients de film côté gaz/liquide [m·s⁻¹], `m` pente de la droite de
-//! Henry y = m·x reliant les concentrations à l'interface [sans dimension],
-//! `ΔC_lm` force motrice logarithmique moyenne [mol·m⁻³], `ΔC₁`/`ΔC₂` forces
-//! motrices aux deux extrémités [mol·m⁻³], `L` longueur caractéristique [m],
-//! `D` diffusivité (coefficient de diffusion) [m²·s⁻¹], `ν` viscosité
-//! cinématique [m²·s⁻¹].
+//! `N` densité de flux molaire `mol·m⁻²·s⁻¹`, `k_c` coefficient de transfert de
+//! matière (film) `m·s⁻¹`, `ΔC` force motrice en concentration `mol·m⁻³`,
+//! `K_G` coefficient global de transfert côté gaz `m·s⁻¹`, `k_G`/`k_L`
+//! coefficients de film côté gaz/liquide `m·s⁻¹`, `m` pente de la droite de
+//! Henry y = m·x reliant les concentrations à l'interface `sans dimension`,
+//! `ΔC_lm` force motrice logarithmique moyenne `mol·m⁻³`, `ΔC₁`/`ΔC₂` forces
+//! motrices aux deux extrémités `mol·m⁻³`, `L` longueur caractéristique `m`,
+//! `D` diffusivité (coefficient de diffusion) `m²·s⁻¹`, `ν` viscosité
+//! cinématique `m²·s⁻¹`.
 //!
 //! **Limite honnête** : modèle du **double film** (deux films stagnants en
 //! série de part et d'autre de l'interface, l'**interface étant supposée à
@@ -33,8 +33,8 @@
 
 /// Densité de flux molaire `N = k_c · ΔC` (mol·m⁻²·s⁻¹), premier film.
 ///
-/// `mass_transfer_coefficient` (k_c) [m·s⁻¹] ; `concentration_driving_force`
-/// (ΔC) [mol·m⁻³].
+/// `mass_transfer_coefficient` (k_c) `m·s⁻¹` ; `concentration_driving_force`
+/// (ΔC) `mol·m⁻³`.
 ///
 /// Panique si `mass_transfer_coefficient < 0`.
 pub fn masstr_flux(mass_transfer_coefficient: f64, concentration_driving_force: f64) -> f64 {
@@ -49,8 +49,8 @@ pub fn masstr_flux(mass_transfer_coefficient: f64, concentration_driving_force: 
 /// **série des résistances de film** : `1/K_G = 1/k_G + m/k_L`, d'où
 /// `K_G = 1/(1/k_G + m/k_L)` (m·s⁻¹).
 ///
-/// `gas_film_coefficient` (k_G) et `liquid_film_coefficient` (k_L) [m·s⁻¹] ;
-/// `henry_slope` (m) pente de la droite d'équilibre y = m·x [sans dimension].
+/// `gas_film_coefficient` (k_G) et `liquid_film_coefficient` (k_L) `m·s⁻¹` ;
+/// `henry_slope` (m) pente de la droite d'équilibre y = m·x `sans dimension`.
 ///
 /// Panique si `gas_film_coefficient <= 0`, `liquid_film_coefficient <= 0` ou
 /// `henry_slope < 0`.
@@ -72,7 +72,7 @@ pub fn masstr_overall_coefficient_gas(
 /// varie entre les deux extrémités du contacteur.
 ///
 /// `driving_force_1` (ΔC₁) et `driving_force_2` (ΔC₂) forces motrices aux deux
-/// bouts [mol·m⁻³], toutes deux strictement positives.
+/// bouts `mol·m⁻³`, toutes deux strictement positives.
 ///
 /// Panique si `driving_force_1 <= 0`, `driving_force_2 <= 0` ou si les deux
 /// forces motrices sont trop proches (`ΔC₁ ≈ ΔC₂`, formule singulière : le
@@ -92,8 +92,8 @@ pub fn masstr_log_mean_driving_force(driving_force_1: f64, driving_force_2: f64)
 /// Nombre de **Sherwood** `Sh = k_c · L / D` (sans dimension), rapport du
 /// transfert de matière convectif à la diffusion moléculaire.
 ///
-/// `mass_transfer_coefficient` (k_c) [m·s⁻¹] ; `characteristic_length` (L)
-/// [m] ; `diffusivity` (D) [m²·s⁻¹].
+/// `mass_transfer_coefficient` (k_c) `m·s⁻¹` ; `characteristic_length` (L)
+/// `m` ; `diffusivity` (D) `m²·s⁻¹`.
 ///
 /// Panique si `mass_transfer_coefficient < 0`, `characteristic_length <= 0` ou
 /// `diffusivity <= 0`.
@@ -113,7 +113,7 @@ pub fn masstr_sherwood(
 /// Nombre de **Schmidt** `Sc = ν / D` (sans dimension), rapport de la diffusion
 /// de quantité de mouvement à la diffusion de matière.
 ///
-/// `kinematic_viscosity` (ν) [m²·s⁻¹] ; `diffusivity` (D) [m²·s⁻¹].
+/// `kinematic_viscosity` (ν) `m²·s⁻¹` ; `diffusivity` (D) `m²·s⁻¹`.
 ///
 /// Panique si `kinematic_viscosity < 0` ou `diffusivity <= 0`.
 pub fn masstr_schmidt(kinematic_viscosity: f64, diffusivity: f64) -> f64 {

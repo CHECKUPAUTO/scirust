@@ -8,20 +8,20 @@
 //! facteur de stripping   S   = 1 / A                                        [-]
 //! fraction absorbée      φ_A = (A^(N+1) − A) / (A^(N+1) − 1)      (A ≠ 1)    [-]
 //! fraction absorbée      φ_A = N / (N + 1)                        (A = 1)    [-]
-//! étages requis          N   = ln[ (Δ_in/Δ_out)·(1 − 1/A) + 1/A ] / ln(A)   [-]
+//! étages requis          N   = ln`(Δ_in/Δ_out)·(1 − 1/A) + 1/A` / ln(A)   [-]
 //!   avec Δ_in = y_in − y*,  Δ_out = y_out − y*,  y* = K·x_in
-//! liquide minimal        Lₘ  = G·K·φ_A                            (pincement)[mol·s⁻¹]
+//! liquide minimal        Lₘ  = G·K·φ_A                            (pincement)`mol·s⁻¹`
 //! ```
 //!
-//! `A` facteur d'absorption [sans dimension], `S` facteur de stripping [sans
-//! dimension], `L` débit molaire de liquide (solvant) [mol·s⁻¹], `G` débit
-//! molaire de gaz porteur [mol·s⁻¹], `K` constante d'équilibre de la droite
-//! `y = K·x` [sans dimension], `N` nombre d'étages théoriques [sans dimension,
+//! `A` facteur d'absorption `sans dimension`, `S` facteur de stripping [sans
+//! dimension], `L` débit molaire de liquide (solvant) `mol·s⁻¹`, `G` débit
+//! molaire de gaz porteur `mol·s⁻¹`, `K` constante d'équilibre de la droite
+//! `y = K·x` `sans dimension`, `N` nombre d'étages théoriques [sans dimension,
 //! réel], `φ_A` fraction du soluté absorbée [sans dimension, 0 ≤ φ_A ≤ 1],
 //! `y_in`/`y_out` fractions molaires du soluté dans le gaz à l'entrée/à la
-//! sortie [sans dimension], `y* = K·x_in` composition du gaz en équilibre avec
-//! le liquide entrant [sans dimension], `Lₘ` débit molaire de liquide minimal
-//! [mol·s⁻¹]. Toute paire de débits molaires dans la **même unité** convient
+//! sortie `sans dimension`, `y* = K·x_in` composition du gaz en équilibre avec
+//! le liquide entrant `sans dimension`, `Lₘ` débit molaire de liquide minimal
+//! `mol·s⁻¹`. Toute paire de débits molaires dans la **même unité** convient
 //! (les rapports `A`, `S`, `φ_A` sont sans dimension).
 //!
 //! **Limite honnête** : la méthode de **Kremser** décrit une **cascade à
@@ -43,7 +43,7 @@
 ///
 /// `liquid_flow` (L) et `gas_flow` (G) débits molaires dans une **même unité**
 /// (p. ex. mol·s⁻¹) ; `equilibrium_constant` (K) pente de la droite d'équilibre
-/// `y = K·x` [sans dimension]. `A > 1` favorise l'absorption, `A < 1` le
+/// `y = K·x` `sans dimension`. `A > 1` favorise l'absorption, `A < 1` le
 /// stripping.
 ///
 /// Panique si `gas_flow <= 0`, `equilibrium_constant <= 0` ou `liquid_flow < 0`.
@@ -58,7 +58,7 @@ pub fn krem_absorption_factor(liquid_flow: f64, gas_flow: f64, equilibrium_const
 /// Facteur de stripping `S = 1 / A` (sans dimension), réciproque du facteur
 /// d'absorption.
 ///
-/// `absorption_factor` (A) facteur d'absorption [sans dimension].
+/// `absorption_factor` (A) facteur d'absorption `sans dimension`.
 ///
 /// Panique si `absorption_factor <= 0`.
 pub fn krem_stripping_factor(absorption_factor: f64) -> f64 {
@@ -91,14 +91,14 @@ pub fn krem_fraction_absorbed(absorption_factor: f64, stages: f64) -> f64 {
 }
 
 /// Nombre d'étages théoriques requis (forme **logarithmique** de Kremser) :
-/// `N = ln[ (Δ_in/Δ_out)·(1 − 1/A) + 1/A ] / ln(A)`
+/// `N = ln`(Δ_in/Δ_out)·(1 − 1/A) + 1/A` / ln(A)`
 /// avec `Δ_in = y_in − y*`, `Δ_out = y_out − y*` et `y* = K·x_in` la
 /// composition du gaz en équilibre avec le liquide entrant.
 ///
 /// `absorption_factor` (A) sans dimension ; `inlet_ratio` (y_in) et
 /// `outlet_ratio` (y_out) fractions molaires du soluté dans le gaz à
-/// l'entrée/à la sortie [sans dimension] ; `equilibrium_ratio` (y* = K·x_in)
-/// composition du gaz en équilibre avec le liquide entrant [sans dimension]
+/// l'entrée/à la sortie `sans dimension` ; `equilibrium_ratio` (y* = K·x_in)
+/// composition du gaz en équilibre avec le liquide entrant `sans dimension`
 /// (0 pour un solvant pur). C'est l'inverse exact de [`krem_fraction_absorbed`].
 ///
 /// Panique si `absorption_factor <= 0`, si `absorption_factor ≈ 1` (ln A
@@ -141,8 +141,8 @@ pub fn krem_stages_required(
 /// avec **solvant pur** (`x_in = 0`) et un nombre d'étages infini : le facteur
 /// d'absorption minimal vaut alors `A_min = φ_A`, d'où `Lₘ = A_min·K·G`.
 ///
-/// `gas_flow` (G) débit molaire de gaz [mol·s⁻¹] ; `equilibrium_constant` (K)
-/// pente de la droite d'équilibre [sans dimension] ; `recovery_fraction` (φ_A)
+/// `gas_flow` (G) débit molaire de gaz `mol·s⁻¹` ; `equilibrium_constant` (K)
+/// pente de la droite d'équilibre `sans dimension` ; `recovery_fraction` (φ_A)
 /// fraction de soluté à récupérer [sans dimension, 0 < φ_A ≤ 1]. Un débit réel
 /// `L > Lₘ` (facteur `A > A_min`) est ensuite **fourni** pour dimensionner un
 /// nombre fini d'étages.

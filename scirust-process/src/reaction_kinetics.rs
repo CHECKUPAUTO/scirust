@@ -3,20 +3,20 @@
 //! identification de l'énergie d'activation sur deux températures.
 //!
 //! ```text
-//! vitesse d'ordre n   r  = k · Cⁿ                                 [mol·m⁻³·s⁻¹]
+//! vitesse d'ordre n   r  = k · Cⁿ                                 `mol·m⁻³·s⁻¹`
 //! Arrhenius           k  = A · exp(−Eₐ / (R·T))                   [unité de k]
-//! conversion batch    X  = 1 − exp(−k·t)   (ordre 1)              [sans dimension]
-//! demi-vie (ordre 1)  t½ = ln 2 / k                               [s]
-//! énergie d'activation Eₐ = R · ln(k₂/k₁) / (1/T₁ − 1/T₂)         [J·mol⁻¹]
+//! conversion batch    X  = 1 − exp(−k·t)   (ordre 1)              `sans dimension`
+//! demi-vie (ordre 1)  t½ = ln 2 / k                               `s`
+//! énergie d'activation Eₐ = R · ln(k₂/k₁) / (1/T₁ − 1/T₂)         `J·mol⁻¹`
 //! ```
 //!
-//! `r` vitesse de réaction [mol·m⁻³·s⁻¹, cohérente avec `k` et `C`], `k` constante
+//! `r` vitesse de réaction `mol·m⁻³·s⁻¹, cohérente avec `k` et `C``, `k` constante
 //! de vitesse [unité dépendant de l'ordre], `C` concentration du réactif
-//! [mol·m⁻³ ou unité cohérente avec `k`], `n` ordre de réaction [sans dimension,
+//! `mol·m⁻³ ou unité cohérente avec `k``, `n` ordre de réaction [sans dimension,
 //! fourni], `A` facteur pré-exponentiel [même unité que `k`], `Eₐ` énergie
-//! d'activation [J·mol⁻¹], `R` constante des gaz parfaits [J·mol⁻¹·K⁻¹], `T`
-//! température **absolue** [K], `X` taux de conversion [sans dimension], `t` temps
-//! de séjour/réaction [s], `t½` demi-vie [s], `k₁`/`k₂` constantes de vitesse aux
+//! d'activation `J·mol⁻¹`, `R` constante des gaz parfaits `J·mol⁻¹·K⁻¹`, `T`
+//! température **absolue** `K`, `X` taux de conversion `sans dimension`, `t` temps
+//! de séjour/réaction `s`, `t½` demi-vie `s`, `k₁`/`k₂` constantes de vitesse aux
 //! températures `T₁`/`T₂` [même unité].
 //!
 //! **Limite honnête** : ces relations décrivent une **cinétique homogène** avec un
@@ -29,10 +29,10 @@
 //! température** sur l'intervalle considéré ; la conversion `X` suppose un
 //! **réacteur batch isotherme à volume constant** et une **réaction d'ordre 1**.
 
-/// Vitesse d'une réaction d'ordre `n` : `r = k · Cⁿ` [mol·m⁻³·s⁻¹].
+/// Vitesse d'une réaction d'ordre `n` : `r = k · Cⁿ` `mol·m⁻³·s⁻¹`.
 ///
 /// `rate_constant` `k` constante de vitesse [unité cohérente avec l'ordre],
-/// `concentration` `C` concentration du réactif [mol·m⁻³ ou unité cohérente],
+/// `concentration` `C` concentration du réactif `mol·m⁻³ ou unité cohérente`,
 /// `order` `n` ordre de réaction [sans dimension, fourni]. L'ordre peut être non
 /// entier (cinétique apparente).
 ///
@@ -55,8 +55,8 @@ pub fn kinetics_rate(rate_constant: f64, concentration: f64, order: f64) -> f64 
 /// `k = A · exp(−Eₐ / (R·T))` [même unité que `A`].
 ///
 /// `pre_exponential` `A` facteur pré-exponentiel [même unité que `k`],
-/// `activation_energy` `Eₐ` énergie d'activation [J·mol⁻¹], `gas_constant` `R`
-/// constante des gaz [J·mol⁻¹·K⁻¹], `temperature` `T` température **absolue** [K].
+/// `activation_energy` `Eₐ` énergie d'activation `J·mol⁻¹`, `gas_constant` `R`
+/// constante des gaz `J·mol⁻¹·K⁻¹`, `temperature` `T` température **absolue** `K`.
 ///
 /// Panique si `pre_exponential` ou `activation_energy` est négatif ou non fini, ou
 /// si `gas_constant` ou `temperature` n'est pas strictement positif.
@@ -88,8 +88,8 @@ pub fn kinetics_arrhenius(
 /// Taux de conversion d'une réaction d'**ordre 1** en réacteur batch isotherme :
 /// `X = 1 − exp(−k·t)` [sans dimension, dans `[0, 1[`].
 ///
-/// `rate_constant` `k` constante de vitesse d'ordre 1 [s⁻¹], `time` `t` durée de
-/// réaction [s]. `X → 1` quand `t → ∞` ; `X = 0` à `t = 0`.
+/// `rate_constant` `k` constante de vitesse d'ordre 1 `s⁻¹`, `time` `t` durée de
+/// réaction `s`. `X → 1` quand `t → ∞` ; `X = 0` à `t = 0`.
 ///
 /// Panique si `rate_constant` ou `time` est négatif ou non fini.
 pub fn kinetics_first_order_conversion(rate_constant: f64, time: f64) -> f64 {
@@ -104,10 +104,10 @@ pub fn kinetics_first_order_conversion(rate_constant: f64, time: f64) -> f64 {
     1.0 - (-rate_constant * time).exp()
 }
 
-/// Demi-vie d'une réaction d'**ordre 1** : `t½ = ln 2 / k` [s],
+/// Demi-vie d'une réaction d'**ordre 1** : `t½ = ln 2 / k` `s`,
 /// indépendante de la concentration initiale.
 ///
-/// `rate_constant` `k` constante de vitesse d'ordre 1 [s⁻¹].
+/// `rate_constant` `k` constante de vitesse d'ordre 1 `s⁻¹`.
 ///
 /// Panique si `rate_constant` n'est pas strictement positif (division) ou n'est
 /// pas fini.
@@ -120,11 +120,11 @@ pub fn kinetics_half_life_first_order(rate_constant: f64) -> f64 {
 }
 
 /// Énergie d'activation identifiée sur **deux températures** :
-/// `Eₐ = R · ln(k₂/k₁) / (1/T₁ − 1/T₂)` [J·mol⁻¹].
+/// `Eₐ = R · ln(k₂/k₁) / (1/T₁ − 1/T₂)` `J·mol⁻¹`.
 ///
 /// `rate1` `k₁` et `rate2` `k₂` constantes de vitesse aux températures `T₁` et
 /// `T₂` [même unité], `temperature1` `T₁` et `temperature2` `T₂` températures
-/// **absolues** [K], `gas_constant` `R` constante des gaz [J·mol⁻¹·K⁻¹]. Forme
+/// **absolues** `K`, `gas_constant` `R` constante des gaz `J·mol⁻¹·K⁻¹`. Forme
 /// intégrée de l'équation d'Arrhenius entre deux points.
 ///
 /// Panique si `rate1`, `rate2`, `temperature1`, `temperature2` ou `gas_constant`

@@ -3,18 +3,18 @@
 //! réacteurs en série équivalent caractérisant le mélange.
 //!
 //! ```text
-//! temps de séjour moyen τ = V / v̇                         [s]
-//! âge de sortie (CSTR)  E(t) = exp(−t/τ) / τ              [1/s]
-//! cumulée (CSTR)        F(t) = 1 − exp(−t/τ)              [sans dimension]
-//! réacteurs en série    N = τ² / σ²                       [sans dimension]
+//! temps de séjour moyen τ = V / v̇                         `s`
+//! âge de sortie (CSTR)  E(t) = exp(−t/τ) / τ              `1/s`
+//! cumulée (CSTR)        F(t) = 1 − exp(−t/τ)              `sans dimension`
+//! réacteurs en série    N = τ² / σ²                       `sans dimension`
 //! ```
 //!
-//! `V` volume utile [m³], `v̇` débit volumétrique en régime permanent [m³/s], `τ`
-//! temps de séjour moyen [s], `t` temps écoulé depuis l'injection du traceur [s],
+//! `V` volume utile `m³`, `v̇` débit volumétrique en régime permanent `m³/s`, `τ`
+//! temps de séjour moyen `s`, `t` temps écoulé depuis l'injection du traceur `s`,
 //! `E(t)` fonction d'âge à la sortie (densité de probabilité, d'intégrale unité)
-//! [1/s], `F(t)` fraction cumulée du traceur déjà sortie [sans dimension, dans
-//! `[0, 1]`], `σ²` variance de la DTS mesurée [s²], `N` nombre de cuves parfaitement
-//! agitées en série équivalent [sans dimension].
+//! `1/s`, `F(t)` fraction cumulée du traceur déjà sortie [sans dimension, dans
+//! ``0, 1``], `σ²` variance de la DTS mesurée `s²`, `N` nombre de cuves parfaitement
+//! agitées en série équivalent `sans dimension`.
 //!
 //! **Limite honnête** : ces relations décrivent la DTS d'un **traceur** en **régime
 //! permanent** à débit constant. `E(t)` et `F(t)` sont données pour le **CSTR
@@ -25,10 +25,10 @@
 //! volatilités, coefficients de partage, constantes cinétiques, diffusivités…) sont
 //! **fournies par l'appelant** : aucune valeur « par défaut » n'est inventée.
 
-/// Temps de séjour moyen `τ = V / v̇` [s].
+/// Temps de séjour moyen `τ = V / v̇` `s`.
 ///
-/// `volume` `V` volume utile [m³], `volumetric_flow` `v̇` débit volumétrique en
-/// régime permanent [m³/s]. `τ` est l'aire sous `1 − F(t)`, soit le premier moment
+/// `volume` `V` volume utile `m³`, `volumetric_flow` `v̇` débit volumétrique en
+/// régime permanent `m³/s`. `τ` est l'aire sous `1 − F(t)`, soit le premier moment
 /// de la DTS.
 ///
 /// Panique si `volume` est négatif ou non fini, ou si `volumetric_flow` n'est pas
@@ -45,10 +45,10 @@ pub fn rtd_mean_residence_time(volume: f64, volumetric_flow: f64) -> f64 {
     volume / volumetric_flow
 }
 
-/// Fonction d'âge à la sortie d'un **CSTR idéal** `E(t) = exp(−t/τ) / τ` [1/s].
+/// Fonction d'âge à la sortie d'un **CSTR idéal** `E(t) = exp(−t/τ) / τ` `1/s`.
 ///
-/// `time` `t` temps depuis l'injection [s], `mean_residence_time` `τ` temps de
-/// séjour moyen [s]. `E(t)` est une densité de probabilité : son intégrale de `0`
+/// `time` `t` temps depuis l'injection `s`, `mean_residence_time` `τ` temps de
+/// séjour moyen `s`. `E(t)` est une densité de probabilité : son intégrale de `0`
 /// à `∞` vaut `1`, et `E(0) = 1/τ` est sa valeur maximale (décroissance
 /// exponentielle).
 ///
@@ -67,10 +67,10 @@ pub fn rtd_exit_age_cstr(time: f64, mean_residence_time: f64) -> f64 {
 }
 
 /// Fonction cumulée de sortie d'un **CSTR idéal** `F(t) = 1 − exp(−t/τ)`
-/// [sans dimension] — fraction du traceur déjà sortie au temps `t`.
+/// `sans dimension` — fraction du traceur déjà sortie au temps `t`.
 ///
-/// `time` `t` temps depuis l'injection [s], `mean_residence_time` `τ` temps de
-/// séjour moyen [s]. `F(t)` croît de `0` (à `t = 0`) vers `1` (à `t → ∞`) et vérifie
+/// `time` `t` temps depuis l'injection `s`, `mean_residence_time` `τ` temps de
+/// séjour moyen `s`. `F(t)` croît de `0` (à `t = 0`) vers `1` (à `t → ∞`) et vérifie
 /// `F(t) = 1 − τ·E(t)` : c'est la primitive de [`rtd_exit_age_cstr`].
 ///
 /// Panique si `time` est négatif ou non fini, ou si `mean_residence_time` n'est
@@ -88,10 +88,10 @@ pub fn rtd_cumulative_cstr(time: f64, mean_residence_time: f64) -> f64 {
 }
 
 /// Nombre de réacteurs parfaitement agités **en série équivalent**
-/// `N = τ² / σ²` [sans dimension].
+/// `N = τ² / σ²` `sans dimension`.
 ///
-/// `mean_residence_time` `τ` temps de séjour moyen [s], `variance` `σ²` variance de
-/// la DTS mesurée [s²]. `N = 1` correspond à un CSTR unique (`σ² = τ²`) et `N → ∞`
+/// `mean_residence_time` `τ` temps de séjour moyen `s`, `variance` `σ²` variance de
+/// la DTS mesurée `s²`. `N = 1` correspond à un CSTR unique (`σ² = τ²`) et `N → ∞`
 /// à l'écoulement piston (`σ² → 0`) : `N` mesure ainsi la proximité du piston.
 ///
 /// Panique si `mean_residence_time` est négatif ou non fini, ou si `variance`

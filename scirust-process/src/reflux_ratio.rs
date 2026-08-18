@@ -7,8 +7,8 @@
 //! reflux minimal (q=1)  Rₘ = 1/(α−1)·(x_D/x_F − α·(1−x_D)/(1−x_F))       [-]
 //! reflux opératoire      R  = f·Rₘ           (f ≈ 1,2–1,5)               [-]
 //! pente rectification    s  = R / (R + 1)                                [-]
-//! charge condenseur      Q_c = (R + 1)·D·λ    (condenseur total)         [W]
-//! charge rebouilleur     Q_b = Q_c + ΔH_F     (bilan enthalpique global) [W]
+//! charge condenseur      Q_c = (R + 1)·D·λ    (condenseur total)         `W`
+//! charge rebouilleur     Q_b = Q_c + ΔH_F     (bilan enthalpique global) `W`
 //! ```
 //!
 //! `α` volatilité relative du constituant léger sur le lourd (sans dimension),
