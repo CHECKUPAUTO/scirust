@@ -23,7 +23,7 @@ jobs:
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
           toolchain: stable
-      - name: Render engineering units as code and validate
+      - name: Render engineering prose as code and validate
         shell: bash
         run: |
           python3 - <<'PY'
@@ -36,7 +36,7 @@ jobs:
               'K', 'W', 'kW', 'MW', 'J', 'kJ', 'MJ', 'N', 'V', 'A', 'Hz',
               'L', 'rad', 'Wb', 'T', 'Ω', '°C', '°F', 'm²', 'm³', 's⁻¹',
           }
-          prose_labels = {'sans dimension', 'dimensionless', 'étages', 'effets'}
+          prose_labels = {'sans dimension', 'dimensionless', 'étages', 'effets', 'cohérentes'}
           unit_tokens = ('m', 's', 'kg', 'g', 'mol', 'Pa', 'bar', 'K', 'W', 'J',
                          'N', 'V', 'A', 'Hz', 'L', 'rad', 'Wb', 'T', 'Ω')
 
@@ -51,25 +51,38 @@ jobs:
                   return len(t) <= 64 and any(tok in t for tok in unit_tokens)
               return False
 
+          def fix_multiline_dimensionless(text: str) -> str:
+              # `[sans dimension,\n//! bounds]` -> ``sans dimension`,\n//! bounds`
+              text = re.sub(
+                  r'\[sans dimension,\s*\n(?P<prefix>\s*(?://!|///)\s*)(?P<body>[^\]\n]+)\]',
+                  lambda m: '`sans dimension`,\n' + m.group('prefix') + m.group('body').strip(),
+                  text,
+              )
+              # `[sans\n//! dimension, bounds]` -> ``sans dimension`,\n//! bounds`
+              text = re.sub(
+                  r'\[sans\s*\n(?P<prefix>\s*(?://!|///)\s*)dimension,\s*(?P<body>[^\]\n]+)\]',
+                  lambda m: '`sans dimension`,\n' + m.group('prefix') + m.group('body').strip(),
+                  text,
+              )
+              return text
+
           changed = []
           for path in sorted(Path('scirust-process/src').rglob('*.rs')):
               original = path.read_text()
+              transformed = fix_multiline_dimensionless(original)
               out = []
-              touched = False
-              for line in original.splitlines(keepends=True):
+              for line in transformed.splitlines(keepends=True):
                   stripped = line.lstrip()
                   if stripped.startswith('///') or stripped.startswith('//!'):
                       def repl(match):
                           return f'`{match.group(1).strip()}`' if unit_like(match.group(1)) else match.group(0)
-                      new_line = bracket.sub(repl, line)
-                      if new_line != line:
-                          touched = True
-                          line = new_line
+                      line = bracket.sub(repl, line)
                   out.append(line)
-              if touched:
-                  path.write_text(''.join(out))
+              new = ''.join(out)
+              if new != original:
+                  path.write_text(new)
                   changed.append(str(path))
-          print('updated rustdoc unit notation:', *changed, sep='\n  ')
+          print('updated rustdoc engineering prose:', *changed, sep='\n  ')
           PY
 
           set +e
@@ -84,10 +97,10 @@ jobs:
             {
               echo "Temporary strict rustdoc diagnostic for scirust-process."
               echo
-              tail -n 260 /tmp/process-rustdoc.log
+              tail -n 300 /tmp/process-rustdoc.log
             } > .github/process-rustdoc-failure.txt
             git add scirust-process/src .github/process-rustdoc-failure.txt
-            git commit -m "docs(process): render engineering units as code" || true
+            git commit -m "docs(process): render engineering prose as code" || true
             git push
             cat /tmp/process-rustdoc.log
             exit "$status"
@@ -96,5 +109,5 @@ jobs:
           rm -f .github/process-rustdoc-failure.txt .github/workflows/tmp-process-rustdoc.yml
           git add scirust-process/src
           git add -A .github/process-rustdoc-failure.txt .github/workflows/tmp-process-rustdoc.yml
-          git commit -m "docs(process): render engineering units as code"
+          git commit -m "docs(process): render engineering prose as code"
           git push
