@@ -28,8 +28,18 @@ jobs:
           toolchain: "1.89.0"
           components: rustfmt
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
+      - name: Canonical formatting diagnostic
+        run: |
+          cargo fmt --all
+          git diff --check
+          echo 'SCIAGENT_OPT_FORMATTED_CLI_BEGIN'
+          base64 -w0 scirust-sciagent/src/bin/sciagent-optimize.rs
+          echo
+          echo 'SCIAGENT_OPT_FORMATTED_CLI_END'
+          echo 'SCIAGENT_OPT_FORMATTED_CORE_BEGIN'
+          base64 -w0 scirust-sciagent/src/optimization_agent/mod.rs
+          echo
+          echo 'SCIAGENT_OPT_FORMATTED_CORE_END'
 
       - name: Build optimization CLI
         run: cargo check -p scirust-sciagent --bin sciagent-optimize
