@@ -41,6 +41,7 @@ mod imp {
     const PR_SET_NO_NEW_PRIVS: c_int = 38;
     const O_CLOEXEC: c_int = 0o2_000_000;
     const O_PATH: c_int = 0o10_000_000;
+    const MIN_STRICT_ABI: u32 = 3;
     const MAX_ABI: u32 = 5;
 
     const FS_EXECUTE: u64 = 1 << 0;
@@ -97,6 +98,10 @@ mod imp {
             return None;
         }
         let abi = u32::try_from(abi).ok()?;
+        if abi < MIN_STRICT_ABI
+        {
+            return None;
+        }
         Some(Support {
             abi,
             enforcement: enforcement_for_abi(abi),
@@ -112,6 +117,24 @@ mod imp {
         if !mode.is_confined()
         {
             return Err("Landlock may only be installed for confined sandbox modes".to_string());
+        }
+        if support.abi < MIN_STRICT_ABI
+        {
+            return Err(format!(
+                "Landlock ABI {} is too old for strict confined semantics; ABI {MIN_STRICT_ABI}+ is required",
+                support.abi
+            ));
+        }
+        if matches!(mode, SandboxMode::WorkspaceWrite)
+        {
+            let private_tmp = workspace_root.join("target/.sciagent-tmp");
+            std::fs::create_dir_all(&private_tmp).map_err(|error| {
+                format!(
+                    "cannot prepare workspace-local TMPDIR `{}` for Landlock: {error}",
+                    private_tmp.display()
+                )
+            })?;
+            command.env("TMPDIR", private_tmp);
         }
         let plan = build_plan(mode, workspace_root, support.abi)?;
         unsafe {
@@ -161,6 +184,12 @@ mod imp {
     }
 
     fn build_plan(mode: SandboxMode, workspace_root: &Path, abi: u32) -> Result<Plan, String> {
+        if abi < MIN_STRICT_ABI
+        {
+            return Err(format!(
+                "Landlock ABI {abi} cannot enforce strict truncate semantics; ABI {MIN_STRICT_ABI}+ is required"
+            ));
+        }
         let handled = fs_mask_for_abi(abi.min(MAX_ABI));
         let mut rules = vec![
             rule(Path::new("/"), READ_SIDE & handled)?,
@@ -168,7 +197,6 @@ mod imp {
         ];
         if matches!(mode, SandboxMode::WorkspaceWrite)
         {
-            rules.push(rule(Path::new("/tmp"), handled)?);
             rules.push(rule(workspace_root, handled)?);
         }
         Ok(Plan { handled, rules })
@@ -288,8 +316,15 @@ mod imp {
         }
 
         #[test]
+        fn strict_fallback_requires_abi_three_or_newer() {
+            assert!(build_plan(SandboxMode::ReadOnly, Path::new("/workspace"), 1).is_err());
+            assert!(build_plan(SandboxMode::ReadOnly, Path::new("/workspace"), 2).is_err());
+            assert!(build_plan(SandboxMode::ReadOnly, Path::new("/workspace"), 3).is_ok());
+        }
+
+        #[test]
         fn enforcement_is_partial_before_abi_five() {
-            assert_eq!(enforcement_for_abi(1), SandboxEnforcement::Partial);
+            assert_eq!(enforcement_for_abi(3), SandboxEnforcement::Partial);
             assert_eq!(enforcement_for_abi(4), SandboxEnforcement::Partial);
             assert_eq!(enforcement_for_abi(5), SandboxEnforcement::Full);
             assert_eq!(enforcement_for_abi(9), SandboxEnforcement::Full);
@@ -306,13 +341,58 @@ mod imp {
         }
 
         #[test]
-        fn workspace_write_adds_tmp_and_workspace_rw() {
+        fn workspace_write_grants_only_the_workspace_beyond_dev_null() {
             let plan = build_plan(SandboxMode::WorkspaceWrite, Path::new("/workspace"), 5).unwrap();
-            assert_eq!(plan.rules.len(), 4);
-            assert_eq!(plan.rules[2].path.to_bytes(), b"/tmp");
+            assert_eq!(plan.rules.len(), 3);
+            assert_eq!(plan.rules[2].path.to_bytes(), b"/workspace");
             assert_eq!(plan.rules[2].access, plan.handled);
-            assert_eq!(plan.rules[3].path.to_bytes(), b"/workspace");
-            assert_eq!(plan.rules[3].access, plan.handled);
+        }
+
+        #[test]
+        fn live_landlock_enforces_workspace_boundary_when_supported() {
+            let Some(support) = probe()
+            else
+            {
+                return;
+            };
+            assert!(support.abi >= MIN_STRICT_ABI);
+
+            let nonce = format!(
+                "{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            );
+            let base = std::env::temp_dir().join(format!("scirust-landlock-{nonce}"));
+            let workspace = base.join("workspace");
+            let outside = base.join("outside.txt");
+            let inside = workspace.join("inside.txt");
+            std::fs::create_dir_all(&workspace).unwrap();
+            std::fs::write(&inside, b"seed").unwrap();
+
+            let write_command = |path: &Path, mode: SandboxMode| {
+                let mut command = Command::new("sh");
+                command.args(["-c", r#"printf '%s' "$1" > "$2""#, "sh", "payload"]);
+                command.arg(path);
+                configure_command(&mut command, mode, &workspace, support).unwrap();
+                command.output().unwrap()
+            };
+
+            let read_only = write_command(&inside, SandboxMode::ReadOnly);
+            assert!(!read_only.status.success());
+            assert_eq!(std::fs::read(&inside).unwrap(), b"seed");
+
+            let workspace_write = write_command(&inside, SandboxMode::WorkspaceWrite);
+            assert!(workspace_write.status.success());
+            assert_eq!(std::fs::read(&inside).unwrap(), b"payload");
+
+            let outside_write = write_command(&outside, SandboxMode::WorkspaceWrite);
+            assert!(!outside_write.status.success());
+            assert!(!outside.exists());
+
+            std::fs::remove_dir_all(&base).unwrap();
         }
     }
 }
