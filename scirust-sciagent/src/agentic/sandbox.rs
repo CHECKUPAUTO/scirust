@@ -169,10 +169,7 @@ fn select_backend(
     }
     if let Some(support) = landlock
     {
-        return Ok((
-            SandboxBackend::Landlock(support),
-            Some(support.enforcement),
-        ));
+        return Ok((SandboxBackend::Landlock(support), Some(support.enforcement)));
     }
     Err(sandbox_unavailable(
         mode,
@@ -188,14 +185,7 @@ fn find_bwrap_on_path() -> Option<PathBuf> {
 }
 
 fn bubblewrap_usable(bwrap: &Path, root: &Path) -> bool {
-    let mut command = bubblewrap_command(
-        bwrap,
-        SandboxMode::ReadOnly,
-        root,
-        root,
-        "true",
-        &[],
-    );
+    let mut command = bubblewrap_command(bwrap, SandboxMode::ReadOnly, root, root, "true", &[]);
     command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -215,7 +205,8 @@ fn bubblewrap_usable(bwrap: &Path, root: &Path) -> bool {
                 drop(child);
                 return status.success();
             },
-            Ok(None) => {},
+            Ok(None) =>
+            {},
             Err(_) =>
             {
                 let _ = child.kill();
