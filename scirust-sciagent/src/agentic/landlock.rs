@@ -72,7 +72,8 @@ impl SandboxMode {
     }
 
     fn label(self) -> &'static str {
-        match self {
+        match self
+        {
             Self::ReadOnly => "read-only",
             Self::WorkspaceWrite => "workspace-write",
             Self::DangerFullAccess => "danger-full-access",
@@ -87,11 +88,14 @@ impl SandboxMode {
 /// The normal bubblewrap installer runs first.  This function is therefore a
 /// selective override, not an independent direct-execution path.
 pub(crate) fn install_fallback_if_needed(tools: &mut [Tool]) {
-    if !should_use_landlock_fallback() {
+    if !should_use_landlock_fallback()
+    {
         return;
     }
-    for tool in tools {
-        tool.execute = match tool.name {
+    for tool in tools
+    {
+        tool.execute = match tool.name
+        {
             "search" => landlocked_search,
             "grep" => landlocked_grep,
             "build" => landlocked_build,
@@ -103,7 +107,9 @@ pub(crate) fn install_fallback_if_needed(tools: &mut [Tool]) {
 }
 
 fn should_use_landlock_fallback() -> bool {
-    let Ok(mode) = SandboxMode::from_env() else {
+    let Ok(mode) = SandboxMode::from_env()
+    else
+    {
         return false;
     };
     fallback_policy(mode, bubblewrap_is_executable(), landlock_abi())
@@ -151,19 +157,26 @@ fn canonical_workspace_root() -> Result<PathBuf, String> {
 
 fn resolve_workspace_path(requested: &str) -> Result<PathBuf, String> {
     let root = canonical_workspace_root()?;
-    let requested = if requested.is_empty() {
+    let requested = if requested.is_empty()
+    {
         root.clone()
-    } else {
+    }
+    else
+    {
         let path = Path::new(requested);
-        if path.is_absolute() {
+        if path.is_absolute()
+        {
             path.to_path_buf()
-        } else {
+        }
+        else
+        {
             root.join(path)
         }
     };
     let resolved = std::fs::canonicalize(&requested)
         .map_err(|error| format!("Cannot resolve `{}`: {error}", requested.display()))?;
-    if !resolved.starts_with(&root) {
+    if !resolved.starts_with(&root)
+    {
         return Err(format!(
             "Refused path outside workspace `{}`",
             root.display()
@@ -189,17 +202,21 @@ fn landlocked_grep(params: HashMap<String, String>) -> String {
 
 fn search_workspace(params: &HashMap<String, String>, max_count: &str) -> String {
     let pattern = params.get("pattern").map(String::as_str).unwrap_or("");
-    if pattern.is_empty() {
+    if pattern.is_empty()
+    {
         return "Missing pattern".to_string();
     }
-    if pattern.len() > 1024 {
+    if pattern.len() > 1024
+    {
         return "Refused search pattern longer than 1024 bytes".to_string();
     }
-    let path = match resolve_workspace_path(params.get("path").map(String::as_str).unwrap_or("")) {
+    let path = match resolve_workspace_path(params.get("path").map(String::as_str).unwrap_or(""))
+    {
         Ok(path) => path,
         Err(error) => return error,
     };
-    let root = match canonical_workspace_root() {
+    let root = match canonical_workspace_root()
+    {
         Ok(root) => root,
         Err(error) => return error,
     };
@@ -218,10 +235,12 @@ fn search_workspace(params: &HashMap<String, String>, max_count: &str) -> String
         OsString::from(pattern),
         path.clone().into_os_string(),
     ];
-    match run_landlocked("rg", &rg_args, &root) {
+    match run_landlocked("rg", &rg_args, &root)
+    {
         Ok(output) if output.timed_out => "Search timed out after 30 seconds".to_string(),
         Ok(output) if output.success => String::from_utf8_lossy(&output.stdout).into_owned(),
-        _ => {
+        _ =>
+        {
             let grep_args = vec![
                 OsString::from("-rn"),
                 OsString::from("--max-count"),
@@ -231,22 +250,28 @@ fn search_workspace(params: &HashMap<String, String>, max_count: &str) -> String
                 OsString::from(pattern),
                 path.into_os_string(),
             ];
-            match run_landlocked("grep", &grep_args, &root) {
+            match run_landlocked("grep", &grep_args, &root)
+            {
                 Ok(output) if output.timed_out => "Search timed out after 30 seconds".to_string(),
-                Ok(output) if output.success => String::from_utf8_lossy(&output.stdout).into_owned(),
+                Ok(output) if output.success =>
+                {
+                    String::from_utf8_lossy(&output.stdout).into_owned()
+                },
                 Ok(output) => format!("No matches: {}", String::from_utf8_lossy(&output.stderr)),
                 Err(error) => format!("Failed to run search: {error}"),
             }
-        }
+        },
     }
 }
 
 fn landlocked_build(params: HashMap<String, String>) -> String {
     let crate_name = params.get("crate").map(String::as_str).unwrap_or("");
-    if !valid_crate_name(crate_name) {
+    if !valid_crate_name(crate_name)
+    {
         return "Invalid crate name".to_string();
     }
-    let root = match canonical_workspace_root() {
+    let root = match canonical_workspace_root()
+    {
         Ok(root) => root,
         Err(error) => return error,
     };
@@ -260,7 +285,8 @@ fn landlocked_build(params: HashMap<String, String>) -> String {
     .into_iter()
     .map(OsString::from)
     .collect::<Vec<_>>();
-    match run_landlocked("cargo", &args, &root) {
+    match run_landlocked("cargo", &args, &root)
+    {
         Ok(output) if output.timed_out => "Build timed out after 30 seconds".to_string(),
         Ok(output) if output.success => format!("{crate_name} builds successfully"),
         Ok(output) => format!("Build errors:\n{}", String::from_utf8_lossy(&output.stderr)),
@@ -270,7 +296,8 @@ fn landlocked_build(params: HashMap<String, String>) -> String {
 
 fn landlocked_test(params: HashMap<String, String>) -> String {
     let crate_name = params.get("crate").map(String::as_str).unwrap_or("");
-    if !valid_crate_name(crate_name) {
+    if !valid_crate_name(crate_name)
+    {
         return "Invalid crate name".to_string();
     }
     let mut args = vec![
@@ -280,39 +307,49 @@ fn landlocked_test(params: HashMap<String, String>) -> String {
         OsString::from(crate_name),
         OsString::from("--message-format=short"),
     ];
-    if let Some(filter) = params.get("test") {
-        if filter.len() > 256 {
+    if let Some(filter) = params.get("test")
+    {
+        if filter.len() > 256
+        {
             return "Refused test filter longer than 256 bytes".to_string();
         }
         args.push(OsString::from("--"));
         args.push(OsString::from(filter));
     }
-    let root = match canonical_workspace_root() {
+    let root = match canonical_workspace_root()
+    {
         Ok(root) => root,
         Err(error) => return error,
     };
-    match run_landlocked("cargo", &args, &root) {
+    match run_landlocked("cargo", &args, &root)
+    {
         Ok(output) if output.timed_out => "Tests timed out after 30 seconds".to_string(),
-        Ok(output) if output.success => {
+        Ok(output) if output.success =>
+        {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let passed = stdout
                 .lines()
                 .find(|line| line.contains("test result"))
                 .unwrap_or("unknown");
             format!("Tests passed: {passed}")
-        }
-        Ok(output) => format!("Test failures:\n{}", String::from_utf8_lossy(&output.stderr)),
+        },
+        Ok(output) => format!(
+            "Test failures:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        ),
         Err(error) => format!("Failed to run tests: {error}"),
     }
 }
 
 fn landlocked_status(_params: HashMap<String, String>) -> String {
-    let root = match canonical_workspace_root() {
+    let root = match canonical_workspace_root()
+    {
         Ok(root) => root,
         Err(error) => return error,
     };
     let args = [OsString::from("status"), OsString::from("--short")];
-    match run_landlocked("git", &args, &root) {
+    match run_landlocked("git", &args, &root)
+    {
         Ok(output) if output.timed_out => "Git status timed out after 30 seconds".to_string(),
         Ok(output) => String::from_utf8_lossy(&output.stdout).into_owned(),
         Err(error) => format!("Git error: {error}"),
@@ -346,7 +383,8 @@ impl PipeDrain {
     }
 
     fn finish(mut self) -> Vec<u8> {
-        if let Some(thread) = self.thread.take() {
+        if let Some(thread) = self.thread.take()
+        {
             let _ = thread.join();
         }
         self.snapshot()
@@ -358,8 +396,10 @@ fn drain_pipe<R: Read + Send + 'static>(mut pipe: R) -> PipeDrain {
     let captured = Arc::clone(&bytes);
     let thread = std::thread::spawn(move || {
         let mut chunk = [0u8; 8192];
-        while let Ok(count) = pipe.read(&mut chunk) {
-            if count == 0 {
+        while let Ok(count) = pipe.read(&mut chunk)
+        {
+            if count == 0
+            {
                 break;
             }
             let mut kept = captured
@@ -394,9 +434,11 @@ fn defer_group_cleanup(child: GroupChild, stdout: PipeDrain, stderr: PipeDrain) 
         #[cfg(not(windows))]
         {
             let mut child = child;
-            loop {
+            loop
+            {
                 let _ = child.kill();
-                if matches!(child.try_wait(), Ok(Some(_))) {
+                if matches!(child.try_wait(), Ok(Some(_)))
+                {
                     drop(child);
                     break;
                 }
@@ -417,22 +459,28 @@ fn terminate_and_reap(
     let deadline = Instant::now() + REAP_GRACE;
     let mut status = None;
     let mut next_kill = Instant::now();
-    loop {
+    loop
+    {
         let now = Instant::now();
-        if now >= next_kill {
+        if now >= next_kill
+        {
             let _ = child.kill();
             next_kill = now + Duration::from_millis(100);
         }
-        if status.is_none() {
-            if let Ok(current) = child.try_wait() {
+        if status.is_none()
+        {
+            if let Ok(current) = child.try_wait()
+            {
                 status = current;
             }
         }
-        if status.is_some() && stdout.is_finished() && stderr.is_finished() {
+        if status.is_some() && stdout.is_finished() && stderr.is_finished()
+        {
             drop(child);
             return (status, stdout.finish(), stderr.finish());
         }
-        if now >= deadline {
+        if now >= deadline
+        {
             let stdout_bytes = stdout.snapshot();
             let stderr_bytes = stderr.snapshot();
             defer_group_cleanup(child, stdout, stderr);
@@ -444,7 +492,8 @@ fn terminate_and_reap(
 
 fn run_landlocked(program: &str, args: &[OsString], cwd: &Path) -> Result<LimitedOutput, String> {
     let mode = SandboxMode::from_env()?;
-    if !mode.confined() {
+    if !mode.confined()
+    {
         return Err(format!(
             "[{SANDBOX_UNAVAILABLE}] Landlock fallback cannot execute {:?} unconfined; rebuild the runtime after selecting danger-full-access",
             mode.label()
@@ -474,7 +523,8 @@ fn run_landlocked_with_timeout(
 
     let mut command = Command::new(program);
     command.args(args).current_dir(cwd);
-    if matches!(mode, SandboxMode::WorkspaceWrite) {
+    if matches!(mode, SandboxMode::WorkspaceWrite)
+    {
         let private_tmp = root.join("target/.sciagent-tmp");
         std::fs::create_dir_all(&private_tmp).map_err(|error| {
             format!(
@@ -484,7 +534,8 @@ fn run_landlocked_with_timeout(
         })?;
         command.env("TMPDIR", private_tmp);
     }
-    for variable in SECRET_ENV_VARS {
+    for variable in SECRET_ENV_VARS
+    {
         command.env_remove(variable);
     }
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -502,20 +553,26 @@ fn run_landlocked_with_timeout(
     let stderr = drain_pipe(child.inner().stderr.take().expect("stderr was piped"));
     let deadline = Instant::now() + timeout;
     let mut exit_status = None;
-    loop {
-        if exit_status.is_none() {
-            match child.try_wait() {
+    loop
+    {
+        if exit_status.is_none()
+        {
+            match child.try_wait()
+            {
                 Ok(status) => exit_status = status,
-                Err(error) => {
+                Err(error) =>
+                {
                     let _ = terminate_and_reap(child, stdout, stderr);
                     return Err(error.to_string());
-                }
+                },
             }
         }
-        if exit_status.is_some() && stdout.is_finished() && stderr.is_finished() {
+        if exit_status.is_some() && stdout.is_finished() && stderr.is_finished()
+        {
             break;
         }
-        if Instant::now() >= deadline {
+        if Instant::now() >= deadline
+        {
             let (_status, stdout, stderr) = terminate_and_reap(child, stdout, stderr);
             return Ok(LimitedOutput {
                 success: false,
@@ -562,7 +619,7 @@ fn landlock_abi() -> Option<i32> {
 
 #[cfg(target_os = "linux")]
 mod linux_landlock {
-    use super::{SandboxMode, MIN_LANDLOCK_ABI};
+    use super::{MIN_LANDLOCK_ABI, SandboxMode};
     use std::ffi::c_void;
     use std::fs::{File, OpenOptions};
     use std::io;
@@ -614,7 +671,11 @@ mod linux_landlock {
     }
 
     pub(super) fn abi() -> io::Result<i32> {
-        #[cfg(any(target_arch = "x86_64", target_arch = "aarch64", target_arch = "riscv64"))]
+        #[cfg(any(
+            target_arch = "x86_64",
+            target_arch = "aarch64",
+            target_arch = "riscv64"
+        ))]
         {
             // SAFETY: the version-query form requires a null attr and size 0.
             let result = unsafe {
@@ -625,13 +686,20 @@ mod linux_landlock {
                     LANDLOCK_CREATE_RULESET_VERSION,
                 )
             };
-            if result < 0 {
+            if result < 0
+            {
                 Err(io::Error::last_os_error())
-            } else {
+            }
+            else
+            {
                 Ok(result as i32)
             }
         }
-        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64", target_arch = "riscv64")))]
+        #[cfg(not(any(
+            target_arch = "x86_64",
+            target_arch = "aarch64",
+            target_arch = "riscv64"
+        )))]
         {
             Err(io::Error::new(
                 io::ErrorKind::Unsupported,
@@ -641,7 +709,8 @@ mod linux_landlock {
     }
 
     fn handled_write_access(abi: i32) -> io::Result<u64> {
-        if abi < MIN_LANDLOCK_ABI {
+        if abi < MIN_LANDLOCK_ABI
+        {
             return Err(io::Error::new(
                 io::ErrorKind::Unsupported,
                 format!(
@@ -659,10 +728,12 @@ mod linux_landlock {
             | ACCESS_MAKE_FIFO
             | ACCESS_MAKE_BLOCK
             | ACCESS_MAKE_SYM;
-        if abi >= 2 {
+        if abi >= 2
+        {
             access |= ACCESS_REFER;
         }
-        if abi >= 3 {
+        if abi >= 3
+        {
             access |= ACCESS_TRUNCATE;
         }
         Ok(access)
@@ -684,7 +755,8 @@ mod linux_landlock {
                 0u32,
             )
         };
-        if fd < 0 {
+        if fd < 0
+        {
             return Err(io::Error::last_os_error());
         }
         // SAFETY: successful create_ruleset returns a new owned descriptor.
@@ -692,11 +764,13 @@ mod linux_landlock {
         // Keep the descriptor available to pre_exec, but ensure it disappears
         // automatically after the target program is exec'd.
         // SAFETY: ruleset is a live descriptor and F_SETFD takes an int flag.
-        if unsafe { fcntl(ruleset.as_raw_fd(), F_SETFD, FD_CLOEXEC) } < 0 {
+        if unsafe { fcntl(ruleset.as_raw_fd(), F_SETFD, FD_CLOEXEC) } < 0
+        {
             return Err(io::Error::last_os_error());
         }
 
-        if matches!(mode, SandboxMode::WorkspaceWrite) {
+        if matches!(mode, SandboxMode::WorkspaceWrite)
+        {
             add_path_rule(&ruleset, root, handled)?;
         }
         Ok(ruleset)
@@ -722,9 +796,12 @@ mod linux_landlock {
                 0u32,
             )
         };
-        if result < 0 {
+        if result < 0
+        {
             Err(io::Error::last_os_error())
-        } else {
+        }
+        else
+        {
             Ok(())
         }
     }
@@ -735,15 +812,19 @@ mod linux_landlock {
 
     pub(super) fn restrict_current_process(ruleset_fd: RawFd) -> io::Result<()> {
         // SAFETY: PR_SET_NO_NEW_PRIVS is process-local and takes scalar values.
-        if unsafe { prctl(PR_SET_NO_NEW_PRIVS, 1usize, 0usize, 0usize, 0usize) } < 0 {
+        if unsafe { prctl(PR_SET_NO_NEW_PRIVS, 1usize, 0usize, 0usize, 0usize) } < 0
+        {
             return Err(io::Error::last_os_error());
         }
         // SAFETY: ruleset_fd is inherited from the parent and remains valid
         // until spawn returns; restrict_self takes no extra structure.
         let result = unsafe { syscall(SYS_LANDLOCK_RESTRICT_SELF, ruleset_fd, 0u32) };
-        if result < 0 {
+        if result < 0
+        {
             Err(io::Error::last_os_error())
-        } else {
+        }
+        else
+        {
             Ok(())
         }
     }
