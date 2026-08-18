@@ -30,7 +30,7 @@
 //!    descriptors of a vorticity field (heterogeneity, localization, roughness,
 //!    sign-mixing, temporal deformation) plus a normalized-weighted scalar
 //!    score.
-//! 3. **The simulation driver** ([`simulate`]) — steps a time-dependent
+//! 3. **The simulation driver** ([`simulate()`]) — steps a time-dependent
 //!    velocity field, accumulating the **curvature-weighted rotational
 //!    intensity** `⟨ω² · e^{L²κ}⟩` and the structural signature into
 //!    interval-integrated indices (intensity / structure / coupled / the five

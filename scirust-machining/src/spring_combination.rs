@@ -19,7 +19,7 @@
 //! sollicités selon le **même axe**, en **chargement statique**. Les raideurs
 //! individuelles `kᵢ` sont des **données matériau / procédé fournies par
 //! l'appelant** — aucune valeur « par défaut » n'est inventée ici. Complète
-//! [`crate::helical_springs`].
+//! [`crate::springs`].
 
 /// Raideur équivalente d'un assemblage **en série** `1/k_eq = Σ(1/kᵢ)`
 /// (N·m⁻¹) ; le résultat est **plus souple** que le ressort le plus souple.

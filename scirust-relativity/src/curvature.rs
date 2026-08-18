@@ -32,7 +32,7 @@ use crate::{Connection, Metric, RelativityError, invert_metric, numerical_christ
 
 /// The curvature tensors of a background at one point.
 ///
-/// All tensors use the conventions in the [module documentation](self).
+/// All tensors use the conventions in the module documentation.
 /// `riemann` stores `R^rho_(sigma mu nu)` indexed `[rho][sigma][mu][nu]`;
 /// `ricci` and `einstein` store the covariant `R_(mu nu)` and `G_(mu nu)`
 /// indexed `[mu][nu]`.

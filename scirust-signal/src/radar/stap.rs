@@ -19,7 +19,7 @@
 //! (minimum-variance-distortionless-response) weight is
 //! `w = R⁻¹ s / (sᴴ R⁻¹ s)`, and the delivered SINR is `σ_t²·sᴴ R⁻¹ s` — deep on
 //! the ridge, near the full `NM` coherent gain off it. Built on the crate's
-//! [`Complex`](crate::complex::Complex) and the shared complex matrix inverse
+//! [`Complex`] and the shared complex matrix inverse
 //! from [`super::doa`]; dependency-free.
 
 use super::doa::invert;

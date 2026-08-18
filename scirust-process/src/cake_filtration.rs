@@ -7,23 +7,23 @@
 //! loi de filtration (débit instantané, forme linéaire en dV/dt)
 //!   dt/dV = μ·α·c/(A²·ΔP)·V + μ·R_m/(A·ΔP)
 //! temps de filtration à pression constante (intégration de V = 0 à V)
-//!   t     = μ·α·c/(2·A²·ΔP)·V² + μ·R_m/(A·ΔP)·V                 [s]
+//!   t     = μ·α·c/(2·A²·ΔP)·V² + μ·R_m/(A·ΔP)·V                 `s`
 //! allure (débit) moyenne de filtration
-//!   Q_moy = V / t                                              [m³·s⁻¹]
+//!   Q_moy = V / t                                              `m³·s⁻¹`
 //! débit de lavage (à pression égale)
-//!   Q_lav = Q_fin                                              [m³·s⁻¹]
+//!   Q_lav = Q_fin                                              `m³·s⁻¹`
 //! résistance du média depuis l'ordonnée à l'origine de t/V vs V
-//!   R_m   = b · A · ΔP / μ                                     [m⁻¹]
+//!   R_m   = b · A · ΔP / μ                                     `m⁻¹`
 //! ```
 //!
-//! `μ` viscosité dynamique du filtrat [Pa·s], `α` résistance spécifique du gâteau
-//! [m·kg⁻¹], `c` masse de gâteau sec déposé par unité de volume de filtrat
-//! [kg·m⁻³], `A` aire de la surface filtrante [m²], `ΔP` perte de charge (pression
-//! motrice) à travers gâteau + média [Pa], `V` volume de filtrat recueilli [m³],
-//! `R_m` résistance du média filtrant [m⁻¹], `t` temps de filtration [s], `Q_moy`
-//! débit volumique moyen [m³·s⁻¹], `Q_fin` débit instantané en fin de filtration
-//! [m³·s⁻¹], `Q_lav` débit de lavage [m³·s⁻¹], `b` ordonnée à l'origine du tracé
-//! linéarisé `t/V = a·V + b` [s·m⁻³].
+//! `μ` viscosité dynamique du filtrat `Pa·s`, `α` résistance spécifique du gâteau
+//! `m·kg⁻¹`, `c` masse de gâteau sec déposé par unité de volume de filtrat
+//! `kg·m⁻³`, `A` aire de la surface filtrante `m²`, `ΔP` perte de charge (pression
+//! motrice) à travers gâteau + média `Pa`, `V` volume de filtrat recueilli `m³`,
+//! `R_m` résistance du média filtrant `m⁻¹`, `t` temps de filtration `s`, `Q_moy`
+//! débit volumique moyen `m³·s⁻¹`, `Q_fin` débit instantané en fin de filtration
+//! `m³·s⁻¹`, `Q_lav` débit de lavage `m³·s⁻¹`, `b` ordonnée à l'origine du tracé
+//! linéarisé `t/V = a·V + b` `s·m⁻³`.
 //!
 //! **Limite honnête** : modèle à l'échelle des **opérations unitaires**,
 //! filtration **à pression constante** et gâteau **INCOMPRESSIBLE** (la résistance
@@ -42,11 +42,11 @@
 /// Le premier terme (quadratique en `V`) est la contribution du **gâteau**, le
 /// second (linéaire en `V`) celle du **média filtrant**.
 ///
-/// `specific_resistance` (α) résistance spécifique du gâteau [m·kg⁻¹],
-/// `viscosity` (μ) viscosité du filtrat [Pa·s], `dry_cake_per_volume` (c) masse de
-/// gâteau sec par volume de filtrat [kg·m⁻³], `area` (A) aire filtrante [m²],
-/// `pressure_drop` (ΔP) perte de charge [Pa], `volume` (V) volume de filtrat [m³],
-/// `medium_resistance` (R_m) résistance du média [m⁻¹].
+/// `specific_resistance` (α) résistance spécifique du gâteau `m·kg⁻¹`,
+/// `viscosity` (μ) viscosité du filtrat `Pa·s`, `dry_cake_per_volume` (c) masse de
+/// gâteau sec par volume de filtrat `kg·m⁻³`, `area` (A) aire filtrante `m²`,
+/// `pressure_drop` (ΔP) perte de charge `Pa`, `volume` (V) volume de filtrat `m³`,
+/// `medium_resistance` (R_m) résistance du média `m⁻¹`.
 ///
 /// Panique si `α < 0`, `μ ≤ 0`, `c < 0`, `A ≤ 0`, `ΔP ≤ 0`, `V < 0` ou `R_m < 0`.
 pub fn filt_constant_pressure_time(
@@ -84,8 +84,8 @@ pub fn filt_constant_pressure_time(
 
 /// Allure (débit volumique) **moyenne** de filtration `Q_moy = V / t` (m³·s⁻¹).
 ///
-/// `volume` (V) volume de filtrat recueilli [m³], `time` (t) durée de filtration
-/// correspondante [s].
+/// `volume` (V) volume de filtrat recueilli `m³`, `time` (t) durée de filtration
+/// correspondante `s`.
 ///
 /// Panique si `V < 0` ou si `t ≤ 0` (durée strictement positive requise).
 pub fn filt_average_rate(volume: f64, time: f64) -> f64 {
@@ -98,7 +98,7 @@ pub fn filt_average_rate(volume: f64, time: f64) -> f64 {
 /// débit de lavage vaut le débit instantané atteint **en fin de filtration**.
 ///
 /// `final_filtration_rate` (Q_fin) débit instantané en fin de filtration
-/// [m³·s⁻¹].
+/// `m³·s⁻¹`.
 ///
 /// Panique si `Q_fin < 0`.
 pub fn filt_washing_rate(final_filtration_rate: f64) -> f64 {
@@ -113,8 +113,8 @@ pub fn filt_washing_rate(final_filtration_rate: f64) -> f64 {
 /// tracé linéarisé `t/V = a·V + b`, soit `R_m = b·A·ΔP/μ` (m⁻¹).
 ///
 /// `intercept` (b) ordonnée à l'origine du tracé `t/V` en fonction de `V`
-/// [s·m⁻³], `viscosity` (μ) viscosité du filtrat [Pa·s], `area` (A) aire filtrante
-/// [m²], `pressure_drop` (ΔP) perte de charge [Pa].
+/// `s·m⁻³`, `viscosity` (μ) viscosité du filtrat `Pa·s`, `area` (A) aire filtrante
+/// `m²`, `pressure_drop` (ΔP) perte de charge `Pa`.
 ///
 /// Panique si `b < 0`, `μ ≤ 0`, `A ≤ 0` ou `ΔP ≤ 0`.
 pub fn filt_medium_resistance_from_intercept(

@@ -1118,7 +1118,7 @@ const S_CRITICAL: f64 = 4412.02148223476;
 /// Region-3 **backward** equation `v(p, h)` \[m³/kg\]: specific volume
 /// of dense/near-critical water from its pressure `p` \[Pa\] and
 /// specific enthalpy `h` \[J/kg\] (Supp-Tv(ph,ps)3-2014 eqs. 4-5),
-/// dispatched to fitted sub-region 3a or 3b by [`h_3ab`]. Unlike
+/// dispatched to fitted sub-region 3a or 3b by `h_3ab`. Unlike
 /// [`crate::steam::region3_from_tp`]'s density bisection, this
 /// closed-form fit is valid across the whole region-3 domain,
 /// subcritical included — there is no density to solve for.
@@ -1184,7 +1184,7 @@ pub fn region3_t_ph(p: f64, h: f64) -> Result<f64, ThermoError> {
 
 /// Region-3 **backward** equation `v(p, s)` \[m³/kg\] (Supp-Tv(ph,ps)3-2014
 /// eqs. 8-9), dispatched to sub-region 3a/3b purely by `s` against
-/// [`S_CRITICAL`] — unlike the `(p,h)` dispatch, no pressure-dependent
+/// `S_CRITICAL` — unlike the `(p,h)` dispatch, no pressure-dependent
 /// boundary is needed.
 pub fn region3_v_ps(p: f64, s: f64) -> Result<f64, ThermoError> {
     in_range("p", p, f64::MIN_POSITIVE, crate::steam::P_MAX)?;
@@ -1268,7 +1268,7 @@ fn hab_s(s_kj: f64) -> f64 {
 /// Region-2 **backward** equation `p(h, s)` \[Pa\]: pressure of
 /// superheated steam from its specific enthalpy `h` \[J/kg\] and
 /// specific entropy `s` \[J/(kg·K)\], dispatched across the three
-/// fitted sub-regions 2a/2b/2c (Supp-PHS12-2014 eqs. 3-5) by [`hab_s`]
+/// fitted sub-regions 2a/2b/2c (Supp-PHS12-2014 eqs. 3-5) by `hab_s`
 /// and the same `s = 5.85 kJ/(kg·K)` split used in [`region2_t_ps`].
 pub fn region2_p_hs(h: f64, s: f64) -> Result<f64, ThermoError> {
     finite("h", h)?;
@@ -1314,7 +1314,7 @@ pub fn region2_p_hs(h: f64, s: f64) -> Result<f64, ThermoError> {
 /// Region-3 **backward** equation `p(h, s)` \[Pa\]: pressure of
 /// dense/near-critical water from its specific enthalpy `h` \[J/kg\]
 /// and specific entropy `s` \[J/(kg·K)\], dispatched to sub-region
-/// 3a/3b by [`S_CRITICAL`] (Supp-phs3-2014 eq. 1).
+/// 3a/3b by `S_CRITICAL` (Supp-phs3-2014 eq. 1).
 pub fn region3_p_hs(h: f64, s: f64) -> Result<f64, ThermoError> {
     finite("h", h)?;
     finite("s", s)?;

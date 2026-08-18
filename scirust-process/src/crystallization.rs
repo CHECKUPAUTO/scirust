@@ -4,24 +4,24 @@
 //!
 //! ```text
 //! rapport de sursaturation        S  = c / c*                              [-]
-//! sursaturation absolue           Δc = c − c*                              [kg·kg⁻¹]
-//! rendement cristaux anhydres     Y  = m_solv · (c₁ − c*)                  [kg]
+//! sursaturation absolue           Δc = c − c*                              `kg·kg⁻¹`
+//! rendement cristaux anhydres     Y  = m_solv · (c₁ − c*)                  `kg`
 //! rapport molaire d'hydrate       R  = M_hydrate / M_anhydre               [-]
 //! rendement cristaux hydratés     Y_h = R · m_solv · (c₁ − c*)
-//!                                        / [1 − c* · (R − 1)]              [kg]
+//!                                        / [1 − c* · (R − 1)]              `kg`
 //! ```
 //!
 //! `c` concentration **réelle** du soluté, `c*` (c\*) concentration à
 //! **saturation** (solubilité) à la température de travail, toutes deux exprimées
-//! par **masse de solvant** [kg de soluté anhydre · kg de solvant⁻¹] ; `S` rapport
-//! de sursaturation [sans dimension] (`S > 1` solution sursaturée, `S = 1`
+//! par **masse de solvant** `kg de soluté anhydre · kg de solvant⁻¹` ; `S` rapport
+//! de sursaturation `sans dimension` (`S > 1` solution sursaturée, `S = 1`
 //! saturée, `S < 1` sous-saturée), `Δc` sursaturation absolue [même unité que
-//! `c`] ; `m_solv` masse de solvant [kg], `c₁` concentration **initiale** et
-//! `c*` concentration finale à **saturation** de la liqueur mère [kg·kg⁻¹] ;
+//! `c`] ; `m_solv` masse de solvant `kg`, `c₁` concentration **initiale** et
+//! `c*` concentration finale à **saturation** de la liqueur mère `kg·kg⁻¹` ;
 //! `M_hydrate`/`M_anhydre` masses molaires du cristal **hydraté**/du sel
-//! **anhydre** [kg·mol⁻¹ ou g·mol⁻¹, même unité], `R` rapport molaire
-//! d'hydratation [sans dimension, `R ≥ 1`] ; `Y`/`Y_h` masses de cristaux
-//! anhydres/hydratés déposées [kg].
+//! **anhydre** `kg·mol⁻¹ ou g·mol⁻¹, même unité`, `R` rapport molaire
+//! d'hydratation `sans dimension, `R ≥ 1`` ; `Y`/`Y_h` masses de cristaux
+//! anhydres/hydratés déposées `kg`.
 //!
 //! **Limite honnête** : ces relations décrivent une cristallisation **à
 //! l'équilibre**, la liqueur mère étant supposée **saturée en fin d'opération**
@@ -43,7 +43,7 @@
 ///
 /// `actual_concentration` (c) concentration réelle du soluté et
 /// `saturation_concentration` (c*) solubilité à la température de travail,
-/// exprimées dans la **même unité** par masse de solvant [kg·kg⁻¹].
+/// exprimées dans la **même unité** par masse de solvant `kg·kg⁻¹`.
 ///
 /// Panique si `actual_concentration < 0` ou si `saturation_concentration <= 0`.
 pub fn cryst_supersaturation_ratio(
@@ -67,7 +67,7 @@ pub fn cryst_supersaturation_ratio(
 ///
 /// `actual_concentration` (c) concentration réelle et `saturation_concentration`
 /// (c*) solubilité à la température de travail, exprimées dans la **même unité**
-/// par masse de solvant [kg·kg⁻¹].
+/// par masse de solvant `kg·kg⁻¹`.
 ///
 /// Panique si `actual_concentration < 0` ou `saturation_concentration < 0`.
 pub fn cryst_supersaturation_difference(
@@ -90,9 +90,9 @@ pub fn cryst_supersaturation_difference(
 /// concentrations sont exprimées **par masse de solvant**, supposée constante
 /// (pas d'eau de cristallisation retirée, pas d'évaporation).
 ///
-/// `solvent_mass` (m_solv) masse de solvant [kg] ; `initial_concentration` (c₁)
+/// `solvent_mass` (m_solv) masse de solvant `kg` ; `initial_concentration` (c₁)
 /// concentration initiale du soluté et `final_saturation_concentration` (c*)
-/// solubilité finale, exprimées par masse de solvant [kg·kg⁻¹].
+/// solubilité finale, exprimées par masse de solvant `kg·kg⁻¹`.
 ///
 /// Panique si `solvent_mass < 0`, si une concentration est négative, ou si
 /// `initial_concentration < final_saturation_concentration` (rendement négatif
@@ -127,9 +127,9 @@ pub fn cryst_yield_anhydrous(
 /// dénominateur `1 − c*·(R − 1)`). Pour `R = 1` (sel anhydre), la formule se
 /// réduit à [`cryst_yield_anhydrous`].
 ///
-/// `solvent_mass` (m_solv) masse de solvant initiale [kg] ;
+/// `solvent_mass` (m_solv) masse de solvant initiale `kg` ;
 /// `initial_concentration` (c₁) et `final_saturation_concentration` (c*)
-/// concentrations en **soluté anhydre par masse de solvant** [kg·kg⁻¹] ;
+/// concentrations en **soluté anhydre par masse de solvant** `kg·kg⁻¹` ;
 /// `hydrate_molar_mass` (M_hydrate) et `anhydrous_molar_mass` (M_anhydre) masses
 /// molaires du cristal hydraté et du sel anhydre [même unité, kg·mol⁻¹ ou
 /// g·mol⁻¹].

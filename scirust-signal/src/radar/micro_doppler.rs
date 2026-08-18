@@ -8,7 +8,7 @@
 //! target class — the basis of non-cooperative target recognition (NCTR).
 //!
 //! This module builds the spectrogram on the crate's power-of-two
-//! [`fft`](crate::fft) with a Hann analysis window, then extracts the standard
+//! [`fft`](crate::fft()) with a Hann analysis window, then extracts the standard
 //! micro-Doppler descriptors: the instantaneous-Doppler **ridge**, the **bulk**
 //! (mean) Doppler, the modulation **bandwidth**, and the micro-motion **cadence**
 //! (its repetition frequency). Dependency-free.

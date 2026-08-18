@@ -236,7 +236,7 @@ fn sample_next(
 }
 
 /// The decode policy over a single `vocab`-length **logits row**, factored out of
-/// [`sample_next`] so any decoder (the CPU tape path, the resident GPU path) runs
+/// `sample_next` so any decoder (the CPU tape path, the resident GPU path) runs
 /// the *same* deterministic sampler: repetition penalty → greedy-argmax (`T ≤ 0`)
 /// or `softmax(logits/T)` → top-k → top-p → renormalise → inverse-CDF draw from
 /// `rng`. `recent` is the trailing context (token ids) for the repetition

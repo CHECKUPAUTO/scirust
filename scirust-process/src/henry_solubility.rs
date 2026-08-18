@@ -7,18 +7,18 @@
 //! pression partielle (p = H·x)   p = H · x
 //! fraction dissoute (réciproque) x = p / H
 //! concentration (p = Hc·c)       c = p / Hc
-//! van't Hoff (température)        H(T) = H_ref · exp[ (−ΔH_sol / R) · (1/T − 1/T_ref) ]
+//! van't Hoff (température)        H(T) = H_ref · exp`(−ΔH_sol / R) · (1/T − 1/T_ref)`
 //! ```
 //!
-//! `p` pression partielle du gaz au-dessus de la solution [Pa], `H` constante de
+//! `p` pression partielle du gaz au-dessus de la solution `Pa`, `H` constante de
 //! Henry en convention **pression–fraction molaire** `p = H·x` [Pa, car `x` est
 //! sans dimension], `x` fraction molaire du gaz dissous dans le liquide [sans
 //! dimension], `Hc` constante de Henry en convention **pression–concentration**
-//! `p = Hc·c` [Pa·m³·mol⁻¹], `c` concentration molaire du gaz dissous
-//! [mol·m⁻³], `H_ref` constante de Henry à la température de référence [même
-//! unité que `H`], `ΔH_sol` enthalpie de dissolution du gaz [J·mol⁻¹], `R`
-//! constante des gaz parfaits [J·mol⁻¹·K⁻¹], `T`/`T_ref` température et
-//! température de référence [**K**].
+//! `p = Hc·c` `Pa·m³·mol⁻¹`, `c` concentration molaire du gaz dissous
+//! `mol·m⁻³`, `H_ref` constante de Henry à la température de référence [même
+//! unité que `H`], `ΔH_sol` enthalpie de dissolution du gaz `J·mol⁻¹`, `R`
+//! constante des gaz parfaits `J·mol⁻¹·K⁻¹`, `T`/`T_ref` température et
+//! température de référence `**K**`.
 //!
 //! **Limite honnête** : la loi de Henry n'est valable que pour des **solutions
 //! DILUÉES**, **loin de la saturation** ; au-delà (fractions élevées, proximité
@@ -35,11 +35,11 @@
 /// Pression partielle du gaz dissous par la loi de Henry `p = H · x`
 /// (convention pression–fraction molaire), en Pa.
 ///
-/// `henry_constant` (H) constante de Henry `p = H·x` [Pa] ;
-/// `liquid_mole_fraction` (x) fraction molaire du gaz dissous [sans dimension].
+/// `henry_constant` (H) constante de Henry `p = H·x` `Pa` ;
+/// `liquid_mole_fraction` (x) fraction molaire du gaz dissous `sans dimension`.
 ///
 /// Panique si `henry_constant <= 0` ou si `liquid_mole_fraction` n'est pas dans
-/// `[0, 1]`.
+/// ``0, 1``.
 pub fn henry_partial_pressure(henry_constant: f64, liquid_mole_fraction: f64) -> f64 {
     assert!(henry_constant > 0.0, "H > 0 requis");
     assert!(
@@ -52,8 +52,8 @@ pub fn henry_partial_pressure(henry_constant: f64, liquid_mole_fraction: f64) ->
 /// Fraction molaire du gaz dissous, réciproque de la loi de Henry `x = p / H`
 /// (convention pression–fraction molaire), sans dimension.
 ///
-/// `partial_pressure` (p) pression partielle du gaz [Pa] ; `henry_constant` (H)
-/// constante de Henry `p = H·x` [Pa].
+/// `partial_pressure` (p) pression partielle du gaz `Pa` ; `henry_constant` (H)
+/// constante de Henry `p = H·x` `Pa`.
 ///
 /// Panique si `partial_pressure < 0` ou si `henry_constant <= 0`.
 pub fn henry_dissolved_fraction(partial_pressure: f64, henry_constant: f64) -> f64 {
@@ -65,9 +65,9 @@ pub fn henry_dissolved_fraction(partial_pressure: f64, henry_constant: f64) -> f
 /// Concentration molaire du gaz dissous à partir d'une constante de Henry en
 /// convention **volatilité** `p = Hc·c`, soit `c = p / Hc`, en mol·m⁻³.
 ///
-/// `partial_pressure` (p) pression partielle du gaz [Pa] ;
+/// `partial_pressure` (p) pression partielle du gaz `Pa` ;
 /// `henry_volatility_constant` (Hc) constante de Henry `p = Hc·c`
-/// [Pa·m³·mol⁻¹].
+/// `Pa·m³·mol⁻¹`.
 ///
 /// Panique si `partial_pressure < 0` ou si `henry_volatility_constant <= 0`.
 pub fn henry_concentration_from_pressure(
@@ -80,12 +80,12 @@ pub fn henry_concentration_from_pressure(
 }
 
 /// Variation de la constante de Henry avec la température (forme de **van't
-/// Hoff**) `H(T) = H_ref · exp[ (−ΔH_sol / R) · (1/T − 1/T_ref) ]`.
+/// Hoff**) `H(T) = H_ref · exp`(−ΔH_sol / R) · (1/T − 1/T_ref)``.
 ///
 /// `henry_ref` (H_ref) constante de Henry à `T_ref` [même unité que le résultat] ;
 /// `enthalpy_of_dissolution` (ΔH_sol) enthalpie de dissolution [J·mol⁻¹, signe
-/// quelconque] ; `gas_constant` (R) constante des gaz parfaits [J·mol⁻¹·K⁻¹] ;
-/// `temperature_ref` (T_ref) et `temperature` (T) températures [**K**].
+/// quelconque] ; `gas_constant` (R) constante des gaz parfaits `J·mol⁻¹·K⁻¹` ;
+/// `temperature_ref` (T_ref) et `temperature` (T) températures `**K**`.
 ///
 /// Panique si `henry_ref <= 0`, `gas_constant <= 0`, `temperature_ref <= 0` ou
 /// `temperature <= 0`.

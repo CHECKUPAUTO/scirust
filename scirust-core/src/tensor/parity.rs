@@ -1346,7 +1346,7 @@ pub fn d_mse_loss_mean(pred: &TensorND, target: &TensorND, gout: f32) -> Result<
 }
 
 /// cross_entropy (reduction="mean") : moyenne sur les lignes de
-/// -log_softmax(logits)[target]. Algorithme logsumexp (stable).
+/// `-log_softmax(logits)[target]`. Algorithme logsumexp (stable).
 pub fn cross_entropy_mean(logits: &TensorND, targets: &[usize]) -> Result<TensorND> {
     if logits.ndim() != 2
     {

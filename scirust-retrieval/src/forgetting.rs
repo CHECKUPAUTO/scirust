@@ -1,8 +1,8 @@
 //! Bounded, decay-aware semantic memory.
 //!
-//! `scirust-retrieval`'s [`DenseIndex`] / [`LshIndex`] / [`Bm25Index`] grow
+//! `scirust-retrieval`'s [`DenseIndex`] / `LshIndex` / `Bm25Index` grow
 //! unbounded — no capacity cap, no recency weighting, no importance-based
-//! eviction — and [`ImprovementLoop`] accumulates feedback forever. For an
+//! eviction — and `ImprovementLoop` accumulates feedback forever. For an
 //! agent that runs indefinitely that is a memory leak. This module adds the
 //! bounds/decay layer that turns the exact dense index into a **bounded
 //! semantic memory**: every document carries [`DocMeta`] (importance,

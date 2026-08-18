@@ -2,19 +2,19 @@
 //! réaction par le bilan enthalpique (aucun échange de chaleur avec l'extérieur).
 //!
 //! ```text
-//! élévation            ΔT      = (−ΔHr)·C_A0·X / (ρ·cp)     [K]
-//! température de sortie T       = T_in + ΔT                  [K]
-//! élévation maximale    ΔT_max  = (−ΔHr)·C_A0 / (ρ·cp)       [K]  (X = 1)
-//! conversion(T)         X       = (T − T_in) / ΔT_max        [sans dimension]
+//! élévation            ΔT      = (−ΔHr)·C_A0·X / (ρ·cp)     `K`
+//! température de sortie T       = T_in + ΔT                  `K`
+//! élévation maximale    ΔT_max  = (−ΔHr)·C_A0 / (ρ·cp)       `K`  (X = 1)
+//! conversion(T)         X       = (T − T_in) / ΔT_max        `sans dimension`
 //! ```
 //!
-//! `ΔT` élévation de température adiabatique [K], `ΔHr` chaleur (enthalpie) de
-//! réaction **par mole de réactif limitant** [J/mol] (`ΔHr < 0` exothermique),
-//! `C_A0` concentration d'entrée du réactif limitant [mol/m³], `X` taux de
-//! conversion [sans dimension, dans `[0, 1]`], `ρ` masse volumique du mélange
-//! [kg/m³], `cp` capacité thermique massique du mélange [J/(kg·K)], `T_in`
-//! température d'entrée [K], `T` température [K], `ΔT_max` élévation à conversion
-//! totale [K]. La relation `X ↔ T` est **linéaire** (droite adiabatique du bilan
+//! `ΔT` élévation de température adiabatique `K`, `ΔHr` chaleur (enthalpie) de
+//! réaction **par mole de réactif limitant** `J/mol` (`ΔHr < 0` exothermique),
+//! `C_A0` concentration d'entrée du réactif limitant `mol/m³`, `X` taux de
+//! conversion `sans dimension, dans ``0, 1```, `ρ` masse volumique du mélange
+//! `kg/m³`, `cp` capacité thermique massique du mélange `J/(kg·K)`, `T_in`
+//! température d'entrée `K`, `T` température `K`, `ΔT_max` élévation à conversion
+//! totale `K`. La relation `X ↔ T` est **linéaire** (droite adiabatique du bilan
 //! enthalpique).
 //!
 //! **Limite honnête** : le réacteur est supposé **strictement adiabatique**
@@ -27,17 +27,17 @@
 //! phase, cp fortement variable) la droite adiabatique n'est qu'approchée.
 
 /// Élévation de température adiabatique
-/// `ΔT = (−ΔHr)·C_A0·X / (ρ·cp)` [K].
+/// `ΔT = (−ΔHr)·C_A0·X / (ρ·cp)` `K`.
 ///
 /// `heat_of_reaction` `ΔHr` chaleur de réaction par mole de réactif limitant
-/// [J/mol] (négative pour une réaction exothermique, d'où `ΔT > 0`),
+/// `J/mol` (négative pour une réaction exothermique, d'où `ΔT > 0`),
 /// `inlet_concentration` `C_A0` concentration d'entrée du réactif limitant
-/// [mol/m³], `conversion` `X` taux de conversion [sans dimension, dans `[0, 1]`],
-/// `density` `ρ` masse volumique du mélange [kg/m³], `specific_heat` `cp`
-/// capacité thermique massique du mélange [J/(kg·K)].
+/// `mol/m³`, `conversion` `X` taux de conversion `sans dimension, dans ``0, 1```,
+/// `density` `ρ` masse volumique du mélange `kg/m³`, `specific_heat` `cp`
+/// capacité thermique massique du mélange `J/(kg·K)`.
 ///
 /// Panique si `heat_of_reaction` n'est pas fini, si `inlet_concentration` est
-/// négatif ou non fini, si `conversion` sort de `[0, 1]`, ou si `density` ou
+/// négatif ou non fini, si `conversion` sort de ``0, 1``, ou si `density` ou
 /// `specific_heat` n'est pas strictement positif (division).
 pub fn adiab_temperature_rise(
     heat_of_reaction: f64,
@@ -69,10 +69,10 @@ pub fn adiab_temperature_rise(
     (-heat_of_reaction) * inlet_concentration * conversion / (density * specific_heat)
 }
 
-/// Température de sortie adiabatique `T = T_in + ΔT` [K].
+/// Température de sortie adiabatique `T = T_in + ΔT` `K`.
 ///
-/// `inlet_temperature` `T_in` température d'entrée [K], `temperature_rise` `ΔT`
-/// élévation de température adiabatique [K] (positive si exothermique, négative
+/// `inlet_temperature` `T_in` température d'entrée `K`, `temperature_rise` `ΔT`
+/// élévation de température adiabatique `K` (positive si exothermique, négative
 /// si endothermique).
 ///
 /// Panique si `inlet_temperature` n'est pas fini ou est négatif (température
@@ -90,12 +90,12 @@ pub fn adiab_adiabatic_temperature(inlet_temperature: f64, temperature_rise: f64
 }
 
 /// Élévation de température adiabatique **maximale**, atteinte à conversion
-/// totale, `ΔT_max = (−ΔHr)·C_A0 / (ρ·cp)` [K].
+/// totale, `ΔT_max = (−ΔHr)·C_A0 / (ρ·cp)` `K`.
 ///
 /// `heat_of_reaction` `ΔHr` chaleur de réaction par mole de réactif limitant
-/// [J/mol], `inlet_concentration` `C_A0` concentration d'entrée du réactif
-/// limitant [mol/m³], `density` `ρ` masse volumique du mélange [kg/m³],
-/// `specific_heat` `cp` capacité thermique massique du mélange [J/(kg·K)].
+/// `J/mol`, `inlet_concentration` `C_A0` concentration d'entrée du réactif
+/// limitant `mol/m³`, `density` `ρ` masse volumique du mélange `kg/m³`,
+/// `specific_heat` `cp` capacité thermique massique du mélange `J/(kg·K)`.
 /// C'est [`adiab_temperature_rise`] évaluée à `X = 1`.
 ///
 /// Panique si `heat_of_reaction` n'est pas fini, si `inlet_concentration` est
@@ -127,12 +127,12 @@ pub fn adiab_maximum_temperature_rise(
 }
 
 /// Conversion déduite de la température par la droite adiabatique
-/// `X = (T − T_in) / ΔT_max` [sans dimension] — réciproque linéaire de
+/// `X = (T − T_in) / ΔT_max` `sans dimension` — réciproque linéaire de
 /// [`adiab_temperature_rise`].
 ///
-/// `temperature` `T` température [K], `inlet_temperature` `T_in` température
-/// d'entrée [K], `maximum_temperature_rise` `ΔT_max` élévation à conversion
-/// totale [K]. Pour une exothermique, `ΔT_max > 0` et `X` croît avec `T`.
+/// `temperature` `T` température `K`, `inlet_temperature` `T_in` température
+/// d'entrée `K`, `maximum_temperature_rise` `ΔT_max` élévation à conversion
+/// totale `K`. Pour une exothermique, `ΔT_max > 0` et `X` croît avec `T`.
 ///
 /// Panique si `temperature` ou `inlet_temperature` n'est pas fini, ou si
 /// `maximum_temperature_rise` n'est pas fini ou est nul (division).

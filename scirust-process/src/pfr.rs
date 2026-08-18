@@ -3,17 +3,17 @@
 //! constante.
 //!
 //! ```text
-//! conversion ordre 1  X  = 1 − exp(−k·τ)                 [sans dimension]
-//! τ requis ordre 1    τ  = −ln(1 − X) / k                [s]
-//! volume ordre 1      V  = v̇₀·τ = v̇₀·(−ln(1 − X)/k)      [m³]
-//! τ requis ordre 2    τ  = X / (k·C_A0·(1 − X))          [s]
+//! conversion ordre 1  X  = 1 − exp(−k·τ)                 `sans dimension`
+//! τ requis ordre 1    τ  = −ln(1 − X) / k                `s`
+//! volume ordre 1      V  = v̇₀·τ = v̇₀·(−ln(1 − X)/k)      `m³`
+//! τ requis ordre 2    τ  = X / (k·C_A0·(1 − X))          `s`
 //! ```
 //!
 //! `X` taux de conversion de A [sans dimension, dans `[0, 1[`], `k` constante
-//! cinétique — du premier ordre [1/s], du second ordre [m³/(mol·s)] —, `τ` temps
-//! de passage (space time) [s], `v̇₀` débit volumétrique d'alimentation [m³/s],
-//! `V` volume utile du réacteur [m³], `C_A0` concentration d'entrée du réactif A
-//! [mol/m³]. Le groupe `k·τ` est le nombre de Damköhler `Da` [sans dimension]
+//! cinétique — du premier ordre `1/s`, du second ordre `m³/(mol·s)` —, `τ` temps
+//! de passage (space time) `s`, `v̇₀` débit volumétrique d'alimentation `m³/s`,
+//! `V` volume utile du réacteur `m³`, `C_A0` concentration d'entrée du réactif A
+//! `mol/m³`. Le groupe `k·τ` est le nombre de Damköhler `Da` `sans dimension`
 //! pour l'ordre 1.
 //!
 //! **Limite honnête** : l'écoulement est supposé **piston** (pas de dispersion
@@ -29,10 +29,10 @@
 //! comparaison des deux volumes est laissée à l'appelant.
 
 /// Conversion d'une réaction d'**ordre 1** à densité constante dans un PFR
-/// `X = 1 − exp(−k·τ)` [sans dimension].
+/// `X = 1 − exp(−k·τ)` `sans dimension`.
 ///
-/// `rate_constant` `k` constante cinétique du premier ordre [1/s], `space_time`
-/// `τ` temps de passage [s]. Le produit `k·τ = Da` est le nombre de Damköhler ;
+/// `rate_constant` `k` constante cinétique du premier ordre `1/s`, `space_time`
+/// `τ` temps de passage `s`. Le produit `k·τ = Da` est le nombre de Damköhler ;
 /// `X → 1` quand `Da → ∞`.
 ///
 /// Panique si `rate_constant` ou `space_time` est négatif ou non fini.
@@ -49,10 +49,10 @@ pub fn pfr_first_order_conversion(rate_constant: f64, space_time: f64) -> f64 {
 }
 
 /// Temps de passage **requis** pour atteindre une conversion donnée en ordre 1
-/// `τ = −ln(1 − X) / k` [s] — réciproque de [`pfr_first_order_conversion`].
+/// `τ = −ln(1 − X) / k` `s` — réciproque de [`pfr_first_order_conversion`].
 ///
 /// `conversion` `X` conversion visée [sans dimension, dans `[0, 1[`],
-/// `rate_constant` `k` constante cinétique du premier ordre [1/s]. `τ → ∞` quand
+/// `rate_constant` `k` constante cinétique du premier ordre `1/s`. `τ → ∞` quand
 /// `X → 1` : la conversion complète exige un réacteur infini.
 ///
 /// Panique si `conversion` sort de `[0, 1[` (la borne 1 fait diverger le
@@ -70,11 +70,11 @@ pub fn pfr_space_time_first_order(conversion: f64, rate_constant: f64) -> f64 {
 }
 
 /// Volume utile d'un PFR pour une réaction d'**ordre 1** à densité constante
-/// `V = v̇₀·τ = v̇₀·(−ln(1 − X)/k)` [m³].
+/// `V = v̇₀·τ = v̇₀·(−ln(1 − X)/k)` `m³`.
 ///
-/// `volumetric_flow` `v̇₀` débit volumétrique d'alimentation [m³/s],
+/// `volumetric_flow` `v̇₀` débit volumétrique d'alimentation `m³/s`,
 /// `conversion` `X` conversion visée [sans dimension, dans `[0, 1[`],
-/// `rate_constant` `k` constante cinétique du premier ordre [1/s]. Le volume est
+/// `rate_constant` `k` constante cinétique du premier ordre `1/s`. Le volume est
 /// proportionnel au débit volumétrique à conversion et cinétique fixées.
 ///
 /// Panique si `volumetric_flow` est négatif ou non fini, si `conversion` sort de
@@ -89,11 +89,11 @@ pub fn pfr_volume_first_order(volumetric_flow: f64, conversion: f64, rate_consta
 }
 
 /// Temps de passage **requis** pour une réaction d'**ordre 2** à densité
-/// constante `τ = X / (k·C_A0·(1 − X))` [s].
+/// constante `τ = X / (k·C_A0·(1 − X))` `s`.
 ///
 /// `conversion` `X` conversion visée [sans dimension, dans `[0, 1[`],
-/// `rate_constant` `k` constante cinétique du second ordre [m³/(mol·s)],
-/// `inlet_concentration` `C_A0` concentration d'entrée du réactif A [mol/m³]. À
+/// `rate_constant` `k` constante cinétique du second ordre `m³/(mol·s)`,
+/// `inlet_concentration` `C_A0` concentration d'entrée du réactif A `mol/m³`. À
 /// `k` et `C_A0` fixés, `τ` croît comme `X/(1 − X)` et diverge quand `X → 1`.
 ///
 /// Panique si `conversion` sort de `[0, 1[` (la borne 1 fait diverger la

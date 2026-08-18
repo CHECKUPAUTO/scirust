@@ -41,7 +41,7 @@ const LAMBDA: f64 = 4.50524;
 ///    **extended** by `L1` neighbours on each side (clipped to the band), of
 ///    actual length `L`;
 /// 4. every coefficient of the *disjoint* block is scaled by the James-Stein
-///    factor `f = max(0, 1 − λ*·L·σ² / S²)` with λ* ≈ 4.50524 ([`LAMBDA`]).
+///    factor `f = max(0, 1 − λ*·L·σ² / S²)` with λ* ≈ 4.50524 (`LAMBDA`).
 ///
 /// Blocks whose extended energy sits at the noise floor (`S² ≤ λ*·L·σ²`) are
 /// zeroed outright; blocks carrying grouped signal energy are kept almost

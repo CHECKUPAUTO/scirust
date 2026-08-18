@@ -4,7 +4,7 @@
 //! Coût par itération plus faible que GMRES(m) (deux produits
 //! matrice-vecteur, pas de stockage de base de Krylov croissante), au prix
 //! d'une convergence parfois irrégulière. Bon complément de
-//! [`crate::linalg::gmres`] pour les grands systèmes creux où stocker la
+//! [`crate::linalg::gmres()`] pour les grands systèmes creux où stocker la
 //! base d'Arnoldi est coûteux.
 //!
 //! Référence : H.A. van der Vorst, « Bi-CGSTAB: A Fast and Smoothly

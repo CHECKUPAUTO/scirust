@@ -80,7 +80,7 @@ impl Pipeline {
     ///
     /// The pipeline is driven by the first configured station. A configuration
     /// with zero stations is not usable, so any empty `stations` list is
-    /// backfilled with a single [`StationConfig::default`] here to guarantee an
+    /// backfilled with a single `StationConfig::default` here to guarantee an
     /// index-safe, panic-free construction (deserialized JSON can legally carry
     /// `"stations": []`). Use [`Pipeline::try_new`] when callers want to reject
     /// such a configuration up front instead of running against a default

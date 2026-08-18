@@ -283,7 +283,7 @@ pub fn verify_license(
 /// opaque `machine_id`. Performs the same signature and validity checks as
 /// [`verify_license`], then enforces the node lock: a **floating** license is
 /// accepted on any machine, a **node-locked** license only when `machine_id`'s
-/// [`node_fingerprint`](license::node_fingerprint) matches the bound lock
+/// [`node_fingerprint`] matches the bound lock
 /// (otherwise [`LicenseError::NodeMismatch`]).
 pub fn verify_license_on_node(
     signed: &SignedLicense,

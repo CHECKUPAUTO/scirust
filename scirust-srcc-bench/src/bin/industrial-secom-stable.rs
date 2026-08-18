@@ -1,6 +1,6 @@
 //! Follow-up 2 — stabilizing the supervised SECOM discriminant.
 //!
-//! Lever 3 ([`industrial-secom-supervised`]) showed the SECOM null was a
+//! Lever 3 (`industrial-secom-supervised`) showed the SECOM null was a
 //! problem-*formulation* result: a supervised linear discriminant clears chance
 //! on the frozen test (AUROC 0.581) where every unsupervised density detector
 //! failed (0.469). But it also over-fit hard — all ~416 imputed features, a

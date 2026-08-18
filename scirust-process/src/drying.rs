@@ -4,19 +4,19 @@
 //!
 //! ```text
 //! humidité libre (base sèche)   X   = X_t − X*                         [-]
-//! durée allure constante        t_c = M_s·(X_1 − X_c)/(A·N_c)          [s]
-//! durée allure décroissante     t_f = M_s·X_c·ln(X_c/X_2)/(A·N_c)      [s]
-//! durée totale de séchage       t   = t_c + t_f                        [s]
+//! durée allure constante        t_c = M_s·(X_1 − X_c)/(A·N_c)          `s`
+//! durée allure décroissante     t_f = M_s·X_c·ln(X_c/X_2)/(A·N_c)      `s`
+//! durée totale de séchage       t   = t_c + t_f                        `s`
 //! ```
 //!
 //! `X` humidité **libre** en **base sèche** [kg eau · kg solide sec⁻¹, sans
 //! dimension], `X_t` teneur en eau totale (base sèche), `X*` teneur en eau
-//! d'**équilibre** (base sèche) ; `M_s` masse de **solide sec** [kg], `A` aire
-//! d'échange (surface de séchage exposée) [m²], `N_c` allure (flux) de séchage
-//! de la période à **allure constante** [kg eau · m⁻² · s⁻¹] ; `X_1` humidité
+//! d'**équilibre** (base sèche) ; `M_s` masse de **solide sec** `kg`, `A` aire
+//! d'échange (surface de séchage exposée) `m²`, `N_c` allure (flux) de séchage
+//! de la période à **allure constante** `kg eau · m⁻² · s⁻¹` ; `X_1` humidité
 //! libre **initiale**, `X_c` humidité libre **critique** (fin de l'allure
 //! constante), `X_2` humidité libre **finale** [toutes sans dimension, base
-//! sèche] ; `t_c`, `t_f`, `t` durées [s].
+//! sèche] ; `t_c`, `t_f`, `t` durées `s`.
 //!
 //! **Limite honnête** : ce module décrit un séchage **convectif à deux
 //! périodes** — une période à **allure constante** `N_c` suivie d'une période à
@@ -60,10 +60,10 @@ pub fn drying_free_moisture(moisture_content: f64, equilibrium_moisture: f64) ->
 /// `t_c = M_s·(X_1 − X_c)/(A·N_c)` (s), obtenue en évaporant l'eau libre de
 /// `X_1` à `X_c` à flux constant `N_c`.
 ///
-/// `dry_solid_mass` (M_s) masse de solide sec [kg], `drying_area` (A) aire
-/// d'échange [m²], `constant_rate` (N_c) flux de séchage [kg eau · m⁻² · s⁻¹],
+/// `dry_solid_mass` (M_s) masse de solide sec `kg`, `drying_area` (A) aire
+/// d'échange `m²`, `constant_rate` (N_c) flux de séchage `kg eau · m⁻² · s⁻¹`,
 /// `initial_free_moisture` (X_1) et `critical_free_moisture` (X_c) humidités
-/// libres initiale et critique [sans dimension, base sèche].
+/// libres initiale et critique `sans dimension, base sèche`.
 ///
 /// Panique si `dry_solid_mass <= 0`, `drying_area <= 0`, `constant_rate <= 0`,
 /// `critical_free_moisture < 0` ou `initial_free_moisture < critical_free_moisture`.
@@ -93,10 +93,10 @@ pub fn drying_constant_rate_time(
 /// `t_f = M_s·X_c·ln(X_c/X_2)/(A·N_c)` (s). L'allure y vaut `N = N_c·X/X_c` ;
 /// l'intégration de `X_c` à `X_2` donne le logarithme.
 ///
-/// `dry_solid_mass` (M_s) masse de solide sec [kg], `drying_area` (A) aire
-/// d'échange [m²], `constant_rate` (N_c) allure au point critique [kg eau ·
+/// `dry_solid_mass` (M_s) masse de solide sec `kg`, `drying_area` (A) aire
+/// d'échange `m²`, `constant_rate` (N_c) allure au point critique [kg eau ·
 /// m⁻² · s⁻¹], `critical_free_moisture` (X_c) et `final_free_moisture` (X_2)
-/// humidités libres critique et finale [sans dimension, base sèche].
+/// humidités libres critique et finale `sans dimension, base sèche`.
 ///
 /// Panique si `dry_solid_mass <= 0`, `drying_area <= 0`, `constant_rate <= 0`,
 /// `critical_free_moisture <= 0`, `final_free_moisture <= 0` ou
@@ -134,7 +134,7 @@ pub fn drying_falling_rate_time(
 /// à allure constante et à allure décroissante.
 ///
 /// `constant_rate_time` (t_c) et `falling_rate_time` (t_f) durées des deux
-/// périodes [s].
+/// périodes `s`.
 ///
 /// Panique si `constant_rate_time < 0` ou `falling_rate_time < 0`.
 pub fn drying_total_time(constant_rate_time: f64, falling_rate_time: f64) -> f64 {

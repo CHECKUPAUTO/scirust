@@ -9,10 +9,10 @@
 //!  libre (source ponctuelle)
 //! ```
 //!
-//! `p` pression acoustique efficace (RMS) [Pa], `p_ref` pression de référence
-//! [Pa] (20 µPa dans l'air), `L` niveau de pression sonore [dB], `L₁`/`L₂`
-//! niveaux de deux sources [dB], `L₊` niveau résultant [dB], `L_ref` niveau
-//! mesuré à la distance `d_ref` [dB], `d`/`d_ref` distances à la source [m].
+//! `p` pression acoustique efficace (RMS) (Pa), `p_ref` pression de référence
+//! (Pa) (20 µPa dans l'air), `L` niveau de pression sonore (dB), `L₁`/`L₂`
+//! niveaux de deux sources (dB), `L₊` niveau résultant (dB), `L_ref` niveau
+//! mesuré à la distance `d_ref` (dB), `d`/`d_ref` distances à la source (m).
 //!
 //! **Limite honnête** : la pression de référence `p_ref` (usuellement 20 µPa
 //! dans l'air, mais 1 µPa dans l'eau) est **fournie par l'appelant** ; aucune
@@ -22,7 +22,7 @@
 //! ponctuelle** (−6 dB par doublement de distance), sans absorption
 //! atmosphérique, réflexions ni directivité, tous fournis à part par l'appelant.
 
-/// Niveau de pression sonore `L = 20·log10(p / p_ref)` [dB].
+/// Niveau de pression sonore `L = 20·log10(p / p_ref)` (dB).
 ///
 /// `rms_pressure` et `reference_pressure` en pascals (Pa) ; le niveau est en dB.
 ///
@@ -39,7 +39,7 @@ pub fn spl_from_pressure(rms_pressure: f64, reference_pressure: f64) -> f64 {
     20.0 * (rms_pressure / reference_pressure).log10()
 }
 
-/// Pression acoustique efficace `p = p_ref · 10^(L / 20)` [Pa] (inverse de
+/// Pression acoustique efficace `p = p_ref · 10^(L / 20)` (Pa) (inverse de
 /// [`spl_from_pressure`]).
 ///
 /// `spl` en dB, `reference_pressure` en Pa ; la pression rendue est en Pa.
@@ -55,7 +55,7 @@ pub fn spl_to_pressure(spl: f64, reference_pressure: f64) -> f64 {
 }
 
 /// Addition **énergétique** de deux sources incohérentes
-/// `L₊ = 10·log10(10^(L₁/10) + 10^(L₂/10))` [dB].
+/// `L₊ = 10·log10(10^(L₁/10) + 10^(L₂/10))` (dB).
 ///
 /// `spl1`, `spl2` et le résultat sont en dB.
 ///
@@ -67,7 +67,7 @@ pub fn spl_sum_two_sources(spl1: f64, spl2: f64) -> f64 {
 }
 
 /// Atténuation en champ libre d'une source ponctuelle
-/// `L(d) = L_ref − 20·log10(d / d_ref)` [dB].
+/// `L(d) = L_ref − 20·log10(d / d_ref)` (dB).
 ///
 /// `spl_reference` en dB à la distance `distance_ref` ; `distance` et
 /// `distance_ref` en mètres ; le résultat est en dB.

@@ -131,7 +131,7 @@ pub struct Opportunity {
     pub score: f32,
     /// SHA-256 fingerprint of the underlying market window.
     pub snapshot_fingerprint: String,
-    /// SHA-256 proof of this opportunity (see [`Opportunity::seal`]).
+    /// SHA-256 proof of this opportunity (see `Opportunity::seal`).
     pub proof_hash: String,
 }
 

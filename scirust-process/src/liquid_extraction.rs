@@ -15,12 +15,12 @@
 //!
 //! `K` coefficient de partage (distribution) du soluté extrait/raffinat [sans
 //! dimension], `c_E`/`c_R` concentrations du soluté dans l'extrait/le raffinat
-//! (mêmes unités, p. ex. mol·m⁻³ ou fraction massique) [cohérentes], `E` facteur
-//! d'extraction [sans dimension], `S` débit de solvant [kg·s⁻¹ ou mol·s⁻¹], `F`
+//! (mêmes unités, p. ex. mol·m⁻³ ou fraction massique) `cohérentes`, `E` facteur
+//! d'extraction `sans dimension`, `S` débit de solvant `kg·s⁻¹ ou mol·s⁻¹`, `F`
 //! débit d'alimentation (charge) [même unité que `S`], `Eₛ` facteur d'extraction
-//! par étage [sans dimension], `N` nombre d'étages théoriques [étages],
-//! `φ₁`/`φ_c`/`φ_cc` fraction de soluté restant dans le raffinat [sans dimension,
-//! 0 ≤ φ ≤ 1] ; le rendement d'extraction vaut `1 − φ`.
+//! par étage `sans dimension`, `N` nombre d'étages théoriques `étages`,
+//! `φ₁`/`φ_c`/`φ_cc` fraction de soluté restant dans le raffinat `sans dimension`,
+//! 0 ≤ φ ≤ 1 ; le rendement d'extraction vaut `1 − φ`.
 //!
 //! **Limite honnête** : ces relations valent pour une **extraction diluée** à
 //! **coefficient de partage `K` CONSTANT FOURNI** par l'appelant (loi de

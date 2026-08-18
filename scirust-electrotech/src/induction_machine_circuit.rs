@@ -5,8 +5,8 @@
 //!
 //! ```text
 //! glissement            g     = (N_s − N) / N_s              [sans dim.]
-//! puissance d'entrefer  P_ag  = P_cu2 / g                    [W]
-//! puissance mécanique   P_mec = P_ag · (1 − g)               [W]
+//! puissance d'entrefer  P_ag  = P_cu2 / g                    `W`
+//! puissance mécanique   P_mec = P_ag · (1 − g)               `W`
 //! couple électromagn.   T_em  = P_ag / Ω_s                   [N·m]
 //! glissement au couple  g_max = R2 / (X1 + X2)               [sans dim.]
 //! maximal (approché)
@@ -14,12 +14,12 @@
 //!
 //! `N_s` vitesse de synchronisme [tr/min ou rad/s, même unité que `N`], `N`
 //! vitesse mécanique du rotor [même unité que `N_s`], `g` glissement [sans
-//! dimension, ×100 pour des %], `P_cu2` pertes Joule au rotor [W], `P_ag`
-//! puissance transmise à l'entrefer [W], `P_mec` puissance mécanique
-//! développée sur l'arbre (avant pertes mécaniques) [W], `Ω_s` vitesse de
+//! dimension, ×100 pour des %], `P_cu2` pertes Joule au rotor `W`, `P_ag`
+//! puissance transmise à l'entrefer `W`, `P_mec` puissance mécanique
+//! développée sur l'arbre (avant pertes mécaniques) `W`, `Ω_s` vitesse de
 //! synchronisme angulaire [rad/s], `T_em` couple électromagnétique [N·m],
-//! `R2` résistance rotorique ramenée au stator [Ω], `X1` réactance de fuite
-//! statorique [Ω], `X2` réactance de fuite rotorique ramenée au stator [Ω].
+//! `R2` résistance rotorique ramenée au stator `Ω`, `X1` réactance de fuite
+//! statorique `Ω`, `X2` réactance de fuite rotorique ramenée au stator `Ω`.
 //! La relation exacte `P_ag = P_cu2 + P_mec = P_cu2 / g` découle du fait que
 //! les pertes Joule rotor valent `g · P_ag`.
 //!
@@ -54,7 +54,7 @@ pub fn imc_slip(synchronous_speed: f64, rotor_speed: f64) -> f64 {
     (synchronous_speed - rotor_speed) / synchronous_speed
 }
 
-/// Puissance transmise à l'entrefer `P_ag = P_cu2 / g` [W] (les pertes Joule
+/// Puissance transmise à l'entrefer `P_ag = P_cu2 / g` `W` (les pertes Joule
 /// rotor valent `g · P_ag`).
 ///
 /// `rotor_copper_loss` pertes Joule au rotor `P_cu2` en watts (W, positives
@@ -75,7 +75,7 @@ pub fn imc_airgap_power(rotor_copper_loss: f64, slip: f64) -> f64 {
     rotor_copper_loss / slip
 }
 
-/// Puissance mécanique développée `P_mec = P_ag · (1 − g)` [W] (puissance sur
+/// Puissance mécanique développée `P_mec = P_ag · (1 − g)` `W` (puissance sur
 /// l'arbre avant déduction des pertes mécaniques).
 ///
 /// `airgap_power` puissance transmise à l'entrefer `P_ag` en watts (W,

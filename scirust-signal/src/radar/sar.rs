@@ -11,7 +11,7 @@
 //! along-track dimension — focuses the target to a sharp peak. The synthesised
 //! aperture spans `L_sa = λR/D`, and the focused cross-range resolution is the
 //! celebrated `δ_az = D/2`: **independent of range**, and finer for a *smaller*
-//! antenna. Built on the crate's [`Complex`](crate::complex::Complex) and the
+//! antenna. Built on the crate's [`Complex`] and the
 //! existing matched filter; dependency-free.
 
 use super::matched_filter::cross_correlate;

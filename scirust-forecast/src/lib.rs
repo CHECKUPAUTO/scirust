@@ -12,8 +12,8 @@
 //! - [`arima_fit`] — ARIMA(p, d, q) fitting via differencing plus a joint
 //!   AR/MA fit ([`ArimaModel`]).
 //! - [`difference`] / [`moving_average`] — series-transformation helpers.
-//! - [`metrics`] — [`mae`](metrics::mae), [`rmse`](metrics::rmse) and
-//!   [`mape`](metrics::mape) accuracy scores.
+//! - [`metrics`] — [`mae`], [`rmse`] and
+//!   [`mape`] accuracy scores.
 //!
 //! Every fallible entry point returns [`ForecastError`], which implements
 //! [`std::fmt::Display`] and [`std::error::Error`].
