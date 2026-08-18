@@ -23,30 +23,77 @@ jobs:
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
           toolchain: stable
-      - name: Probe and persist diagnostic
+      - name: Render engineering units as code and validate
         shell: bash
         run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          bracket = re.compile(r'\[([^\[\]\n]+)\]')
+          simple_units = {
+              'm', 's', 'kg', 'g', 'mol', 'kmol', 'Pa', 'kPa', 'MPa', 'bar',
+              'K', 'W', 'kW', 'MW', 'J', 'kJ', 'MJ', 'N', 'V', 'A', 'Hz',
+              'L', 'rad', 'Wb', 'T', 'Ω', '°C', '°F', 'm²', 'm³', 's⁻¹',
+          }
+          unit_tokens = ('m', 's', 'kg', 'g', 'mol', 'Pa', 'bar', 'K', 'W', 'J',
+                         'N', 'V', 'A', 'Hz', 'L', 'rad', 'Wb', 'T', 'Ω')
+
+          def unit_like(text: str) -> bool:
+              t = text.strip()
+              if t in simple_units or t.lower() in {'sans dimension', 'dimensionless'}:
+                  return True
+              if re.fullmatch(r'[+−-]?\d+(?:[.,]\d+)?\s*(?:[,;:]\s*[+−-]?\d+(?:[.,]\d+)?)?', t):
+                  return True
+              if any(ch in t for ch in ('·', '⁻', '⁺', '²', '³', '⁴', '°', 'µ', 'μ', '/')):
+                  return len(t) <= 64 and any(tok in t for tok in unit_tokens)
+              return False
+
+          changed = []
+          for path in sorted(Path('scirust-process/src').rglob('*.rs')):
+              original = path.read_text()
+              out = []
+              touched = False
+              for line in original.splitlines(keepends=True):
+                  stripped = line.lstrip()
+                  if stripped.startswith('///') or stripped.startswith('//!'):
+                      def repl(match):
+                          nonlocal_marker = unit_like(match.group(1))
+                          return f'`{match.group(1).strip()}`' if nonlocal_marker else match.group(0)
+                      new_line = bracket.sub(repl, line)
+                      if new_line != line:
+                          touched = True
+                          line = new_line
+                  out.append(line)
+              if touched:
+                  path.write_text(''.join(out))
+                  changed.append(str(path))
+          print('updated rustdoc unit notation:', *changed, sep='\n  ')
+          PY
+
           set +e
           cargo +stable doc -p scirust-process --no-deps --locked > /tmp/process-rustdoc.log 2>&1
           status=$?
           set -e
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           if [ "$status" -ne 0 ]; then
             {
               echo "Temporary strict rustdoc diagnostic for scirust-process."
               echo
-              tail -n 220 /tmp/process-rustdoc.log
+              tail -n 260 /tmp/process-rustdoc.log
             } > .github/process-rustdoc-failure.txt
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add .github/process-rustdoc-failure.txt
-            git commit -m "ci: capture scirust-process rustdoc failure" || true
+            git add scirust-process/src .github/process-rustdoc-failure.txt
+            git commit -m "docs(process): render engineering units as code" || true
             git push
             cat /tmp/process-rustdoc.log
             exit "$status"
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           rm -f .github/process-rustdoc-failure.txt .github/workflows/tmp-process-rustdoc.yml
+          git add scirust-process/src
           git add -A .github/process-rustdoc-failure.txt .github/workflows/tmp-process-rustdoc.yml
-          git commit -m "ci: remove scirust-process rustdoc probe"
+          git commit -m "docs(process): render engineering units as code"
           git push
