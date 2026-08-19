@@ -1,6 +1,7 @@
 pub mod approval_audit;
 pub mod approval_request;
 pub mod approval_service;
+pub mod budgets;
 pub mod deepseek_bridge;
 pub mod delegation;
 pub mod durable_audit;
@@ -22,6 +23,10 @@ pub use approval_request::{APPROVAL_REQUEST_ID_CHARS, ApprovalRequestId, Approva
 pub use approval_service::{
     ApprovalAnswer, ApprovalAnswerer, ApprovalRequest, ApprovalRequestWire, ApprovalService,
     ApprovalServiceRequest, CancellationToken, PendingApprovals, ResolvedApproval,
+};
+pub use budgets::{
+    EgressPolicy, EgressTarget, FullResourceBackend, NoResourceBackend, ResourceBackend,
+    ResourceLimits,
 };
 pub use deepseek_bridge::{
     BRIDGE_SCHEMA_VERSION, BridgeApprovalOutcome, BridgeError, BridgeEvent, DeepSeekBridge,
