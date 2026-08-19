@@ -1,6 +1,7 @@
 pub mod approval_audit;
 pub mod approval_request;
 pub mod approval_service;
+pub mod delegation;
 pub mod guard;
 pub mod permission;
 pub mod policy_store;
@@ -17,6 +18,9 @@ pub use approval_request::{APPROVAL_REQUEST_ID_CHARS, ApprovalRequestId, Approva
 pub use approval_service::{
     ApprovalAnswer, ApprovalAnswerer, ApprovalRequest, ApprovalRequestWire, ApprovalService,
     CancellationToken, PendingApprovals, ResolvedApproval,
+};
+pub use delegation::{
+    ChildRequest, DelegationContext, DelegationError, ResourceBudget, SecretCapability,
 };
 pub use guard::{ConformalGuard, GuardVerdict};
 pub use permission::{
