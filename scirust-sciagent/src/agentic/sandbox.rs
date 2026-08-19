@@ -1,5 +1,6 @@
 mod landlock;
 
+use super::sandbox_approval::SandboxPermission;
 use super::tools::Tool;
 use command_group::{CommandGroup, GroupChild};
 use std::collections::HashMap;
@@ -17,6 +18,7 @@ const REAP_GRACE: Duration = Duration::from_secs(2);
 const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const SANDBOX_UNAVAILABLE: &str = "SANDBOX_UNAVAILABLE";
 const BWRAP_RUNNER_FAILURE_SIGNATURE: &str = "bwrap: ";
+const INTERNAL_SANDBOX_OVERRIDE: &str = "__sciagent_sandbox_override";
 #[cfg(test)]
 const BWRAP_DENIAL_SIGNATURE: &str = "read-only file system";
 const SECRET_ENV_VARS: &[&str] = &[
@@ -60,6 +62,24 @@ impl SandboxMode {
         }
     }
 
+    fn from_permission(permission: SandboxPermission) -> Self {
+        match permission
+        {
+            SandboxPermission::ReadOnly => Self::ReadOnly,
+            SandboxPermission::WorkspaceWrite => Self::WorkspaceWrite,
+            SandboxPermission::DangerFullAccess => Self::DangerFullAccess,
+        }
+    }
+
+    fn permission(self) -> SandboxPermission {
+        match self
+        {
+            Self::ReadOnly => SandboxPermission::ReadOnly,
+            Self::WorkspaceWrite => SandboxPermission::WorkspaceWrite,
+            Self::DangerFullAccess => SandboxPermission::DangerFullAccess,
+        }
+    }
+
     fn is_confined(self) -> bool {
         !matches!(self, Self::DangerFullAccess)
     }
@@ -94,8 +114,10 @@ struct SandboxConfig {
 }
 
 impl SandboxConfig {
-    fn from_env() -> Result<Self, String> {
-        let mode = SandboxMode::parse(std::env::var("SCIAGENT_SANDBOX_MODE").ok().as_deref())?;
+    fn from_env_with_override(requested: Option<SandboxPermission>) -> Result<Self, String> {
+        let configured =
+            SandboxMode::parse(std::env::var("SCIAGENT_SANDBOX_MODE").ok().as_deref())?;
+        let mode = resolve_effective_mode(configured, requested)?;
         let bwrap = if cfg!(target_os = "linux")
         {
             std::env::var_os("SCIAGENT_BWRAP")
@@ -223,6 +245,54 @@ fn bubblewrap_usable(bwrap: &Path, root: &Path) -> bool {
     }
 }
 
+pub(crate) fn configured_permission() -> Result<SandboxPermission, String> {
+    SandboxMode::parse(std::env::var("SCIAGENT_SANDBOX_MODE").ok().as_deref())
+        .map(SandboxMode::permission)
+}
+
+pub(crate) fn tool_supports_sandbox(name: &str) -> bool {
+    matches!(name, "search" | "grep" | "build" | "test" | "status")
+}
+
+pub(crate) fn install_one_shot_override(
+    params: &mut HashMap<String, String>,
+    permission: SandboxPermission,
+) {
+    params.insert(
+        INTERNAL_SANDBOX_OVERRIDE.to_string(),
+        permission.label().to_string(),
+    );
+}
+
+fn take_one_shot_override(
+    params: &mut HashMap<String, String>,
+) -> Result<Option<SandboxPermission>, String> {
+    params
+        .remove(INTERNAL_SANDBOX_OVERRIDE)
+        .map(|value| SandboxPermission::parse(&value).map_err(|error| error.to_string()))
+        .transpose()
+}
+
+fn resolve_effective_mode(
+    configured: SandboxMode,
+    requested: Option<SandboxPermission>,
+) -> Result<SandboxMode, String> {
+    let Some(requested) = requested
+    else
+    {
+        return Ok(configured);
+    };
+    if !configured.permission().can_escalate_to(requested)
+    {
+        return Err(format!(
+            "Refused non-widening sandbox override from {:?} to {:?}",
+            configured.label(),
+            requested.label()
+        ));
+    }
+    Ok(SandboxMode::from_permission(requested))
+}
+
 pub(crate) fn install_process_sandbox(tools: &mut [Tool]) {
     for tool in tools
     {
@@ -280,15 +350,29 @@ fn valid_crate_name(name: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
 }
 
-fn sandboxed_search(params: HashMap<String, String>) -> String {
-    search_workspace(&params, "10")
+fn sandboxed_search(mut params: HashMap<String, String>) -> String {
+    let requested = match take_one_shot_override(&mut params)
+    {
+        Ok(requested) => requested,
+        Err(error) => return error,
+    };
+    search_workspace(&params, "10", requested)
 }
 
-fn sandboxed_grep(params: HashMap<String, String>) -> String {
-    search_workspace(&params, "15")
+fn sandboxed_grep(mut params: HashMap<String, String>) -> String {
+    let requested = match take_one_shot_override(&mut params)
+    {
+        Ok(requested) => requested,
+        Err(error) => return error,
+    };
+    search_workspace(&params, "15", requested)
 }
 
-fn search_workspace(params: &HashMap<String, String>, max_count: &str) -> String {
+fn search_workspace(
+    params: &HashMap<String, String>,
+    max_count: &str,
+    requested: Option<SandboxPermission>,
+) -> String {
     let pattern = params.get("pattern").map(String::as_str).unwrap_or("");
     if pattern.is_empty()
     {
@@ -323,7 +407,7 @@ fn search_workspace(params: &HashMap<String, String>, max_count: &str) -> String
         OsString::from(pattern),
         path.clone().into_os_string(),
     ];
-    match run_sandboxed("rg", &rg_args, &root)
+    match run_sandboxed("rg", &rg_args, &root, requested)
     {
         Ok(output) if output.timed_out => "Search timed out after 30 seconds".to_string(),
         Ok(output) if output.success => String::from_utf8_lossy(&output.stdout).into_owned(),
@@ -338,7 +422,7 @@ fn search_workspace(params: &HashMap<String, String>, max_count: &str) -> String
                 OsString::from(pattern),
                 path.into_os_string(),
             ];
-            match run_sandboxed("grep", &grep_args, &root)
+            match run_sandboxed("grep", &grep_args, &root, requested)
             {
                 Ok(output) if output.timed_out => "Search timed out after 30 seconds".to_string(),
                 Ok(output) if output.success =>
@@ -352,7 +436,12 @@ fn search_workspace(params: &HashMap<String, String>, max_count: &str) -> String
     }
 }
 
-fn sandboxed_build(params: HashMap<String, String>) -> String {
+fn sandboxed_build(mut params: HashMap<String, String>) -> String {
+    let requested = match take_one_shot_override(&mut params)
+    {
+        Ok(requested) => requested,
+        Err(error) => return error,
+    };
     let crate_name = params.get("crate").map(String::as_str).unwrap_or("");
     if !valid_crate_name(crate_name)
     {
@@ -373,7 +462,7 @@ fn sandboxed_build(params: HashMap<String, String>) -> String {
     .into_iter()
     .map(OsString::from)
     .collect::<Vec<_>>();
-    match run_sandboxed("cargo", &args, &root)
+    match run_sandboxed("cargo", &args, &root, requested)
     {
         Ok(output) if output.timed_out => "Build timed out after 30 seconds".to_string(),
         Ok(output) if output.success => format!("{crate_name} builds successfully"),
@@ -382,7 +471,12 @@ fn sandboxed_build(params: HashMap<String, String>) -> String {
     }
 }
 
-fn sandboxed_test(params: HashMap<String, String>) -> String {
+fn sandboxed_test(mut params: HashMap<String, String>) -> String {
+    let requested = match take_one_shot_override(&mut params)
+    {
+        Ok(requested) => requested,
+        Err(error) => return error,
+    };
     let crate_name = params.get("crate").map(String::as_str).unwrap_or("");
     if !valid_crate_name(crate_name)
     {
@@ -409,7 +503,7 @@ fn sandboxed_test(params: HashMap<String, String>) -> String {
         Ok(root) => root,
         Err(error) => return error,
     };
-    match run_sandboxed("cargo", &args, &root)
+    match run_sandboxed("cargo", &args, &root, requested)
     {
         Ok(output) if output.timed_out => "Tests timed out after 30 seconds".to_string(),
         Ok(output) if output.success =>
@@ -429,14 +523,19 @@ fn sandboxed_test(params: HashMap<String, String>) -> String {
     }
 }
 
-fn sandboxed_status(_params: HashMap<String, String>) -> String {
+fn sandboxed_status(mut params: HashMap<String, String>) -> String {
+    let requested = match take_one_shot_override(&mut params)
+    {
+        Ok(requested) => requested,
+        Err(error) => return error,
+    };
     let root = match canonical_workspace_root()
     {
         Ok(root) => root,
         Err(error) => return error,
     };
     let args = [OsString::from("status"), OsString::from("--short")];
-    match run_sandboxed("git", &args, &root)
+    match run_sandboxed("git", &args, &root, requested)
     {
         Ok(output) if output.timed_out => "Git status timed out after 30 seconds".to_string(),
         Ok(output) => String::from_utf8_lossy(&output.stdout).into_owned(),
@@ -578,8 +677,19 @@ fn terminate_and_reap(
     }
 }
 
-fn run_sandboxed(program: &str, args: &[OsString], cwd: &Path) -> Result<LimitedOutput, String> {
-    run_sandboxed_with_config(program, args, cwd, SandboxConfig::from_env()?, TOOL_TIMEOUT)
+fn run_sandboxed(
+    program: &str,
+    args: &[OsString],
+    cwd: &Path,
+    requested: Option<SandboxPermission>,
+) -> Result<LimitedOutput, String> {
+    run_sandboxed_with_config(
+        program,
+        args,
+        cwd,
+        SandboxConfig::from_env_with_override(requested)?,
+        TOOL_TIMEOUT,
+    )
 }
 
 fn run_sandboxed_with_config(
@@ -778,6 +888,51 @@ mod tests {
         );
         assert!(SandboxMode::parse(Some("auto")).is_err());
         assert!(SandboxMode::parse(Some("strict")).is_err());
+    }
+
+    #[test]
+    fn one_shot_override_is_strictly_widening() {
+        assert_eq!(
+            resolve_effective_mode(
+                SandboxMode::ReadOnly,
+                Some(SandboxPermission::WorkspaceWrite),
+            )
+            .unwrap(),
+            SandboxMode::WorkspaceWrite
+        );
+        assert_eq!(
+            resolve_effective_mode(
+                SandboxMode::WorkspaceWrite,
+                Some(SandboxPermission::DangerFullAccess),
+            )
+            .unwrap(),
+            SandboxMode::DangerFullAccess
+        );
+        assert!(
+            resolve_effective_mode(
+                SandboxMode::WorkspaceWrite,
+                Some(SandboxPermission::ReadOnly),
+            )
+            .is_err()
+        );
+        assert!(
+            resolve_effective_mode(
+                SandboxMode::WorkspaceWrite,
+                Some(SandboxPermission::WorkspaceWrite),
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn internal_override_round_trip_is_not_public_tool_metadata() {
+        let mut params = HashMap::new();
+        install_one_shot_override(&mut params, SandboxPermission::DangerFullAccess);
+        assert_eq!(
+            take_one_shot_override(&mut params).unwrap(),
+            Some(SandboxPermission::DangerFullAccess)
+        );
+        assert!(params.is_empty());
     }
 
     #[test]
