@@ -13,7 +13,7 @@ pub use approval_audit::{
 pub use guard::{ConformalGuard, GuardVerdict};
 pub use permission::{
     ApprovalChoice, ApprovalOutcome, PermissionDecision, PermissionGate, PermissionPolicy,
-    PermissionRule, ScopedToolApprover, ToolApprover,
+    PermissionRule, PermissionRuleStore, ScopedToolApprover, ToolApprover,
 };
 pub use sandbox_approval::{
     NoSandboxApprovalService, SandboxApprovalError, SandboxApprovalRequest, SandboxApprovalService,
