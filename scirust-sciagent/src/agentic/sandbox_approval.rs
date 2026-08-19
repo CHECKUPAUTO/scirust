@@ -6,17 +6,14 @@ use std::sync::Arc;
 
 /// Sandbox permission vocabulary accepted by one-shot escalation requests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SandboxPermission
-{
+pub enum SandboxPermission {
     ReadOnly,
     WorkspaceWrite,
     DangerFullAccess,
 }
 
-impl SandboxPermission
-{
-    pub fn parse(value: &str) -> Result<Self, SandboxApprovalError>
-    {
+impl SandboxPermission {
+    pub fn parse(value: &str) -> Result<Self, SandboxApprovalError> {
         match value.trim()
         {
             "read-only" => Ok(Self::ReadOnly),
@@ -28,8 +25,7 @@ impl SandboxPermission
         }
     }
 
-    pub fn label(self) -> &'static str
-    {
+    pub fn label(self) -> &'static str {
         match self
         {
             Self::ReadOnly => "read-only",
@@ -38,20 +34,20 @@ impl SandboxPermission
         }
     }
 
-    pub fn can_escalate_to(self, requested: Self) -> bool
-    {
+    pub fn can_escalate_to(self, requested: Self) -> bool {
         matches!(
             (self, requested),
-            (Self::ReadOnly, Self::WorkspaceWrite | Self::DangerFullAccess)
-                | (Self::WorkspaceWrite, Self::DangerFullAccess)
+            (
+                Self::ReadOnly,
+                Self::WorkspaceWrite | Self::DangerFullAccess
+            ) | (Self::WorkspaceWrite, Self::DangerFullAccess)
         )
     }
 }
 
 /// A self-contained request to widen one exact tool call.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SandboxApprovalRequest
-{
+pub struct SandboxApprovalRequest {
     pub call_id: String,
     pub tool: String,
     pub current: SandboxPermission,
@@ -59,16 +55,14 @@ pub struct SandboxApprovalRequest
     pub justification: String,
 }
 
-impl SandboxApprovalRequest
-{
+impl SandboxApprovalRequest {
     pub fn new(
         call_id: impl Into<String>,
         tool: impl Into<String>,
         current: SandboxPermission,
         requested: SandboxPermission,
         justification: impl Into<String>,
-    ) -> Result<Self, SandboxApprovalError>
-    {
+    ) -> Result<Self, SandboxApprovalError> {
         let call_id = call_id.into();
         if call_id.trim().is_empty()
         {
@@ -110,8 +104,7 @@ impl SandboxApprovalRequest
         current: SandboxPermission,
         sandbox_permissions: Option<&str>,
         justification: Option<&str>,
-    ) -> Result<Option<Self>, SandboxApprovalError>
-    {
+    ) -> Result<Option<Self>, SandboxApprovalError> {
         match (sandbox_permissions, justification)
         {
             (None, None) => Ok(None),
@@ -130,25 +123,20 @@ impl SandboxApprovalRequest
 }
 
 /// Synchronous seam for the UI/session layer that owns sandbox escalation.
-pub trait SandboxApprovalService: Send + Sync
-{
-    fn request_approval(
-        &self,
-        request: &SandboxApprovalRequest,
-    ) -> Result<ApprovalOutcome, String>;
+pub trait SandboxApprovalService: Send + Sync {
+    fn request_approval(&self, request: &SandboxApprovalRequest)
+    -> Result<ApprovalOutcome, String>;
 }
 
 /// Safe default when no interactive escalation channel is installed.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NoSandboxApprovalService;
 
-impl SandboxApprovalService for NoSandboxApprovalService
-{
+impl SandboxApprovalService for NoSandboxApprovalService {
     fn request_approval(
         &self,
         _request: &SandboxApprovalRequest,
-    ) -> Result<ApprovalOutcome, String>
-    {
+    ) -> Result<ApprovalOutcome, String> {
         Ok(ApprovalOutcome::Unavailable)
     }
 }
@@ -160,16 +148,13 @@ impl SandboxApprovalService for NoSandboxApprovalService
 /// `Ask`, but it never grants a sandbox widening request. Widening is always
 /// resolved independently and only `AllowedOnce` permits the current call.
 #[derive(Clone)]
-pub struct SandboxPermissionGate
-{
+pub struct SandboxPermissionGate {
     permission: PermissionGate,
     sandbox_approver: Option<Arc<dyn SandboxApprovalService>>,
 }
 
-impl SandboxPermissionGate
-{
-    pub fn new(permission: PermissionGate) -> Self
-    {
+impl SandboxPermissionGate {
+    pub fn new(permission: PermissionGate) -> Self {
         Self {
             permission,
             sandbox_approver: None,
@@ -179,24 +164,20 @@ impl SandboxPermissionGate
     pub fn with_approval_service(
         permission: PermissionGate,
         sandbox_approver: Arc<dyn SandboxApprovalService>,
-    ) -> Self
-    {
+    ) -> Self {
         Self {
             permission,
             sandbox_approver: Some(sandbox_approver),
         }
     }
 
-    pub fn permission_gate(&self) -> &PermissionGate
-    {
+    pub fn permission_gate(&self) -> &PermissionGate {
         &self.permission
     }
 }
 
-impl ToolPolicy for SandboxPermissionGate
-{
-    fn before_execute(&self, call: &ToolCall, tool: &Tool) -> Result<(), String>
-    {
+impl ToolPolicy for SandboxPermissionGate {
+    fn before_execute(&self, call: &ToolCall, tool: &Tool) -> Result<(), String> {
         self.permission.before_execute(call, tool)
     }
 
@@ -205,8 +186,7 @@ impl ToolPolicy for SandboxPermissionGate
         _call: &ToolCall,
         _tool: &Tool,
         request: &SandboxApprovalRequest,
-    ) -> Result<(), String>
-    {
+    ) -> Result<(), String> {
         let Some(approver) = self.sandbox_approver.as_ref()
         else
         {
@@ -228,21 +208,20 @@ impl ToolPolicy for SandboxPermissionGate
             ApprovalOutcome::Cancelled => Err(
                 "sandbox escalation approval was cancelled; do not retry it unchanged".to_string(),
             ),
-            ApprovalOutcome::Unavailable => {
+            ApprovalOutcome::Unavailable =>
+            {
                 Err("sandbox escalation approval is unavailable; refusing to execute".to_string())
             },
         }
     }
 
-    fn after_execute(&self, call: &ToolCall, tool: &Tool, output: &str)
-    {
+    fn after_execute(&self, call: &ToolCall, tool: &Tool, output: &str) {
         self.permission.after_execute(call, tool, output);
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SandboxApprovalError
-{
+pub enum SandboxApprovalError {
     InvalidSandboxPermission(String),
     MissingCallId,
     MissingTool,
@@ -255,10 +234,8 @@ pub enum SandboxApprovalError
     },
 }
 
-impl fmt::Display for SandboxApprovalError
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
-    {
+impl fmt::Display for SandboxApprovalError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self
         {
             Self::InvalidSandboxPermission(value) => write!(
@@ -271,7 +248,8 @@ impl fmt::Display for SandboxApprovalError
                 f,
                 "sandbox_permissions and justification must be supplied together"
             ),
-            Self::EmptyJustification => {
+            Self::EmptyJustification =>
+            {
                 write!(f, "Sandbox approval justification must not be empty")
             },
             Self::NotAnEscalation { current, requested } => write!(
@@ -287,18 +265,16 @@ impl fmt::Display for SandboxApprovalError
 impl std::error::Error for SandboxApprovalError {}
 
 #[cfg(test)]
-mod tests
-{
-    use super::*;
+mod tests {
     use super::super::permission::{PermissionDecision, PermissionPolicy};
+    use super::*;
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn request(
         current: SandboxPermission,
         requested: SandboxPermission,
-    ) -> Result<SandboxApprovalRequest, SandboxApprovalError>
-    {
+    ) -> Result<SandboxApprovalRequest, SandboxApprovalError> {
         SandboxApprovalRequest::new(
             "call-7",
             "build",
@@ -308,13 +284,11 @@ mod tests
         )
     }
 
-    fn noop(_params: HashMap<String, String>) -> String
-    {
+    fn noop(_params: HashMap<String, String>) -> String {
         "ok".to_string()
     }
 
-    fn synthetic_tool() -> Tool
-    {
+    fn synthetic_tool() -> Tool {
         Tool {
             name: "build",
             description: "sandbox approval test tool",
@@ -323,20 +297,17 @@ mod tests
         }
     }
 
-    struct FixedSandboxApprover
-    {
+    struct FixedSandboxApprover {
         calls: AtomicUsize,
         outcome: ApprovalOutcome,
         fail: bool,
     }
 
-    impl SandboxApprovalService for FixedSandboxApprover
-    {
+    impl SandboxApprovalService for FixedSandboxApprover {
         fn request_approval(
             &self,
             _request: &SandboxApprovalRequest,
-        ) -> Result<ApprovalOutcome, String>
-        {
+        ) -> Result<ApprovalOutcome, String> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             if self.fail
             {
@@ -349,8 +320,7 @@ mod tests
         }
     }
 
-    fn allow_tool_permission() -> PermissionGate
-    {
+    fn allow_tool_permission() -> PermissionGate {
         PermissionGate::new(PermissionPolicy::new(
             PermissionDecision::Allow,
             Vec::new(),
@@ -360,8 +330,7 @@ mod tests
     }
 
     #[test]
-    fn permission_vocabulary_is_exact()
-    {
+    fn permission_vocabulary_is_exact() {
         assert_eq!(
             SandboxPermission::parse("read-only").unwrap(),
             SandboxPermission::ReadOnly
@@ -379,8 +348,7 @@ mod tests
     }
 
     #[test]
-    fn widening_matrix_is_strict()
-    {
+    fn widening_matrix_is_strict() {
         use SandboxPermission::{DangerFullAccess, ReadOnly, WorkspaceWrite};
 
         assert!(ReadOnly.can_escalate_to(WorkspaceWrite));
@@ -395,8 +363,7 @@ mod tests
     }
 
     #[test]
-    fn metadata_pair_is_atomic()
-    {
+    fn metadata_pair_is_atomic() {
         let current = SandboxPermission::ReadOnly;
         assert_eq!(
             SandboxApprovalRequest::from_metadata(
@@ -423,8 +390,7 @@ mod tests
     }
 
     #[test]
-    fn empty_justification_is_refused()
-    {
+    fn empty_justification_is_refused() {
         let error = SandboxApprovalRequest::new(
             "call-1",
             "build",
@@ -437,23 +403,25 @@ mod tests
     }
 
     #[test]
-    fn non_widening_requests_are_refused()
-    {
-        assert!(request(
-            SandboxPermission::WorkspaceWrite,
-            SandboxPermission::ReadOnly,
-        )
-        .is_err());
-        assert!(request(
-            SandboxPermission::WorkspaceWrite,
-            SandboxPermission::WorkspaceWrite,
-        )
-        .is_err());
+    fn non_widening_requests_are_refused() {
+        assert!(
+            request(
+                SandboxPermission::WorkspaceWrite,
+                SandboxPermission::ReadOnly,
+            )
+            .is_err()
+        );
+        assert!(
+            request(
+                SandboxPermission::WorkspaceWrite,
+                SandboxPermission::WorkspaceWrite,
+            )
+            .is_err()
+        );
     }
 
     #[test]
-    fn absent_service_is_unavailable()
-    {
+    fn absent_service_is_unavailable() {
         let request = request(
             SandboxPermission::WorkspaceWrite,
             SandboxPermission::DangerFullAccess,
@@ -466,8 +434,7 @@ mod tests
     }
 
     #[test]
-    fn composite_gate_fails_closed_without_sandbox_service()
-    {
+    fn composite_gate_fails_closed_without_sandbox_service() {
         let gate = SandboxPermissionGate::new(allow_tool_permission());
         let call = ToolCall::new("call-7", "build", HashMap::new());
         let request = request(
@@ -482,8 +449,7 @@ mod tests
     }
 
     #[test]
-    fn composite_gate_accepts_only_allowed_once()
-    {
+    fn composite_gate_accepts_only_allowed_once() {
         for (outcome, allowed) in [
             (ApprovalOutcome::AllowedOnce, true),
             (ApprovalOutcome::Rejected, false),
@@ -516,8 +482,7 @@ mod tests
     }
 
     #[test]
-    fn sandbox_approval_transport_error_fails_closed()
-    {
+    fn sandbox_approval_transport_error_fails_closed() {
         let approver = Arc::new(FixedSandboxApprover {
             calls: AtomicUsize::new(0),
             outcome: ApprovalOutcome::AllowedOnce,

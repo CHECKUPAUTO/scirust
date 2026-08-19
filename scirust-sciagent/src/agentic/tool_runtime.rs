@@ -470,9 +470,11 @@ mod tests {
             execute: panic_tool,
         };
         let call = ToolCall::new("call-1", "status", HashMap::new());
-        assert!(policy
-            .approve_sandbox_escalation(&call, &tool, &request)
-            .is_err());
+        assert!(
+            policy
+                .approve_sandbox_escalation(&call, &tool, &request)
+                .is_err()
+        );
     }
 
     #[test]
