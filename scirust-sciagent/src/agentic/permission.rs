@@ -1,3 +1,4 @@
+use super::policy_store::ApprovalPolicyStore;
 use super::tool_runtime::{ToolCall, ToolPolicy};
 use super::tools::Tool;
 use std::collections::HashSet;
@@ -344,6 +345,7 @@ pub struct PermissionGate {
     scoped_approver: Option<Arc<dyn ScopedToolApprover>>,
     rule_store: Option<Arc<dyn PermissionRuleStore>>,
     approval_policy: Arc<RwLock<ApprovalPolicy>>,
+    approval_policy_store: Option<Arc<dyn ApprovalPolicyStore>>,
     session_approved_tools: Arc<RwLock<HashSet<String>>>,
 }
 
@@ -355,6 +357,7 @@ impl PermissionGate {
             scoped_approver: None,
             rule_store: None,
             approval_policy: Arc::new(RwLock::new(ApprovalPolicy::Ask)),
+            approval_policy_store: None,
             session_approved_tools: Arc::new(RwLock::new(HashSet::new())),
         }
     }
@@ -371,6 +374,7 @@ impl PermissionGate {
             scoped_approver: None,
             rule_store: None,
             approval_policy: Arc::new(RwLock::new(ApprovalPolicy::Ask)),
+            approval_policy_store: None,
             session_approved_tools: Arc::new(RwLock::new(HashSet::new())),
         }
     }
@@ -386,6 +390,7 @@ impl PermissionGate {
             scoped_approver: Some(approver),
             rule_store: None,
             approval_policy: Arc::new(RwLock::new(ApprovalPolicy::Ask)),
+            approval_policy_store: None,
             session_approved_tools: Arc::new(RwLock::new(HashSet::new())),
         }
     }
@@ -405,15 +410,44 @@ impl PermissionGate {
     }
 
     /// Change the approval policy for this gate/session and all of its clones.
-    ///
-    /// Lock failure is authorization failure and refuses the change.
+    /// When a durable [`ApprovalPolicyStore`] is installed, the change is
+    /// appended there first; a failed append refuses the change so a policy
+    /// switch never exists only in memory. Lock failure is authorization
+    /// failure and refuses the change.
     pub fn set_approval_policy(&self, policy: ApprovalPolicy) -> Result<(), String> {
+        if let Some(store) = self.approval_policy_store.as_ref()
+        {
+            store.append(policy, "runtime")?;
+        }
         *self
             .approval_policy
             .write()
             .map_err(|_| "approval policy state is unavailable; refusing approval".to_string())? =
             policy;
         Ok(())
+    }
+
+    /// Install the durable policy store and restore the effective policy from
+    /// it. A corrupt or unverifiable log fails closed (`Never`) rather than
+    /// silently keeping `Ask`.
+    pub fn with_approval_policy_store(
+        mut self,
+        store: Arc<dyn ApprovalPolicyStore>,
+    ) -> Result<Self, String> {
+        let effective = store.effective()?;
+        self.approval_policy_store = Some(store);
+        if let Some(policy) = effective
+        {
+            *self.approval_policy.write().map_err(|_| {
+                "approval policy state is unavailable; refusing approval".to_string()
+            })? = policy;
+        }
+        Ok(self)
+    }
+
+    /// The installed durable policy store, if any.
+    pub fn approval_policy_store(&self) -> Option<Arc<dyn ApprovalPolicyStore>> {
+        self.approval_policy_store.clone()
     }
 
     /// Install the opt-in persistence sink used only for `ApprovalChoice::Always`.
@@ -952,6 +986,56 @@ mod tests {
             .expect_err("poisoned policy state must fail closed");
         assert!(error.contains("unavailable"), "{error}");
         assert!(gate.set_approval_policy(ApprovalPolicy::Never).is_err());
+    }
+
+    #[test]
+    fn durable_store_restores_effective_policy_on_gate() {
+        let store = Arc::new(super::super::policy_store::MemoryApprovalPolicyStore::default());
+        store.append(ApprovalPolicy::Never, "deployment").unwrap();
+        let gate = PermissionGate::new(PermissionPolicy::default())
+            .with_approval_policy_store(store.clone())
+            .expect("store must load");
+        assert_eq!(gate.approval_policy().unwrap(), ApprovalPolicy::Never);
+        assert!(gate.approval_policy_store().is_some());
+    }
+
+    #[test]
+    fn durable_set_policy_appends_before_switching() {
+        let store = Arc::new(super::super::policy_store::MemoryApprovalPolicyStore::default());
+        let gate = PermissionGate::new(PermissionPolicy::default())
+            .with_approval_policy_store(store.clone())
+            .unwrap();
+        gate.set_approval_policy(ApprovalPolicy::Never).unwrap();
+        assert_eq!(gate.approval_policy().unwrap(), ApprovalPolicy::Never);
+        assert_eq!(store.effective().unwrap(), Some(ApprovalPolicy::Never));
+    }
+
+    #[test]
+    fn durable_store_failure_fails_closed_and_keeps_old_policy() {
+        struct FailingStore;
+        impl ApprovalPolicyStore for FailingStore {
+            fn append(&self, _policy: ApprovalPolicy, _source: &str) -> Result<u64, String> {
+                Err("policy store unavailable".to_string())
+            }
+            fn effective(&self) -> Result<Option<ApprovalPolicy>, String> {
+                Ok(None)
+            }
+            fn events(
+                &self,
+            ) -> Result<Vec<super::super::policy_store::ApprovalPolicyEvent>, String> {
+                Ok(Vec::new())
+            }
+        }
+        let store = Arc::new(FailingStore);
+        let gate = PermissionGate::new(PermissionPolicy::default())
+            .with_approval_policy_store(store.clone())
+            .unwrap();
+        assert_eq!(gate.approval_policy().unwrap(), ApprovalPolicy::Ask);
+        let error = gate
+            .set_approval_policy(ApprovalPolicy::Never)
+            .expect_err("a failed durable append must refuse the switch");
+        assert!(error.contains("policy store unavailable"), "{error}");
+        assert_eq!(gate.approval_policy().unwrap(), ApprovalPolicy::Ask);
     }
 
     struct CountingApprover {
