@@ -463,9 +463,9 @@ impl ToolPolicy for PermissionGate {
                                         .to_string(),
                                 );
                             };
-                            store
-                                .remember_allow(&rule)
-                                .map_err(|error| format!("failed to persist approval rule: {error}"))?;
+                            store.remember_allow(&rule).map_err(|error| {
+                                format!("failed to persist approval rule: {error}")
+                            })?;
                             self.approve_tool_for_session(&rule)?;
                             Ok(())
                         },
@@ -618,8 +618,8 @@ fn glob_matches(pattern: &str, value: &str) -> bool {
 mod tests {
     use super::*;
     use std::collections::{HashMap, VecDeque};
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn call(tool: &str, params: &[(&str, &str)]) -> ToolCall {
         ToolCall::new(
@@ -1046,8 +1046,9 @@ mod tests {
     fn persistent_choice_stores_bare_rule_and_grants_current_session() {
         let approver = Arc::new(SequenceScopedApprover::new([ApprovalChoice::Always]));
         let store = Arc::new(MemoryRuleStore::new(false));
-        let gate = PermissionGate::with_scoped_approver(PermissionPolicy::default(), approver.clone())
-            .with_rule_store(store.clone());
+        let gate =
+            PermissionGate::with_scoped_approver(PermissionPolicy::default(), approver.clone())
+                .with_rule_store(store.clone());
 
         gate.before_execute(&call("build", &[("crate", "scirust-core")]), &tool("build"))
             .expect("persistent approval should authorize the call");
@@ -1090,6 +1091,9 @@ mod tests {
         let error = gate
             .before_execute(&call("build", &[("crate", "secret-model")]), &tool("build"))
             .expect_err("explicit ask must still require approval");
-        assert!(error.contains("no approval service is available"), "{error}");
+        assert!(
+            error.contains("no approval service is available"),
+            "{error}"
+        );
     }
 }
