@@ -69,6 +69,40 @@ impl ApprovalOutcome {
     }
 }
 
+/// Session approval policy matching the DeepSeek harness vocabulary.
+///
+/// `Ask` (the default) delegates approval-required operations to the configured
+/// approval service and fails closed when none is available. `Never`
+/// deterministically rejects any operation that would require a NEW approval,
+/// before any approver or sandbox approval service is invoked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ApprovalPolicy {
+    #[default]
+    Ask,
+    Never,
+}
+
+impl ApprovalPolicy {
+    /// Wire-safe vocabulary label.
+    pub fn label(self) -> &'static str {
+        match self
+        {
+            Self::Ask => "ask",
+            Self::Never => "never",
+        }
+    }
+
+    /// Parse an untrusted policy label; unknown values fail closed to `Never`.
+    pub fn parse(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str()
+        {
+            "ask" => Self::Ask,
+            "never" => Self::Never,
+            _ => Self::Never,
+        }
+    }
+}
+
 /// One tool-family rule with an optional subject selector.
 ///
 /// Accepted forms are `Tool`, `Tool(glob)`, and the compatibility form
@@ -309,6 +343,7 @@ pub struct PermissionGate {
     approver: Option<Arc<dyn ToolApprover>>,
     scoped_approver: Option<Arc<dyn ScopedToolApprover>>,
     rule_store: Option<Arc<dyn PermissionRuleStore>>,
+    approval_policy: Arc<RwLock<ApprovalPolicy>>,
     session_approved_tools: Arc<RwLock<HashSet<String>>>,
 }
 
@@ -319,6 +354,7 @@ impl PermissionGate {
             approver: None,
             scoped_approver: None,
             rule_store: None,
+            approval_policy: Arc::new(RwLock::new(ApprovalPolicy::Ask)),
             session_approved_tools: Arc::new(RwLock::new(HashSet::new())),
         }
     }
@@ -334,6 +370,7 @@ impl PermissionGate {
             approver: Some(approver),
             scoped_approver: None,
             rule_store: None,
+            approval_policy: Arc::new(RwLock::new(ApprovalPolicy::Ask)),
             session_approved_tools: Arc::new(RwLock::new(HashSet::new())),
         }
     }
@@ -348,12 +385,35 @@ impl PermissionGate {
             approver: None,
             scoped_approver: Some(approver),
             rule_store: None,
+            approval_policy: Arc::new(RwLock::new(ApprovalPolicy::Ask)),
             session_approved_tools: Arc::new(RwLock::new(HashSet::new())),
         }
     }
 
     pub fn policy(&self) -> &PermissionPolicy {
         &self.policy
+    }
+
+    /// Current approval policy shared by every clone of this gate.
+    ///
+    /// Lock failure is authorization failure and fails closed.
+    pub fn approval_policy(&self) -> Result<ApprovalPolicy, String> {
+        Ok(*self
+            .approval_policy
+            .read()
+            .map_err(|_| "approval policy state is unavailable; refusing approval".to_string())?)
+    }
+
+    /// Change the approval policy for this gate/session and all of its clones.
+    ///
+    /// Lock failure is authorization failure and refuses the change.
+    pub fn set_approval_policy(&self, policy: ApprovalPolicy) -> Result<(), String> {
+        *self
+            .approval_policy
+            .write()
+            .map_err(|_| "approval policy state is unavailable; refusing approval".to_string())? =
+            policy;
+        Ok(())
     }
 
     /// Install the opt-in persistence sink used only for `ApprovalChoice::Always`.
@@ -439,6 +499,13 @@ impl ToolPolicy for PermissionGate {
                     && self.is_tool_approved_for_session(&call.tool)?
                 {
                     return Ok(());
+                }
+
+                if self.approval_policy()? == ApprovalPolicy::Never
+                {
+                    return Err(
+                        "approval policy is set to never; refusing to request approval".to_string(),
+                    );
                 }
 
                 let subject = primary_subject(call);
@@ -772,6 +839,119 @@ mod tests {
             error.contains("no approval service is available"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn approval_policy_vocabulary_matches_harness() {
+        assert_eq!(ApprovalPolicy::Ask.label(), "ask");
+        assert_eq!(ApprovalPolicy::Never.label(), "never");
+        assert_eq!(ApprovalPolicy::default(), ApprovalPolicy::Ask);
+        assert_eq!(ApprovalPolicy::parse("ask"), ApprovalPolicy::Ask);
+        assert_eq!(ApprovalPolicy::parse("never"), ApprovalPolicy::Never);
+        assert_eq!(ApprovalPolicy::parse("NEVER"), ApprovalPolicy::Never);
+        assert_eq!(ApprovalPolicy::parse("unknown"), ApprovalPolicy::Never);
+
+        let gate = PermissionGate::new(PermissionPolicy::default());
+        assert_eq!(gate.approval_policy().unwrap(), ApprovalPolicy::Ask);
+    }
+
+    #[test]
+    fn never_policy_is_shared_and_blocks_before_approver() {
+        let approver = one_shot_approver(ApprovalOutcome::AllowedOnce);
+        let gate = PermissionGate::with_approver(PermissionPolicy::default(), approver.clone());
+        let clone = gate.clone();
+
+        clone.set_approval_policy(ApprovalPolicy::Never).unwrap();
+        assert_eq!(gate.approval_policy().unwrap(), ApprovalPolicy::Never);
+
+        let error = gate
+            .before_execute(&call("build", &[("crate", "scirust-core")]), &tool("build"))
+            .expect_err("never must reject before the approver");
+
+        assert!(error.contains("approval policy is set to never"), "{error}");
+        assert_eq!(approver.calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn never_policy_blocks_explicit_ask_with_scoped_approver() {
+        let policy = PermissionPolicy::new(
+            PermissionDecision::Ask,
+            Vec::new(),
+            vec![rule("build(secret-*)")],
+            Vec::new(),
+        );
+        let approver = Arc::new(SequenceScopedApprover::new([ApprovalChoice::Once]));
+        let gate = PermissionGate::with_scoped_approver(policy, approver.clone());
+        gate.approve_tool_for_session("build").unwrap();
+        gate.set_approval_policy(ApprovalPolicy::Never).unwrap();
+
+        let error = gate
+            .before_execute(&call("build", &[("crate", "secret-model")]), &tool("build"))
+            .expect_err("explicit ask must still require approval under never");
+
+        assert!(error.contains("approval policy is set to never"), "{error}");
+        assert_eq!(approver.calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn never_policy_leaves_static_allow_deny_and_remembered_grants_intact() {
+        // Static Allow stays a pass even under Never.
+        let allow_gate = PermissionGate::new(PermissionPolicy::new(
+            PermissionDecision::Allow,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        ));
+        allow_gate
+            .set_approval_policy(ApprovalPolicy::Never)
+            .unwrap();
+        allow_gate
+            .before_execute(&call("build", &[("crate", "scirust-core")]), &tool("build"))
+            .expect("static allow must remain a pass under never");
+
+        // Static Deny stays an absolute block even under Never.
+        let deny_gate = PermissionGate::new(PermissionPolicy::new(
+            PermissionDecision::Allow,
+            Vec::new(),
+            Vec::new(),
+            vec![rule("build")],
+        ));
+        deny_gate
+            .set_approval_policy(ApprovalPolicy::Never)
+            .unwrap();
+        let error = deny_gate
+            .before_execute(&call("build", &[("crate", "scirust-core")]), &tool("build"))
+            .expect_err("static deny must remain absolute under never");
+        assert!(error.contains("denied by permission policy"), "{error}");
+
+        // A remembered session grant prevents a NEW approval request, so it
+        // remains valid under Never (no implicit revocation).
+        let remembered_gate = PermissionGate::new(PermissionPolicy::default());
+        remembered_gate.approve_tool_for_session("build").unwrap();
+        remembered_gate
+            .set_approval_policy(ApprovalPolicy::Never)
+            .unwrap();
+        remembered_gate
+            .before_execute(&call("build", &[("crate", "scirust-core")]), &tool("build"))
+            .expect("remembered session grant must satisfy an ordinary ask under never");
+    }
+
+    #[test]
+    fn approval_policy_lock_poisoning_fails_closed() {
+        let gate = PermissionGate::new(PermissionPolicy::default());
+        let clone = gate.clone();
+        // Poison the shared policy lock.
+        let handle = std::thread::spawn(move || {
+            let _guard = clone.approval_policy.write().unwrap();
+            panic!("poison the approval policy lock");
+        });
+        assert!(handle.join().is_err());
+
+        let error = gate
+            .before_execute(&call("build", &[("crate", "scirust-core")]), &tool("build"))
+            .expect_err("poisoned policy state must fail closed");
+        assert!(error.contains("unavailable"), "{error}");
+        assert!(gate.set_approval_policy(ApprovalPolicy::Never).is_err());
     }
 
     struct CountingApprover {
