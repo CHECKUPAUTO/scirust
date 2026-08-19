@@ -1,6 +1,7 @@
 pub mod approval_audit;
 pub mod guard;
 pub mod permission;
+pub mod policy_store;
 mod sandbox;
 pub mod sandbox_approval;
 pub mod tool_runtime;
@@ -14,6 +15,10 @@ pub use guard::{ConformalGuard, GuardVerdict};
 pub use permission::{
     ApprovalChoice, ApprovalOutcome, ApprovalPolicy, PermissionDecision, PermissionGate,
     PermissionPolicy, PermissionRule, PermissionRuleStore, ScopedToolApprover, ToolApprover,
+};
+pub use policy_store::{
+    ApprovalPolicyEvent, ApprovalPolicyStore, FileApprovalPolicyStore, MemoryApprovalPolicyStore,
+    POLICY_GENESIS_HASH,
 };
 pub use sandbox_approval::{
     NoSandboxApprovalService, SandboxApprovalError, SandboxApprovalRequest, SandboxApprovalService,
