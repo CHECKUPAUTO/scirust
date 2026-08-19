@@ -770,7 +770,7 @@ pub mod certify {
 
     fn eval_tanh(x: f32) -> Option<(f64, f64)> {
         let ax = x.abs();
-        if x.is_nan() || ax >= 10.0 || ax < 1e-4
+        if x.is_nan() || !(1e-4..10.0).contains(&ax)
         {
             return None;
         }
@@ -848,7 +848,7 @@ pub mod certify {
 
     fn eval_erf(x: f32) -> Option<(f64, f64)> {
         let ax = x.abs();
-        if x.is_nan() || ax >= 4.0 || ax < 1e-4
+        if x.is_nan() || !(1e-4..4.0).contains(&ax)
         {
             return None;
         }
