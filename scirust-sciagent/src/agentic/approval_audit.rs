@@ -116,7 +116,8 @@ pub struct InMemoryApprovalAudit {
 
 impl InMemoryApprovalAudit {
     pub fn new(capacity: usize) -> Result<Self, String> {
-        if capacity == 0 {
+        if capacity == 0
+        {
             return Err("approval audit capacity must be greater than zero".to_string());
         }
         Ok(Self {
@@ -152,7 +153,8 @@ impl ApprovalAuditSink for InMemoryApprovalAudit {
             .events
             .lock()
             .map_err(|_| "approval audit journal is unavailable".to_string())?;
-        if events.len() == self.capacity {
+        if events.len() == self.capacity
+        {
             events.pop_front();
         }
         events.push_back(event);
@@ -179,11 +181,14 @@ impl ToolApprover for AuditedToolApprover {
         tool: &Tool,
         subject: &str,
     ) -> Result<ApprovalOutcome, String> {
-        self.audit
-            .record(ApprovalAuditEvent::tool_requested(&call.id, &call.tool, subject))?;
-        let outcome = match self.inner.approve(call, tool, subject) {
+        self.audit.record(ApprovalAuditEvent::tool_requested(
+            &call.id, &call.tool, subject,
+        ))?;
+        let outcome = match self.inner.approve(call, tool, subject)
+        {
             Ok(outcome) => outcome,
-            Err(error) => {
+            Err(error) =>
+            {
                 self.audit.record(ApprovalAuditEvent::tool_resolved(
                     &call.id,
                     &call.tool,
@@ -191,7 +196,7 @@ impl ToolApprover for AuditedToolApprover {
                     ApprovalResolution::Unavailable,
                 ))?;
                 return Err(error);
-            }
+            },
         };
         self.audit.record(ApprovalAuditEvent::tool_resolved(
             &call.id,
@@ -222,11 +227,14 @@ impl ScopedToolApprover for AuditedScopedToolApprover {
         tool: &Tool,
         subject: &str,
     ) -> Result<ApprovalChoice, String> {
-        self.audit
-            .record(ApprovalAuditEvent::tool_requested(&call.id, &call.tool, subject))?;
-        let choice = match self.inner.approve(call, tool, subject) {
+        self.audit.record(ApprovalAuditEvent::tool_requested(
+            &call.id, &call.tool, subject,
+        ))?;
+        let choice = match self.inner.approve(call, tool, subject)
+        {
             Ok(choice) => choice,
-            Err(error) => {
+            Err(error) =>
+            {
                 self.audit.record(ApprovalAuditEvent::tool_resolved(
                     &call.id,
                     &call.tool,
@@ -234,18 +242,16 @@ impl ScopedToolApprover for AuditedScopedToolApprover {
                     ApprovalResolution::Unavailable,
                 ))?;
                 return Err(error);
-            }
+            },
         };
-        let resolution = match choice {
+        let resolution = match choice
+        {
             ApprovalChoice::Once => ApprovalResolution::AllowedOnce,
             ApprovalChoice::Session => ApprovalResolution::AllowedSession,
             ApprovalChoice::Decline => ApprovalResolution::Rejected,
         };
         self.audit.record(ApprovalAuditEvent::tool_resolved(
-            &call.id,
-            &call.tool,
-            subject,
-            resolution,
+            &call.id, &call.tool, subject, resolution,
         ))?;
         Ok(choice)
     }
@@ -258,10 +264,7 @@ pub struct AuditedSandboxApprovalService {
 }
 
 impl AuditedSandboxApprovalService {
-    pub fn new(
-        inner: Arc<dyn SandboxApprovalService>,
-        audit: Arc<dyn ApprovalAuditSink>,
-    ) -> Self {
+    pub fn new(inner: Arc<dyn SandboxApprovalService>, audit: Arc<dyn ApprovalAuditSink>) -> Self {
         Self { inner, audit }
     }
 }
@@ -273,15 +276,17 @@ impl SandboxApprovalService for AuditedSandboxApprovalService {
     ) -> Result<ApprovalOutcome, String> {
         self.audit
             .record(ApprovalAuditEvent::sandbox_requested(request))?;
-        let outcome = match self.inner.request_approval(request) {
+        let outcome = match self.inner.request_approval(request)
+        {
             Ok(outcome) => outcome,
-            Err(error) => {
+            Err(error) =>
+            {
                 self.audit.record(ApprovalAuditEvent::sandbox_resolved(
                     request,
                     ApprovalResolution::Unavailable,
                 ))?;
                 return Err(error);
-            }
+            },
         };
         self.audit.record(ApprovalAuditEvent::sandbox_resolved(
             request,
@@ -292,7 +297,8 @@ impl SandboxApprovalService for AuditedSandboxApprovalService {
 }
 
 fn resolution_from_outcome(outcome: ApprovalOutcome) -> ApprovalResolution {
-    match outcome {
+    match outcome
+    {
         ApprovalOutcome::AllowedOnce => ApprovalResolution::AllowedOnce,
         ApprovalOutcome::Rejected => ApprovalResolution::Rejected,
         ApprovalOutcome::Cancelled => ApprovalResolution::Cancelled,
@@ -302,8 +308,8 @@ fn resolution_from_outcome(outcome: ApprovalOutcome) -> ApprovalResolution {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::sandbox_approval::SandboxPermission;
+    use super::*;
     use std::collections::HashMap;
 
     fn noop(_params: HashMap<String, String>) -> String {
@@ -412,7 +418,10 @@ mod tests {
             ApprovalChoice::Session
         );
         let events = audit.snapshot().unwrap();
-        assert_eq!(events[1].resolution, Some(ApprovalResolution::AllowedSession));
+        assert_eq!(
+            events[1].resolution,
+            Some(ApprovalResolution::AllowedSession)
+        );
     }
 
     #[test]
@@ -437,7 +446,10 @@ mod tests {
             events[0].requested_permission.as_deref(),
             Some("danger-full-access")
         );
-        assert_eq!(events[0].justification.as_deref(), Some("needs external linker"));
+        assert_eq!(
+            events[0].justification.as_deref(),
+            Some("needs external linker")
+        );
     }
 
     #[test]
