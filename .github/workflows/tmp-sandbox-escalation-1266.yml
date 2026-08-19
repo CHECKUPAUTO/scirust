@@ -1,0 +1,30 @@
+name: tmp-sandbox-escalation-1266-replay
+
+on:
+  workflow_dispatch:
+
+jobs:
+  inert:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('scirust-sciagent/src/agentic/sandbox.rs')
+          text = path.read_text()
+          needle = '''impl SandboxConfig {
+    fn from_env_with_override(requested: Option<SandboxPermission>) -> Result<Self, String> {
+'''
+          replacement = '''impl SandboxConfig {
+    fn from_env() -> Result<Self, String> {
+        Self::from_env_with_override(None)
+    }
+
+    fn from_env_with_override(requested: Option<SandboxPermission>) -> Result<Self, String> {
+'''
+          if text.count(needle) != 1:
+              raise SystemExit(f'expected SandboxConfig override seam once, found {text.count(needle)}')
+          path.write_text(text.replace(needle, replacement, 1))
+          PY
+
+          cargo +nightly-2026-07-02 fmt --all
