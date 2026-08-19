@@ -258,3 +258,4 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "feat(sciagent): add persistent approval scope"
           git push origin HEAD:feat/sciagent-persistent-approvals
+# retrigger 2026-08-19
