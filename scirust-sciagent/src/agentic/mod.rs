@@ -5,7 +5,8 @@ pub mod tool_runtime;
 pub mod tools;
 pub use guard::{ConformalGuard, GuardVerdict};
 pub use permission::{
-    PermissionDecision, PermissionGate, PermissionPolicy, PermissionRule, ToolApprover,
+    ApprovalChoice, PermissionDecision, PermissionGate, PermissionPolicy, PermissionRule,
+    ScopedToolApprover, ToolApprover,
 };
 pub use tool_runtime::{AllowAllPolicy, ToolCall, ToolPolicy, ToolRuntime, ToolRuntimeError};
 pub use tools::Tool;
