@@ -34,6 +34,41 @@ impl PermissionDecision {
     }
 }
 
+/// Closed result vocabulary for one exact one-shot approval request.
+///
+/// `AllowedOnce` authorizes only the current tool call and is never inserted
+/// into the session approval cache.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovalOutcome {
+    AllowedOnce,
+    Rejected,
+    Cancelled,
+    Unavailable,
+}
+
+impl ApprovalOutcome {
+    pub fn parse(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str()
+        {
+            "allowed-once" => Self::AllowedOnce,
+            "rejected" => Self::Rejected,
+            "cancelled" => Self::Cancelled,
+            "unavailable" => Self::Unavailable,
+            _ => Self::Unavailable,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self
+        {
+            Self::AllowedOnce => "allowed-once",
+            Self::Rejected => "rejected",
+            Self::Cancelled => "cancelled",
+            Self::Unavailable => "unavailable",
+        }
+    }
+}
+
 /// One tool-family rule with an optional subject selector.
 ///
 /// Accepted forms are `Tool`, `Tool(glob)`, and the compatibility form
@@ -228,9 +263,14 @@ pub trait ScopedToolApprover: Send + Sync {
     ) -> Result<ApprovalChoice, String>;
 }
 
-/// Compatibility resolver for callers that only need one-shot yes/no approval.
+/// One-shot resolver with a closed, fail-closed outcome vocabulary.
 pub trait ToolApprover: Send + Sync {
-    fn approve(&self, call: &ToolCall, tool: &Tool, subject: &str) -> Result<bool, String>;
+    fn approve(
+        &self,
+        call: &ToolCall,
+        tool: &Tool,
+        subject: &str,
+    ) -> Result<ApprovalOutcome, String>;
 }
 
 /// Runtime permission gate installed as a [`ToolPolicy`].
@@ -262,7 +302,7 @@ impl PermissionGate {
         Self::new(PermissionPolicy::from_env())
     }
 
-    /// Install the legacy boolean approver. Successful approvals are one-shot.
+    /// Install the typed one-shot approver. No outcome is remembered for the session.
     pub fn with_approver(policy: PermissionPolicy, approver: Arc<dyn ToolApprover>) -> Self {
         Self {
             policy,
@@ -388,22 +428,30 @@ impl ToolPolicy for PermissionGate {
                 let Some(approver) = self.approver.as_ref()
                 else
                 {
-                    return Err(
-                        "approval required but no approval service is available; refusing to execute"
-                            .to_string(),
-                    );
+                    return Err(approval_unavailable_error());
                 };
-                if approver.approve(call, tool, &subject)?
+                let outcome = approver
+                    .approve(call, tool, &subject)
+                    .unwrap_or(ApprovalOutcome::Unavailable);
+                match outcome
                 {
-                    Ok(())
-                }
-                else
-                {
-                    Err("the user declined this tool call; do not retry it unchanged".to_string())
+                    ApprovalOutcome::AllowedOnce => Ok(()),
+                    ApprovalOutcome::Rejected => Err(
+                        "the user declined this tool call; do not retry it unchanged".to_string(),
+                    ),
+                    ApprovalOutcome::Cancelled => Err(
+                        "approval for this tool call was cancelled; do not retry it unchanged"
+                            .to_string(),
+                    ),
+                    ApprovalOutcome::Unavailable => Err(approval_unavailable_error()),
                 }
             },
         }
     }
+}
+
+fn approval_unavailable_error() -> String {
+    "approval required but no approval service is available; refusing to execute".to_string()
 }
 
 fn session_tool_key(tool: &str) -> Result<String, String> {
@@ -677,27 +725,91 @@ mod tests {
 
     struct CountingApprover {
         calls: AtomicUsize,
-        allow: bool,
+        outcome: ApprovalOutcome,
+        fail: bool,
     }
 
     impl ToolApprover for CountingApprover {
-        fn approve(&self, _call: &ToolCall, _tool: &Tool, _subject: &str) -> Result<bool, String> {
+        fn approve(
+            &self,
+            _call: &ToolCall,
+            _tool: &Tool,
+            _subject: &str,
+        ) -> Result<ApprovalOutcome, String> {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(self.allow)
+            if self.fail
+            {
+                Err("approval transport failed".to_string())
+            }
+            else
+            {
+                Ok(self.outcome)
+            }
+        }
+    }
+
+    fn one_shot_approver(outcome: ApprovalOutcome) -> Arc<CountingApprover> {
+        Arc::new(CountingApprover {
+            calls: AtomicUsize::new(0),
+            outcome,
+            fail: false,
+        })
+    }
+
+    #[test]
+    fn approval_outcome_vocabulary_matches_harness() {
+        for (value, outcome) in [
+            ("allowed-once", ApprovalOutcome::AllowedOnce),
+            ("rejected", ApprovalOutcome::Rejected),
+            ("cancelled", ApprovalOutcome::Cancelled),
+            ("unavailable", ApprovalOutcome::Unavailable),
+        ]
+        {
+            assert_eq!(ApprovalOutcome::parse(value), outcome);
+            assert_eq!(outcome.label(), value);
+        }
+        assert_eq!(
+            ApprovalOutcome::parse("unexpected-answer"),
+            ApprovalOutcome::Unavailable
+        );
+    }
+
+    #[test]
+    fn rejected_cancelled_and_unavailable_one_shot_outcomes_fail_closed() {
+        for (outcome, needle) in [
+            (ApprovalOutcome::Rejected, "declined"),
+            (ApprovalOutcome::Cancelled, "cancelled"),
+            (
+                ApprovalOutcome::Unavailable,
+                "no approval service is available",
+            ),
+        ]
+        {
+            let approver = one_shot_approver(outcome);
+            let gate = PermissionGate::with_approver(PermissionPolicy::default(), approver.clone());
+            let error = gate
+                .before_execute(&call("test", &[("crate", "scirust-core")]), &tool("test"))
+                .expect_err("non-allow one-shot outcome must block");
+            assert!(error.contains(needle), "{error}");
+            assert_eq!(approver.calls.load(Ordering::SeqCst), 1);
         }
     }
 
     #[test]
-    fn approver_resolves_ask_before_execution() {
+    fn one_shot_approver_error_normalizes_to_unavailable() {
         let approver = Arc::new(CountingApprover {
             calls: AtomicUsize::new(0),
-            allow: false,
+            outcome: ApprovalOutcome::AllowedOnce,
+            fail: true,
         });
         let gate = PermissionGate::with_approver(PermissionPolicy::default(), approver.clone());
         let error = gate
             .before_execute(&call("test", &[("crate", "scirust-core")]), &tool("test"))
-            .expect_err("declined approval must block");
-        assert!(error.contains("declined"));
+            .expect_err("approver transport error must fail closed");
+        assert!(
+            error.contains("no approval service is available"),
+            "{error}"
+        );
         assert_eq!(approver.calls.load(Ordering::SeqCst), 1);
     }
 
@@ -814,11 +926,8 @@ mod tests {
     }
 
     #[test]
-    fn legacy_boolean_approvals_remain_one_shot() {
-        let approver = Arc::new(CountingApprover {
-            calls: AtomicUsize::new(0),
-            allow: true,
-        });
+    fn typed_allowed_once_is_never_cached_as_session_approval() {
+        let approver = one_shot_approver(ApprovalOutcome::AllowedOnce);
         let gate = PermissionGate::with_approver(PermissionPolicy::default(), approver.clone());
 
         gate.before_execute(&call("build", &[("crate", "scirust-core")]), &tool("build"))
@@ -832,10 +941,7 @@ mod tests {
 
     #[test]
     fn read_only_builtins_never_prompt_without_explicit_rule() {
-        let approver = Arc::new(CountingApprover {
-            calls: AtomicUsize::new(0),
-            allow: false,
-        });
+        let approver = one_shot_approver(ApprovalOutcome::Rejected);
         let gate = PermissionGate::with_approver(PermissionPolicy::default(), approver.clone());
         gate.before_execute(&call("read", &[("path", "README.md")]), &tool("read"))
             .expect("reader should be allowed by fallback");
