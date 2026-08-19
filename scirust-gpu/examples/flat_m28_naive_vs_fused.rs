@@ -207,7 +207,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let ctx = WgpuContext::new()?;
-    let pipeline = WgpuGroupedForwardPipeline::new(ctx.device())?;
+    // Use the qualified vec4 MHA path (M44/M6, D=64/128) rather than the
+    // portable default so the comparison measures FLAT's best qualified
+    // kernel for the benchmark geometry.
+    let pipeline = WgpuGroupedForwardPipeline::with_vectorization(ctx.device(), true)?;
     let shape = GroupedAttentionShape {
         batch: 1,
         q_heads: 1,
