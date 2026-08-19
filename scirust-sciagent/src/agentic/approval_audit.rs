@@ -3,26 +3,27 @@ use super::permission::{ApprovalChoice, ApprovalOutcome, ScopedToolApprover, Too
 use super::sandbox_approval::{SandboxApprovalRequest, SandboxApprovalService};
 use super::tool_runtime::ToolCall;
 use super::tools::Tool;
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// Approval channel whose lifecycle is being observed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ApprovalChannel {
     Tool,
     Sandbox,
 }
 
 /// Lifecycle phase for one correlated approval request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ApprovalLifecycle {
     Requested,
     Resolved,
 }
 
 /// Closed resolution vocabulary shared by supervision clients.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ApprovalResolution {
     AllowedOnce,
     AllowedSession,
@@ -38,7 +39,7 @@ pub enum ApprovalResolution {
 /// Resolved pair; `call_id` remains the correlation to the actual tool
 /// invocation. Sandbox events additionally carry the requested permission and
 /// justification. Tool events may carry a subject.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ApprovalAuditEvent {
     pub sequence: u64,
     pub channel: ApprovalChannel,
