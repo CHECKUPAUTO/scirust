@@ -1,4 +1,5 @@
 name: tmp-session-approvals-1263
+# Retrigger after PR 1264 creation.
 
 on:
   push:
@@ -246,7 +247,6 @@ fn session_tool_key(tool: &str) -> Result<String, String> {
 
           test_anchor = "\n    #[test]\n    fn read_only_builtins_never_prompt_without_explicit_rule() {"
           idx = text.index(test_anchor)
-          # Keep the existing final reader test, and insert new session tests immediately before it.
           tests = r'''
     struct SequenceScopedApprover {
         calls: AtomicUsize,
