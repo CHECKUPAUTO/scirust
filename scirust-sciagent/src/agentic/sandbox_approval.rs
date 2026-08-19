@@ -1,4 +1,4 @@
-use super::permission::{ApprovalOutcome, PermissionGate};
+use super::permission::{ApprovalOutcome, ApprovalPolicy, PermissionGate};
 use super::tool_runtime::{ToolCall, ToolPolicy};
 use super::tools::Tool;
 use std::fmt;
@@ -187,6 +187,13 @@ impl ToolPolicy for SandboxPermissionGate {
         _tool: &Tool,
         request: &SandboxApprovalRequest,
     ) -> Result<(), String> {
+        if self.permission.approval_policy()? == ApprovalPolicy::Never
+        {
+            return Err(
+                "approval policy is set to never; refusing sandbox escalation approval".to_string(),
+            );
+        }
+
         let Some(approver) = self.sandbox_approver.as_ref()
         else
         {
@@ -266,7 +273,7 @@ impl std::error::Error for SandboxApprovalError {}
 
 #[cfg(test)]
 mod tests {
-    use super::super::permission::{PermissionDecision, PermissionPolicy};
+    use super::super::permission::{ApprovalPolicy, PermissionDecision, PermissionPolicy};
     use super::*;
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -327,6 +334,57 @@ mod tests {
             Vec::new(),
             Vec::new(),
         ))
+    }
+
+    #[test]
+    fn never_policy_blocks_sandbox_before_approval_service() {
+        let permission = allow_tool_permission();
+        permission
+            .set_approval_policy(ApprovalPolicy::Never)
+            .unwrap();
+
+        let approver = Arc::new(FixedSandboxApprover {
+            calls: AtomicUsize::new(0),
+            outcome: ApprovalOutcome::AllowedOnce,
+            fail: false,
+        });
+        let gate = SandboxPermissionGate::with_approval_service(permission, approver.clone());
+        let call = ToolCall::new("call-7", "build", HashMap::new());
+        let escalation = request(
+            SandboxPermission::ReadOnly,
+            SandboxPermission::WorkspaceWrite,
+        )
+        .unwrap();
+
+        let error = gate
+            .approve_sandbox_escalation(&call, &synthetic_tool(), &escalation)
+            .expect_err("never must reject sandbox escalation before the approval service");
+
+        assert!(error.contains("approval policy is set to never"), "{error}");
+        assert_eq!(approver.calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn ask_policy_sandbox_escalation_still_uses_approval_service() {
+        let permission = allow_tool_permission();
+        assert_eq!(permission.approval_policy().unwrap(), ApprovalPolicy::Ask);
+
+        let approver = Arc::new(FixedSandboxApprover {
+            calls: AtomicUsize::new(0),
+            outcome: ApprovalOutcome::AllowedOnce,
+            fail: false,
+        });
+        let gate = SandboxPermissionGate::with_approval_service(permission, approver.clone());
+        let call = ToolCall::new("call-7", "build", HashMap::new());
+        let escalation = request(
+            SandboxPermission::ReadOnly,
+            SandboxPermission::WorkspaceWrite,
+        )
+        .unwrap();
+
+        gate.approve_sandbox_escalation(&call, &synthetic_tool(), &escalation)
+            .expect("ask policy must still route through the approval service");
+        assert_eq!(approver.calls.load(Ordering::SeqCst), 1);
     }
 
     #[test]
