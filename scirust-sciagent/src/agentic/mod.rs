@@ -1,8 +1,12 @@
 pub mod guard;
+pub mod permission;
 mod sandbox;
 pub mod tool_runtime;
 pub mod tools;
 pub use guard::{ConformalGuard, GuardVerdict};
+pub use permission::{
+    PermissionDecision, PermissionGate, PermissionPolicy, PermissionRule, ToolApprover,
+};
 pub use tool_runtime::{AllowAllPolicy, ToolCall, ToolPolicy, ToolRuntime, ToolRuntimeError};
 pub use tools::Tool;
 pub use tools::ToolResult;
@@ -28,7 +32,7 @@ pub struct AgentTurn {
 }
 
 pub struct AgentRouter {
-    runtime: ToolRuntime,
+    runtime: ToolRuntime<PermissionGate>,
 }
 
 impl Default for AgentRouter {
@@ -39,8 +43,19 @@ impl Default for AgentRouter {
 
 impl AgentRouter {
     pub fn new() -> Self {
+        Self::with_permission_gate(PermissionGate::from_env())
+    }
+
+    pub fn with_permission_policy(policy: PermissionPolicy) -> Self {
+        Self::with_permission_gate(PermissionGate::new(policy))
+    }
+
+    pub fn with_permission_gate(gate: PermissionGate) -> Self {
+        let mut tools = Tool::builtins();
+        sandbox::install_process_sandbox(&mut tools);
         Self {
-            runtime: ToolRuntime::builtins(),
+            runtime: ToolRuntime::new(tools, gate)
+                .expect("built-in SciAgent tool contracts must be valid"),
         }
     }
 
@@ -238,5 +253,23 @@ mod tests {
         };
         let result = router.execute(&action);
         assert!(result.contains("Missing required parameter"), "{result}");
+    }
+
+    #[test]
+    fn router_permission_policy_denies_before_tool_execution() {
+        let router = AgentRouter::with_permission_policy(PermissionPolicy::new(
+            PermissionDecision::Allow,
+            Vec::new(),
+            Vec::new(),
+            vec![PermissionRule::parse("search").expect("valid rule")],
+        ));
+        let action = AgentAction::Call {
+            tool: "search".to_string(),
+            params: [("pattern".to_string(), "NdMuon".to_string())]
+                .into_iter()
+                .collect(),
+        };
+        let result = router.execute(&action);
+        assert!(result.contains("denied by permission policy"), "{result}");
     }
 }
