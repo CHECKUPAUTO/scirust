@@ -1,16 +1,16 @@
 name: tmp-persistent-approval-1268
 
 on:
-  push:
-    branches: [feat/sciagent-persistent-approvals]
-    paths:
-      - ".github/workflows/tmp-persistent-approval-1268.yml"
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
 
 jobs:
   apply:
+    if: github.head_ref == 'feat/sciagent-persistent-approvals'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -258,4 +258,3 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "feat(sciagent): add persistent approval scope"
           git push origin HEAD:feat/sciagent-persistent-approvals
-# retrigger 2026-08-19
