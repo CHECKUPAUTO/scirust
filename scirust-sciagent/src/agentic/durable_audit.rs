@@ -1,7 +1,8 @@
 //! Durable approval audit — append-only session event log.
 //!
-//! [`InMemoryApprovalAudit`] remains the bounded, process-local journal for
-//! supervision UIs. [`FileApprovalAudit`] is the durable counterpart: every
+//! [`super::approval_audit::InMemoryApprovalAudit`] remains the bounded,
+//! process-local journal for supervision UIs. [`FileApprovalAudit`] is the
+//! durable counterpart: every
 //! event is appended as one JSON line and chained to the previous line with
 //! SHA-256, so ordering is deterministic, corruption or truncation is
 //! detectable, and a restart replays the exact same audit trail. A corrupt
