@@ -908,16 +908,20 @@ mod tests {
             .unwrap(),
             SandboxMode::DangerFullAccess
         );
-        assert!(resolve_effective_mode(
-            SandboxMode::WorkspaceWrite,
-            Some(SandboxPermission::ReadOnly),
-        )
-        .is_err());
-        assert!(resolve_effective_mode(
-            SandboxMode::WorkspaceWrite,
-            Some(SandboxPermission::WorkspaceWrite),
-        )
-        .is_err());
+        assert!(
+            resolve_effective_mode(
+                SandboxMode::WorkspaceWrite,
+                Some(SandboxPermission::ReadOnly),
+            )
+            .is_err()
+        );
+        assert!(
+            resolve_effective_mode(
+                SandboxMode::WorkspaceWrite,
+                Some(SandboxPermission::WorkspaceWrite),
+            )
+            .is_err()
+        );
     }
 
     #[test]
