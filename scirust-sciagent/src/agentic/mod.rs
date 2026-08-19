@@ -1,9 +1,15 @@
+pub mod approval_audit;
 pub mod guard;
 pub mod permission;
 mod sandbox;
 pub mod sandbox_approval;
 pub mod tool_runtime;
 pub mod tools;
+pub use approval_audit::{
+    ApprovalAuditEvent, ApprovalAuditSink, ApprovalChannel, ApprovalLifecycle, ApprovalResolution,
+    AuditedSandboxApprovalService, AuditedScopedToolApprover, AuditedToolApprover,
+    InMemoryApprovalAudit,
+};
 pub use guard::{ConformalGuard, GuardVerdict};
 pub use permission::{
     ApprovalChoice, ApprovalOutcome, PermissionDecision, PermissionGate, PermissionPolicy,
