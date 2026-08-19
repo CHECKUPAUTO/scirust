@@ -1,6 +1,7 @@
 use super::tool_runtime::{ToolCall, ToolPolicy};
 use super::tools::Tool;
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, RwLock};
 
 const SUBJECT_KEYS: &[&str] = &[
     "command",
@@ -206,19 +207,45 @@ impl PermissionPolicy {
     }
 }
 
-/// Interactive resolver for `Ask` decisions.
+/// One operator response to an `Ask` decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovalChoice {
+    /// Permit this call only; do not remember it.
+    Once,
+    /// Permit this tool family for the lifetime of this gate/session.
+    Session,
+    /// Refuse this call; do not remember the refusal.
+    Decline,
+}
+
+/// Interactive resolver that can distinguish one-shot and session approval.
+pub trait ScopedToolApprover: Send + Sync {
+    fn approve(
+        &self,
+        call: &ToolCall,
+        tool: &Tool,
+        subject: &str,
+    ) -> Result<ApprovalChoice, String>;
+}
+
+/// Compatibility resolver for callers that only need one-shot yes/no approval.
 pub trait ToolApprover: Send + Sync {
     fn approve(&self, call: &ToolCall, tool: &Tool, subject: &str) -> Result<bool, String>;
 }
 
 /// Runtime permission gate installed as a [`ToolPolicy`].
 ///
-/// A missing approver fails closed for `Ask`, matching the DeepSeek user-approval
-/// seam. Explicit `Deny` rules always block before the tool callback and before
-/// sandbox execution.
+/// Session approval follows the DeepSeek harness contract: choosing `Session`
+/// remembers the normalized tool name, not the individual parameters. The
+/// memory is process-local, shared only by clones of this gate, and never
+/// persisted. Static `Deny` rules are evaluated first and therefore always
+/// override a remembered session approval.
+#[derive(Clone)]
 pub struct PermissionGate {
     policy: PermissionPolicy,
     approver: Option<Arc<dyn ToolApprover>>,
+    scoped_approver: Option<Arc<dyn ScopedToolApprover>>,
+    session_approved_tools: Arc<RwLock<HashSet<String>>>,
 }
 
 impl PermissionGate {
@@ -226,6 +253,8 @@ impl PermissionGate {
         Self {
             policy,
             approver: None,
+            scoped_approver: None,
+            session_approved_tools: Arc::new(RwLock::new(HashSet::new())),
         }
     }
 
@@ -233,15 +262,93 @@ impl PermissionGate {
         Self::new(PermissionPolicy::from_env())
     }
 
+    /// Install the legacy boolean approver. Successful approvals are one-shot.
     pub fn with_approver(policy: PermissionPolicy, approver: Arc<dyn ToolApprover>) -> Self {
         Self {
             policy,
             approver: Some(approver),
+            scoped_approver: None,
+            session_approved_tools: Arc::new(RwLock::new(HashSet::new())),
+        }
+    }
+
+    /// Install an approver that can return `Once`, `Session`, or `Decline`.
+    pub fn with_scoped_approver(
+        policy: PermissionPolicy,
+        approver: Arc<dyn ScopedToolApprover>,
+    ) -> Self {
+        Self {
+            policy,
+            approver: None,
+            scoped_approver: Some(approver),
+            session_approved_tools: Arc::new(RwLock::new(HashSet::new())),
         }
     }
 
     pub fn policy(&self) -> &PermissionPolicy {
         &self.policy
+    }
+
+    /// Remember one tool family for this in-memory session.
+    pub fn approve_tool_for_session(&self, tool: &str) -> Result<(), String> {
+        let key = session_tool_key(tool)?;
+        self.session_approved_tools
+            .write()
+            .map_err(|_| {
+                "session approval memory is unavailable; refusing to mutate it".to_string()
+            })?
+            .insert(key);
+        Ok(())
+    }
+
+    /// Remove one remembered tool family. Returns whether a grant existed.
+    pub fn revoke_tool_for_session(&self, tool: &str) -> Result<bool, String> {
+        let key = session_tool_key(tool)?;
+        Ok(self
+            .session_approved_tools
+            .write()
+            .map_err(|_| {
+                "session approval memory is unavailable; refusing to mutate it".to_string()
+            })?
+            .remove(&key))
+    }
+
+    /// Forget every remembered session approval.
+    pub fn clear_session_approvals(&self) -> Result<(), String> {
+        self.session_approved_tools
+            .write()
+            .map_err(|_| {
+                "session approval memory is unavailable; refusing to mutate it".to_string()
+            })?
+            .clear();
+        Ok(())
+    }
+
+    /// Query a remembered tool family. Lock failure is fail-closed.
+    pub fn is_tool_approved_for_session(&self, tool: &str) -> Result<bool, String> {
+        let key = session_tool_key(tool)?;
+        Ok(self
+            .session_approved_tools
+            .read()
+            .map_err(|_| {
+                "session approval memory is unavailable; refusing remembered approval".to_string()
+            })?
+            .contains(&key))
+    }
+
+    /// Return a stable, sorted snapshot suitable for a supervision UI.
+    pub fn session_approved_tools(&self) -> Result<Vec<String>, String> {
+        let mut tools = self
+            .session_approved_tools
+            .read()
+            .map_err(|_| {
+                "session approval memory is unavailable; refusing remembered approval".to_string()
+            })?
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        tools.sort();
+        Ok(tools)
     }
 }
 
@@ -255,6 +362,29 @@ impl ToolPolicy for PermissionGate {
             ),
             PermissionDecision::Ask =>
             {
+                if self.is_tool_approved_for_session(&call.tool)?
+                {
+                    return Ok(());
+                }
+
+                let subject = primary_subject(call);
+                if let Some(approver) = self.scoped_approver.as_ref()
+                {
+                    return match approver.approve(call, tool, &subject)?
+                    {
+                        ApprovalChoice::Once => Ok(()),
+                        ApprovalChoice::Session =>
+                        {
+                            self.approve_tool_for_session(&call.tool)?;
+                            Ok(())
+                        },
+                        ApprovalChoice::Decline => Err(
+                            "the user declined this tool call; do not retry it unchanged"
+                                .to_string(),
+                        ),
+                    };
+                }
+
                 let Some(approver) = self.approver.as_ref()
                 else
                 {
@@ -263,7 +393,6 @@ impl ToolPolicy for PermissionGate {
                             .to_string(),
                     );
                 };
-                let subject = primary_subject(call);
                 if approver.approve(call, tool, &subject)?
                 {
                     Ok(())
@@ -275,6 +404,15 @@ impl ToolPolicy for PermissionGate {
             },
         }
     }
+}
+
+fn session_tool_key(tool: &str) -> Result<String, String> {
+    let tool = tool.trim();
+    if tool.is_empty()
+    {
+        return Err("cannot remember approval for an empty tool name".to_string());
+    }
+    Ok(tool.to_ascii_lowercase())
 }
 
 /// Built-ins with no side effects outside observation are readers. Unknown or
@@ -380,7 +518,8 @@ fn glob_matches(pattern: &str, value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, VecDeque};
+    use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn call(tool: &str, params: &[(&str, &str)]) -> ToolCall {
@@ -560,6 +699,135 @@ mod tests {
             .expect_err("declined approval must block");
         assert!(error.contains("declined"));
         assert_eq!(approver.calls.load(Ordering::SeqCst), 1);
+    }
+
+    struct SequenceScopedApprover {
+        calls: AtomicUsize,
+        choices: Mutex<VecDeque<ApprovalChoice>>,
+    }
+
+    impl SequenceScopedApprover {
+        fn new(choices: impl IntoIterator<Item = ApprovalChoice>) -> Self {
+            Self {
+                calls: AtomicUsize::new(0),
+                choices: Mutex::new(choices.into_iter().collect()),
+            }
+        }
+    }
+
+    impl ScopedToolApprover for SequenceScopedApprover {
+        fn approve(
+            &self,
+            _call: &ToolCall,
+            _tool: &Tool,
+            _subject: &str,
+        ) -> Result<ApprovalChoice, String> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.choices
+                .lock()
+                .map_err(|_| "test approval queue poisoned".to_string())?
+                .pop_front()
+                .ok_or_else(|| "no test approval choice remains".to_string())
+        }
+    }
+
+    #[test]
+    fn session_choice_caches_only_the_tool_family() {
+        let approver = Arc::new(SequenceScopedApprover::new([
+            ApprovalChoice::Session,
+            ApprovalChoice::Once,
+        ]));
+        let gate =
+            PermissionGate::with_scoped_approver(PermissionPolicy::default(), approver.clone());
+
+        gate.before_execute(&call("build", &[("crate", "scirust-core")]), &tool("build"))
+            .expect("first build should receive session approval");
+        gate.before_execute(
+            &call("build", &[("crate", "scirust-stats")]),
+            &tool("build"),
+        )
+        .expect("same tool should use remembered session approval");
+        gate.before_execute(&call("test", &[("crate", "scirust-core")]), &tool("test"))
+            .expect("different tool should request its own approval");
+
+        assert_eq!(approver.calls.load(Ordering::SeqCst), 2);
+        assert_eq!(gate.session_approved_tools().unwrap(), vec!["build"]);
+    }
+
+    #[test]
+    fn one_shot_and_decline_are_never_cached() {
+        let approver = Arc::new(SequenceScopedApprover::new([
+            ApprovalChoice::Once,
+            ApprovalChoice::Decline,
+        ]));
+        let gate =
+            PermissionGate::with_scoped_approver(PermissionPolicy::default(), approver.clone());
+
+        gate.before_execute(&call("build", &[("crate", "scirust-core")]), &tool("build"))
+            .expect("one-shot approval should permit the first call");
+        let error = gate
+            .before_execute(&call("build", &[("crate", "scirust-core")]), &tool("build"))
+            .expect_err("second call should prompt and be declined");
+
+        assert!(error.contains("declined"), "{error}");
+        assert_eq!(approver.calls.load(Ordering::SeqCst), 2);
+        assert!(gate.session_approved_tools().unwrap().is_empty());
+    }
+
+    #[test]
+    fn static_deny_overrides_remembered_session_approval() {
+        let policy = PermissionPolicy::new(
+            PermissionDecision::Ask,
+            Vec::new(),
+            Vec::new(),
+            vec![rule("build(secret-*)")],
+        );
+        let gate = PermissionGate::new(policy);
+        gate.approve_tool_for_session("BUILD").unwrap();
+
+        gate.before_execute(&call("build", &[("crate", "scirust-core")]), &tool("build"))
+            .expect("remembered build approval should satisfy an ordinary ask");
+        let error = gate
+            .before_execute(&call("build", &[("crate", "secret-model")]), &tool("build"))
+            .expect_err("explicit deny must dominate remembered approval");
+        assert!(error.contains("denied by permission policy"), "{error}");
+    }
+
+    #[test]
+    fn session_approvals_are_revocable_clearable_and_process_local() {
+        let gate = PermissionGate::new(PermissionPolicy::default());
+        let clone = gate.clone();
+        gate.approve_tool_for_session("Build").unwrap();
+        gate.approve_tool_for_session("test").unwrap();
+
+        assert_eq!(
+            clone.session_approved_tools().unwrap(),
+            vec!["build".to_string(), "test".to_string()]
+        );
+        assert!(clone.revoke_tool_for_session("BUILD").unwrap());
+        assert!(!gate.is_tool_approved_for_session("build").unwrap());
+        clone.clear_session_approvals().unwrap();
+        assert!(gate.session_approved_tools().unwrap().is_empty());
+
+        let fresh_gate = PermissionGate::new(PermissionPolicy::default());
+        assert!(!fresh_gate.is_tool_approved_for_session("test").unwrap());
+    }
+
+    #[test]
+    fn legacy_boolean_approvals_remain_one_shot() {
+        let approver = Arc::new(CountingApprover {
+            calls: AtomicUsize::new(0),
+            allow: true,
+        });
+        let gate = PermissionGate::with_approver(PermissionPolicy::default(), approver.clone());
+
+        gate.before_execute(&call("build", &[("crate", "scirust-core")]), &tool("build"))
+            .unwrap();
+        gate.before_execute(&call("build", &[("crate", "scirust-core")]), &tool("build"))
+            .unwrap();
+
+        assert_eq!(approver.calls.load(Ordering::SeqCst), 2);
+        assert!(gate.session_approved_tools().unwrap().is_empty());
     }
 
     #[test]
