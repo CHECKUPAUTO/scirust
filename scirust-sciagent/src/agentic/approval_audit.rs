@@ -1,3 +1,4 @@
+use super::approval_request::ApprovalRequestId;
 use super::permission::{ApprovalChoice, ApprovalOutcome, ScopedToolApprover, ToolApprover};
 use super::sandbox_approval::{SandboxApprovalRequest, SandboxApprovalService};
 use super::tool_runtime::ToolCall;
@@ -33,13 +34,16 @@ pub enum ApprovalResolution {
 
 /// One machine-readable approval lifecycle event.
 ///
-/// `call_id` is the correlation key. Sandbox events additionally carry the
-/// requested permission and justification. Tool events may carry a subject.
+/// `request_id` is the strong [`ApprovalRequestId`] shared by a Requested /
+/// Resolved pair; `call_id` remains the correlation to the actual tool
+/// invocation. Sandbox events additionally carry the requested permission and
+/// justification. Tool events may carry a subject.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApprovalAuditEvent {
     pub sequence: u64,
     pub channel: ApprovalChannel,
     pub lifecycle: ApprovalLifecycle,
+    pub request_id: Option<ApprovalRequestId>,
     pub call_id: String,
     pub tool: String,
     pub subject: Option<String>,
@@ -54,6 +58,7 @@ impl ApprovalAuditEvent {
             sequence: 0,
             channel: ApprovalChannel::Tool,
             lifecycle: ApprovalLifecycle::Requested,
+            request_id: None,
             call_id: call_id.to_string(),
             tool: tool.to_string(),
             subject: (!subject.is_empty()).then(|| subject.to_string()),
@@ -61,6 +66,17 @@ impl ApprovalAuditEvent {
             justification: None,
             resolution: None,
         }
+    }
+
+    pub fn tool_requested_with_id(
+        request_id: ApprovalRequestId,
+        call_id: &str,
+        tool: &str,
+        subject: &str,
+    ) -> Self {
+        let mut event = Self::tool_requested(call_id, tool, subject);
+        event.request_id = Some(request_id);
+        event
     }
 
     pub fn tool_resolved(
@@ -75,11 +91,24 @@ impl ApprovalAuditEvent {
         event
     }
 
+    pub fn tool_resolved_with_id(
+        request_id: ApprovalRequestId,
+        call_id: &str,
+        tool: &str,
+        subject: &str,
+        resolution: ApprovalResolution,
+    ) -> Self {
+        let mut event = Self::tool_resolved(call_id, tool, subject, resolution);
+        event.request_id = Some(request_id);
+        event
+    }
+
     pub fn sandbox_requested(request: &SandboxApprovalRequest) -> Self {
         Self {
             sequence: 0,
             channel: ApprovalChannel::Sandbox,
             lifecycle: ApprovalLifecycle::Requested,
+            request_id: None,
             call_id: request.call_id.clone(),
             tool: request.tool.clone(),
             subject: None,
@@ -89,6 +118,15 @@ impl ApprovalAuditEvent {
         }
     }
 
+    pub fn sandbox_requested_with_id(
+        request_id: ApprovalRequestId,
+        request: &SandboxApprovalRequest,
+    ) -> Self {
+        let mut event = Self::sandbox_requested(request);
+        event.request_id = Some(request_id);
+        event
+    }
+
     pub fn sandbox_resolved(
         request: &SandboxApprovalRequest,
         resolution: ApprovalResolution,
@@ -96,6 +134,16 @@ impl ApprovalAuditEvent {
         let mut event = Self::sandbox_requested(request);
         event.lifecycle = ApprovalLifecycle::Resolved;
         event.resolution = Some(resolution);
+        event
+    }
+
+    pub fn sandbox_resolved_with_id(
+        request_id: ApprovalRequestId,
+        request: &SandboxApprovalRequest,
+        resolution: ApprovalResolution,
+    ) -> Self {
+        let mut event = Self::sandbox_resolved(request, resolution);
+        event.request_id = Some(request_id);
         event
     }
 }
@@ -182,29 +230,38 @@ impl ToolApprover for AuditedToolApprover {
         tool: &Tool,
         subject: &str,
     ) -> Result<ApprovalOutcome, String> {
-        self.audit.record(ApprovalAuditEvent::tool_requested(
-            &call.id, &call.tool, subject,
-        ))?;
+        let request_id = ApprovalRequestId::generate();
+        self.audit
+            .record(ApprovalAuditEvent::tool_requested_with_id(
+                request_id.clone(),
+                &call.id,
+                &call.tool,
+                subject,
+            ))?;
         let outcome = match self.inner.approve(call, tool, subject)
         {
             Ok(outcome) => outcome,
             Err(error) =>
             {
-                self.audit.record(ApprovalAuditEvent::tool_resolved(
-                    &call.id,
-                    &call.tool,
-                    subject,
-                    ApprovalResolution::Unavailable,
-                ))?;
+                self.audit
+                    .record(ApprovalAuditEvent::tool_resolved_with_id(
+                        request_id,
+                        &call.id,
+                        &call.tool,
+                        subject,
+                        ApprovalResolution::Unavailable,
+                    ))?;
                 return Err(error);
             },
         };
-        self.audit.record(ApprovalAuditEvent::tool_resolved(
-            &call.id,
-            &call.tool,
-            subject,
-            resolution_from_outcome(outcome),
-        ))?;
+        self.audit
+            .record(ApprovalAuditEvent::tool_resolved_with_id(
+                request_id,
+                &call.id,
+                &call.tool,
+                subject,
+                resolution_from_outcome(outcome),
+            ))?;
         Ok(outcome)
     }
 }
@@ -228,20 +285,27 @@ impl ScopedToolApprover for AuditedScopedToolApprover {
         tool: &Tool,
         subject: &str,
     ) -> Result<ApprovalChoice, String> {
-        self.audit.record(ApprovalAuditEvent::tool_requested(
-            &call.id, &call.tool, subject,
-        ))?;
+        let request_id = ApprovalRequestId::generate();
+        self.audit
+            .record(ApprovalAuditEvent::tool_requested_with_id(
+                request_id.clone(),
+                &call.id,
+                &call.tool,
+                subject,
+            ))?;
         let choice = match self.inner.approve(call, tool, subject)
         {
             Ok(choice) => choice,
             Err(error) =>
             {
-                self.audit.record(ApprovalAuditEvent::tool_resolved(
-                    &call.id,
-                    &call.tool,
-                    subject,
-                    ApprovalResolution::Unavailable,
-                ))?;
+                self.audit
+                    .record(ApprovalAuditEvent::tool_resolved_with_id(
+                        request_id,
+                        &call.id,
+                        &call.tool,
+                        subject,
+                        ApprovalResolution::Unavailable,
+                    ))?;
                 return Err(error);
             },
         };
@@ -252,9 +316,10 @@ impl ScopedToolApprover for AuditedScopedToolApprover {
             ApprovalChoice::Always => ApprovalResolution::AllowedPersistent,
             ApprovalChoice::Decline => ApprovalResolution::Rejected,
         };
-        self.audit.record(ApprovalAuditEvent::tool_resolved(
-            &call.id, &call.tool, subject, resolution,
-        ))?;
+        self.audit
+            .record(ApprovalAuditEvent::tool_resolved_with_id(
+                request_id, &call.id, &call.tool, subject, resolution,
+            ))?;
         Ok(choice)
     }
 }
@@ -276,24 +341,32 @@ impl SandboxApprovalService for AuditedSandboxApprovalService {
         &self,
         request: &SandboxApprovalRequest,
     ) -> Result<ApprovalOutcome, String> {
+        let request_id = ApprovalRequestId::generate();
         self.audit
-            .record(ApprovalAuditEvent::sandbox_requested(request))?;
+            .record(ApprovalAuditEvent::sandbox_requested_with_id(
+                request_id.clone(),
+                request,
+            ))?;
         let outcome = match self.inner.request_approval(request)
         {
             Ok(outcome) => outcome,
             Err(error) =>
             {
-                self.audit.record(ApprovalAuditEvent::sandbox_resolved(
-                    request,
-                    ApprovalResolution::Unavailable,
-                ))?;
+                self.audit
+                    .record(ApprovalAuditEvent::sandbox_resolved_with_id(
+                        request_id,
+                        request,
+                        ApprovalResolution::Unavailable,
+                    ))?;
                 return Err(error);
             },
         };
-        self.audit.record(ApprovalAuditEvent::sandbox_resolved(
-            request,
-            resolution_from_outcome(outcome),
-        ))?;
+        self.audit
+            .record(ApprovalAuditEvent::sandbox_resolved_with_id(
+                request_id,
+                request,
+                resolution_from_outcome(outcome),
+            ))?;
         Ok(outcome)
     }
 }
@@ -481,6 +554,82 @@ mod tests {
             events[0].justification.as_deref(),
             Some("needs external linker")
         );
+    }
+
+    #[test]
+    fn audited_pair_shares_one_request_id() {
+        let audit = Arc::new(InMemoryApprovalAudit::new(8).unwrap());
+        let approver = AuditedToolApprover::new(Arc::new(AllowOnce), audit.clone());
+        let call = ToolCall::new("call-1", "build", HashMap::new());
+        approver.approve(&call, &tool(), "scirust-core").unwrap();
+        let events = audit.snapshot().unwrap();
+        assert_eq!(events.len(), 2);
+        let requested = &events[0];
+        let resolved = &events[1];
+        assert_eq!(requested.lifecycle, ApprovalLifecycle::Requested);
+        assert_eq!(resolved.lifecycle, ApprovalLifecycle::Resolved);
+        let request_id = requested.request_id.as_ref().expect("requested id");
+        assert_eq!(
+            resolved.request_id.as_ref(),
+            Some(request_id),
+            "the pair must share the same ApprovalRequestId"
+        );
+        assert_eq!(requested.call_id, "call-1");
+        assert_eq!(resolved.call_id, "call-1");
+        assert!(request_id.is_valid());
+    }
+
+    #[test]
+    fn same_call_twice_gets_two_distinct_request_ids() {
+        let audit = Arc::new(InMemoryApprovalAudit::new(8).unwrap());
+        let approver = AuditedToolApprover::new(Arc::new(AllowOnce), audit.clone());
+        let call = ToolCall::new("call-1", "build", HashMap::new());
+        approver.approve(&call, &tool(), "scirust-core").unwrap();
+        approver.approve(&call, &tool(), "scirust-core").unwrap();
+        let events = audit.snapshot().unwrap();
+        let first = events[0].request_id.as_ref().unwrap();
+        let second = events[2].request_id.as_ref().unwrap();
+        assert_ne!(first, second, "each new question needs a fresh id");
+        assert_eq!(events[0].call_id, events[2].call_id);
+    }
+
+    #[test]
+    fn audited_sandbox_pair_shares_one_request_id() {
+        let audit = Arc::new(InMemoryApprovalAudit::new(8).unwrap());
+        let approver = AuditedSandboxApprovalService::new(Arc::new(AllowOnce), audit.clone());
+        let request = SandboxApprovalRequest::new(
+            "call-3",
+            "build",
+            SandboxPermission::WorkspaceWrite,
+            SandboxPermission::DangerFullAccess,
+            "needs external linker",
+        )
+        .unwrap();
+        approver.request_approval(&request).unwrap();
+        let events = audit.snapshot().unwrap();
+        let requested = events[0].request_id.as_ref().unwrap();
+        assert_eq!(events[1].request_id.as_ref(), Some(requested));
+        assert_eq!(events[0].call_id, "call-3");
+    }
+
+    #[test]
+    fn sandbox_pair_preserves_call_id_and_tool() {
+        let audit = Arc::new(InMemoryApprovalAudit::new(8).unwrap());
+        let approver = AuditedSandboxApprovalService::new(Arc::new(AllowOnce), audit.clone());
+        let request = SandboxApprovalRequest::new(
+            "call-9",
+            "build",
+            SandboxPermission::ReadOnly,
+            SandboxPermission::WorkspaceWrite,
+            "needs wider fs",
+        )
+        .unwrap();
+        approver.request_approval(&request).unwrap();
+        let events = audit.snapshot().unwrap();
+        assert_eq!(events[0].call_id, "call-9");
+        assert_eq!(events[0].tool, "build");
+        assert_eq!(events[1].call_id, "call-9");
+        assert_eq!(events[1].tool, "build");
     }
 
     #[test]

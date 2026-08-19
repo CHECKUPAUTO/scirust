@@ -1,4 +1,5 @@
 pub mod approval_audit;
+pub mod approval_request;
 pub mod guard;
 pub mod permission;
 pub mod policy_store;
@@ -11,6 +12,7 @@ pub use approval_audit::{
     AuditedSandboxApprovalService, AuditedScopedToolApprover, AuditedToolApprover,
     InMemoryApprovalAudit,
 };
+pub use approval_request::{APPROVAL_REQUEST_ID_CHARS, ApprovalRequestId, ApprovalRequestIdError};
 pub use guard::{ConformalGuard, GuardVerdict};
 pub use permission::{
     ApprovalChoice, ApprovalOutcome, ApprovalPolicy, PermissionDecision, PermissionGate,
