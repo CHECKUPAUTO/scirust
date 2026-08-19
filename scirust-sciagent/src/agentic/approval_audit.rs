@@ -25,6 +25,7 @@ pub enum ApprovalLifecycle {
 pub enum ApprovalResolution {
     AllowedOnce,
     AllowedSession,
+    AllowedPersistent,
     Rejected,
     Cancelled,
     Unavailable,
@@ -248,6 +249,7 @@ impl ScopedToolApprover for AuditedScopedToolApprover {
         {
             ApprovalChoice::Once => ApprovalResolution::AllowedOnce,
             ApprovalChoice::Session => ApprovalResolution::AllowedSession,
+            ApprovalChoice::Always => ApprovalResolution::AllowedPersistent,
             ApprovalChoice::Decline => ApprovalResolution::Rejected,
         };
         self.audit.record(ApprovalAuditEvent::tool_resolved(
@@ -360,6 +362,19 @@ mod tests {
         }
     }
 
+    struct AllowPersistent;
+
+    impl ScopedToolApprover for AllowPersistent {
+        fn approve(
+            &self,
+            _call: &ToolCall,
+            _tool: &Tool,
+            _subject: &str,
+        ) -> Result<ApprovalChoice, String> {
+            Ok(ApprovalChoice::Always)
+        }
+    }
+
     #[test]
     fn bounded_journal_is_ordered_and_evicts_oldest() {
         let audit = InMemoryApprovalAudit::new(2).unwrap();
@@ -421,6 +436,22 @@ mod tests {
         assert_eq!(
             events[1].resolution,
             Some(ApprovalResolution::AllowedSession)
+        );
+    }
+
+    #[test]
+    fn audited_scoped_tool_approval_records_persistent_resolution() {
+        let audit = Arc::new(InMemoryApprovalAudit::new(8).unwrap());
+        let approver = AuditedScopedToolApprover::new(Arc::new(AllowPersistent), audit.clone());
+        let call = ToolCall::new("call-persist", "build", HashMap::new());
+        assert_eq!(
+            approver.approve(&call, &tool(), "scirust-core").unwrap(),
+            ApprovalChoice::Always
+        );
+        let events = audit.snapshot().unwrap();
+        assert_eq!(
+            events[1].resolution,
+            Some(ApprovalResolution::AllowedPersistent)
         );
     }
 
