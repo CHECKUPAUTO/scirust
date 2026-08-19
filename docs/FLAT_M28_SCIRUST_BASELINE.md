@@ -41,4 +41,25 @@ The release-evidence sweep covers `seq_len` 128 and 512 with `head_dim` 64 and 1
 
 This workflow is evidence collection, not a performance assertion. A release-level improvement statement may be promoted only after the exact-head output has been inspected and accepted for the explicitly measured workload(s). Any run collected while Thor occupancy is unverified or while another compute workload is active is rejected as release evidence. Software-adapter timing does not substitute for this physical-device evidence.
 
+## Accepted physical Thor evidence (2026-08-19)
+
+GitHub Actions run `32304299752` on exact SciRust head `f326c6cb3ea16fb5d05f750df2e16e6c8240cdc0` (PR #1283, FLAT pinned to `43b4c0ba`) executed successfully on the persistent physical Thor runner, adapter `NVIDIA Tegra NVIDIA Thor`, backend Vulkan. The full protocol was enforced: exact-head checkout, compile before GPU reservation, GPU lock with independent contention proof, Thor/Vulkan identity verification, idle/cooldown window, contamination watchdog, alternating three-path rotation, oracle correctness gate before timing, and empty post-run occupancy.
+
+Recorded rows (MHA batch=1 heads=1, 3 warmups, 9 repeats, medians in microseconds):
+
+| seq | dim | causal | naive multi-dispatch µs | FLAT fresh µs | FLAT reused µs | naive / FLAT fresh | naive parity max abs | FLAT parity max abs |
+|---:|---:|:---:|---:|---:|---:|---:|---:|---:|
+| 128 | 64 | no | 521.880 | 1680.178 | 1679.308 | 0.310610 | 0.00000101 | 0.00000036 |
+| 128 | 64 | yes | 376.473 | 430.704 | 426.686 | 0.874088 | 0.00000048 | 0.00000036 |
+| 128 | 128 | no | 274.056 | 531.769 | 524.427 | 0.515367 | 0.00000077 | 0.00000042 |
+| 128 | 128 | yes | 277.241 | 534.899 | 529.871 | 0.518305 | 0.00000072 | 0.00000036 |
+| 512 | 64 | no | 847.298 | 2788.716 | 2789.060 | 0.303831 | 0.00000179 | 0.00000060 |
+| 512 | 64 | yes | 828.991 | 1904.548 | 1892.188 | 0.435269 | 0.00000137 | 0.00000060 |
+| 512 | 128 | no | 1250.399 | 3092.440 | 3086.263 | 0.404341 | 0.00000167 | 0.00000072 |
+| 512 | 128 | yes | 1244.270 | 2088.678 | 2096.215 | 0.595721 | 0.00000125 | 0.00000060 |
+
+**Negative result.** The FLAT fused grouped-forward pipeline is slower than the SciRust naive multi-dispatch baseline in all eight measured MHA rows (naive/FLAT ratios 0.30–0.87). Correctness parity is excellent (FLAT parity errors are lower than naive in every row), but the roadmap 1.0 performance gate — measured improvement over SciRust's previous multi-dispatch attention for supported target workloads — is **not satisfied** by the FLAT grouped-forward pipeline for these MHA prefill geometries on physical Thor.
+
+This evidence identifies the bottleneck: the FLAT grouped-forward prefill path on Thor. The M48 decode (1.17x–1.22x over M15) and M53 asymmetric prefill vec4 (1.09x–1.18x over portable) candidates remain separate, device/workload-scoped evidence and do not close this gate. `performance_claim=none` remains in force; this negative result is retained as required by the Phase O retention rule.
+
 The sovereignty boundary is unchanged: Rust-native host code and WGPU/WGSL only; no project-authored C/C++ or C ABI bridge and no mandatory CUDA C++/`nvcc`, WMMA/WGMMA, CUTLASS, cuDNN or vendor SDK.
