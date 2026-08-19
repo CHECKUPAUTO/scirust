@@ -1,5 +1,6 @@
 pub mod approval_audit;
 pub mod approval_request;
+pub mod approval_service;
 pub mod durable_audit;
 pub mod guard;
 pub mod permission;
@@ -14,6 +15,10 @@ pub use approval_audit::{
     InMemoryApprovalAudit,
 };
 pub use approval_request::{APPROVAL_REQUEST_ID_CHARS, ApprovalRequestId, ApprovalRequestIdError};
+pub use approval_service::{
+    ApprovalAnswer, ApprovalAnswerer, ApprovalRequest, ApprovalRequestWire, ApprovalService,
+    CancellationToken, PendingApprovals, ResolvedApproval,
+};
 pub use durable_audit::{AUDIT_GENESIS_HASH, DurableAuditEntry, FileApprovalAudit};
 pub use guard::{ConformalGuard, GuardVerdict};
 pub use permission::{
