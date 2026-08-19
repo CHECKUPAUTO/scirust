@@ -1,5 +1,9 @@
+use super::sandbox_approval::SandboxApprovalRequest;
 use super::tools::{Tool, ToolParam};
 use std::collections::{HashMap, HashSet};
+
+pub const SANDBOX_PERMISSIONS_METADATA: &str = "sandbox_permissions";
+pub const JUSTIFICATION_METADATA: &str = "justification";
 
 /// A validated tool invocation presented to runtime policy hooks.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -7,6 +11,8 @@ pub struct ToolCall {
     pub id: String,
     pub tool: String,
     pub params: HashMap<String, String>,
+    pub sandbox_permissions: Option<String>,
+    pub justification: Option<String>,
 }
 
 impl ToolCall {
@@ -19,7 +25,19 @@ impl ToolCall {
             id: id.into(),
             tool: tool.into(),
             params,
+            sandbox_permissions: None,
+            justification: None,
         }
+    }
+
+    pub fn with_sandbox_metadata(
+        mut self,
+        sandbox_permissions: Option<String>,
+        justification: Option<String>,
+    ) -> Self {
+        self.sandbox_permissions = sandbox_permissions;
+        self.justification = justification;
+        self
     }
 }
 
@@ -28,6 +46,17 @@ impl ToolCall {
 pub trait ToolPolicy {
     fn before_execute(&self, _call: &ToolCall, _tool: &Tool) -> Result<(), String> {
         Ok(())
+    }
+
+    /// Sandbox widening is a distinct privilege and therefore fails closed
+    /// unless the active policy explicitly implements an approval channel.
+    fn approve_sandbox_escalation(
+        &self,
+        _call: &ToolCall,
+        _tool: &Tool,
+        _request: &SandboxApprovalRequest,
+    ) -> Result<(), String> {
+        Err("sandbox escalation is not supported by this tool policy".to_string())
     }
 
     fn after_execute(&self, _call: &ToolCall, _tool: &Tool, _output: &str) {}
@@ -45,7 +74,9 @@ pub enum ToolRuntimeError {
     UnknownTool(String),
     MissingRequiredParameter { tool: String, parameter: String },
     UndeclaredParameter { tool: String, parameter: String },
+    ReservedParameter { tool: String, parameter: String },
     PolicyDenied { tool: String, reason: String },
+    SandboxEscalationDenied { tool: String, reason: String },
 }
 
 impl std::fmt::Display for ToolRuntimeError {
@@ -66,10 +97,18 @@ impl std::fmt::Display for ToolRuntimeError {
             {
                 write!(f, "Undeclared parameter {parameter:?} for tool {tool:?}")
             },
+            Self::ReservedParameter { tool, parameter } => write!(
+                f,
+                "Parameter {parameter:?} is reserved runtime metadata for tool {tool:?}"
+            ),
             Self::PolicyDenied { tool, reason } =>
             {
                 write!(f, "Tool {tool:?} denied by policy: {reason}")
             },
+            Self::SandboxEscalationDenied { tool, reason } => write!(
+                f,
+                "Sandbox escalation for tool {tool:?} was refused: {reason}"
+            ),
         }
     }
 }
@@ -134,7 +173,21 @@ impl<P: ToolPolicy> ToolRuntime<P> {
                 reason,
             }
         })?;
-        let output = (tool.execute)(call.params.clone());
+
+        let escalation = sandbox_request(call)?;
+        let mut params = call.params.clone();
+        if let Some(request) = escalation.as_ref()
+        {
+            self.policy
+                .approve_sandbox_escalation(call, tool, request)
+                .map_err(|reason| ToolRuntimeError::SandboxEscalationDenied {
+                    tool: call.tool.clone(),
+                    reason,
+                })?;
+            super::sandbox::install_one_shot_override(&mut params, request.requested);
+        }
+
+        let output = (tool.execute)(params);
         self.policy.after_execute(call, tool, &output);
         Ok(output)
     }
@@ -142,10 +195,46 @@ impl<P: ToolPolicy> ToolRuntime<P> {
     pub fn execute_named(
         &self,
         tool: &str,
-        params: HashMap<String, String>,
+        mut params: HashMap<String, String>,
     ) -> Result<String, ToolRuntimeError> {
-        self.execute(&ToolCall::new("legacy", tool, params))
+        let sandbox_permissions = params.remove(SANDBOX_PERMISSIONS_METADATA);
+        let justification = params.remove(JUSTIFICATION_METADATA);
+        self.execute(
+            &ToolCall::new("legacy", tool, params)
+                .with_sandbox_metadata(sandbox_permissions, justification),
+        )
     }
+}
+
+fn sandbox_request(call: &ToolCall) -> Result<Option<SandboxApprovalRequest>, ToolRuntimeError> {
+    if call.sandbox_permissions.is_none() && call.justification.is_none()
+    {
+        return Ok(None);
+    }
+    if !super::sandbox::tool_supports_sandbox(&call.tool)
+    {
+        return Err(ToolRuntimeError::SandboxEscalationDenied {
+            tool: call.tool.clone(),
+            reason: "this tool does not execute through the process sandbox".to_string(),
+        });
+    }
+    let current = super::sandbox::configured_permission().map_err(|reason| {
+        ToolRuntimeError::SandboxEscalationDenied {
+            tool: call.tool.clone(),
+            reason,
+        }
+    })?;
+    SandboxApprovalRequest::from_metadata(
+        call.id.clone(),
+        call.tool.clone(),
+        current,
+        call.sandbox_permissions.as_deref(),
+        call.justification.as_deref(),
+    )
+    .map_err(|error| ToolRuntimeError::SandboxEscalationDenied {
+        tool: call.tool.clone(),
+        reason: error.to_string(),
+    })
 }
 
 fn validate_registry(tools: &[Tool]) -> Result<(), ToolRuntimeError> {
@@ -159,6 +248,16 @@ fn validate_registry(tools: &[Tool]) -> Result<(), ToolRuntimeError> {
         let mut params = HashSet::new();
         for parameter in &tool.parameters
         {
+            if matches!(
+                parameter.name,
+                SANDBOX_PERMISSIONS_METADATA | JUSTIFICATION_METADATA
+            )
+            {
+                return Err(ToolRuntimeError::ReservedParameter {
+                    tool: tool.name.to_string(),
+                    parameter: parameter.name.to_string(),
+                });
+            }
             if !params.insert(parameter.name)
             {
                 return Err(ToolRuntimeError::DuplicateParameter {
@@ -349,6 +448,50 @@ mod tests {
         let runtime = ToolRuntime::new(vec![synthetic_tool(ok_tool)], ObservePolicy).unwrap();
         assert_eq!(runtime.execute_named("synthetic", params()).unwrap(), "ok");
         assert_eq!(OBSERVATIONS.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn allow_all_policy_cannot_approve_sandbox_escalation() {
+        use super::super::sandbox_approval::{SandboxApprovalRequest, SandboxPermission};
+
+        let policy = AllowAllPolicy;
+        let request = SandboxApprovalRequest::new(
+            "call-1",
+            "status",
+            SandboxPermission::WorkspaceWrite,
+            SandboxPermission::DangerFullAccess,
+            "one exact status call needs an explicit wider policy",
+        )
+        .unwrap();
+        let tool = Tool {
+            name: "status",
+            description: "synthetic status",
+            parameters: Vec::new(),
+            execute: panic_tool,
+        };
+        let call = ToolCall::new("call-1", "status", HashMap::new());
+        assert!(
+            policy
+                .approve_sandbox_escalation(&call, &tool, &request)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn reserved_metadata_cannot_be_registered_as_tool_parameter() {
+        let mut tool = synthetic_tool(ok_tool);
+        tool.parameters.push(ToolParam {
+            name: SANDBOX_PERMISSIONS_METADATA,
+            param_type: "string",
+            description: "must stay runtime metadata",
+            required: false,
+        });
+        let error = match ToolRuntime::new(vec![tool], AllowAllPolicy)
+        {
+            Ok(_) => panic!("reserved runtime metadata must not enter a tool schema"),
+            Err(error) => error,
+        };
+        assert!(matches!(error, ToolRuntimeError::ReservedParameter { .. }));
     }
 
     #[test]

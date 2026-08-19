@@ -1,6 +1,7 @@
 pub mod guard;
 pub mod permission;
 mod sandbox;
+pub mod sandbox_approval;
 pub mod tool_runtime;
 pub mod tools;
 pub use guard::{ConformalGuard, GuardVerdict};
@@ -8,11 +9,19 @@ pub use permission::{
     ApprovalChoice, ApprovalOutcome, PermissionDecision, PermissionGate, PermissionPolicy,
     PermissionRule, ScopedToolApprover, ToolApprover,
 };
-pub use tool_runtime::{AllowAllPolicy, ToolCall, ToolPolicy, ToolRuntime, ToolRuntimeError};
+pub use sandbox_approval::{
+    NoSandboxApprovalService, SandboxApprovalError, SandboxApprovalRequest, SandboxApprovalService,
+    SandboxPermission, SandboxPermissionGate,
+};
+pub use tool_runtime::{
+    AllowAllPolicy, JUSTIFICATION_METADATA, SANDBOX_PERMISSIONS_METADATA, ToolCall, ToolPolicy,
+    ToolRuntime, ToolRuntimeError,
+};
 pub use tools::Tool;
 pub use tools::ToolResult;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentAction {
@@ -33,7 +42,7 @@ pub struct AgentTurn {
 }
 
 pub struct AgentRouter {
-    runtime: ToolRuntime<PermissionGate>,
+    runtime: ToolRuntime<SandboxPermissionGate>,
 }
 
 impl Default for AgentRouter {
@@ -52,10 +61,23 @@ impl AgentRouter {
     }
 
     pub fn with_permission_gate(gate: PermissionGate) -> Self {
+        Self::with_runtime_policy(SandboxPermissionGate::new(gate))
+    }
+
+    /// Install independent ordinary-tool and sandbox-widening approval seams.
+    /// A session grant held by `gate` never grants sandbox escalation.
+    pub fn with_sandbox_approval_service(
+        gate: PermissionGate,
+        service: Arc<dyn SandboxApprovalService>,
+    ) -> Self {
+        Self::with_runtime_policy(SandboxPermissionGate::with_approval_service(gate, service))
+    }
+
+    fn with_runtime_policy(policy: SandboxPermissionGate) -> Self {
         let mut tools = Tool::builtins();
         sandbox::install_process_sandbox(&mut tools);
         Self {
-            runtime: ToolRuntime::new(tools, gate)
+            runtime: ToolRuntime::new(tools, policy)
                 .expect("built-in SciAgent tool contracts must be valid"),
         }
     }
@@ -84,7 +106,7 @@ impl AgentRouter {
 
     pub fn parse_tool_call(&self, json: &serde_json::Value) -> Option<AgentAction> {
         let name = json.get("name").and_then(|v| v.as_str())?;
-        let params: HashMap<String, String> = json
+        let mut params: HashMap<String, String> = json
             .get("params")
             .and_then(|v| v.as_object())
             .map(|obj| {
@@ -93,6 +115,21 @@ impl AgentRouter {
                     .collect()
             })
             .unwrap_or_default();
+
+        for key in [SANDBOX_PERMISSIONS_METADATA, JUSTIFICATION_METADATA]
+        {
+            if let Some(value) = json.get(key).and_then(|value| value.as_str())
+            {
+                if let Some(existing) = params.get(key)
+                {
+                    if existing != value
+                    {
+                        return None;
+                    }
+                }
+                params.insert(key.to_string(), value.to_string());
+            }
+        }
 
         if self.runtime.has_tool(name)
         {
@@ -199,6 +236,39 @@ mod tests {
                     .iter()
                     .cloned()
                     .collect(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_tool_call_sandbox_metadata() {
+        let router = AgentRouter::new();
+        let text = r#"{"name":"build","params":{"crate":"scirust-core"},"sandbox_permissions":"danger-full-access","justification":"requires one exact wider call"}"#;
+        let action = router.parse_action(text);
+        let AgentAction::Call { tool, params } = action
+        else
+        {
+            panic!("expected tool call");
+        };
+        assert_eq!(tool, "build");
+        assert_eq!(
+            params.get(SANDBOX_PERMISSIONS_METADATA).map(String::as_str),
+            Some("danger-full-access")
+        );
+        assert_eq!(
+            params.get(JUSTIFICATION_METADATA).map(String::as_str),
+            Some("requires one exact wider call")
+        );
+    }
+
+    #[test]
+    fn conflicting_sandbox_metadata_is_not_parsed_as_a_tool_call() {
+        let router = AgentRouter::new();
+        let text = r#"{"name":"build","params":{"crate":"scirust-core","sandbox_permissions":"workspace-write"},"sandbox_permissions":"danger-full-access","justification":"conflict"}"#;
+        assert_eq!(
+            router.parse_action(text),
+            AgentAction::Respond {
+                text: text.to_string()
             }
         );
     }
