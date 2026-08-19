@@ -1,0 +1,39 @@
+name: tmp-format-pr1267
+
+on:
+  push:
+    branches: [feat/sciagent-approval-audit]
+    paths:
+      - ".github/workflows/tmp-format-pr1267.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: feat/sciagent-approval-audit
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt,clippy
+      - name: Format workspace
+        run: cargo +nightly-2026-07-02 fmt --all
+      - name: Validate approval audit tests and clippy
+        run: |
+          cargo +nightly-2026-07-02 test -p scirust-sciagent approval_audit --lib --locked
+          cargo +nightly-2026-07-02 clippy -p scirust-sciagent --all-targets --locked -- -D warnings
+      - name: Commit formatted source and self-delete
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/tmp-format-pr1267.yml
+          git add scirust-sciagent/src/agentic/approval_audit.rs scirust-sciagent/src/agentic/mod.rs
+          git diff --cached --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix(sciagent): format approval audit lifecycle"
+          git push origin HEAD:feat/sciagent-approval-audit
