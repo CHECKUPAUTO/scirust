@@ -222,6 +222,17 @@ impl PermissionPolicy {
         decision
     }
 
+    fn explicitly_asks(&self, call: &ToolCall) -> bool {
+        let subjects = call_subjects(call);
+        if subjects.is_empty()
+        {
+            return matches_any(&self.ask, &call.tool, "");
+        }
+        subjects
+            .iter()
+            .any(|subject| matches_any(&self.ask, &call.tool, subject))
+    }
+
     pub fn decide_subject(&self, tool: &str, read_only: bool, subject: &str) -> PermissionDecision {
         if matches_any(&self.deny, tool, subject)
         {
@@ -249,6 +260,8 @@ pub enum ApprovalChoice {
     Once,
     /// Permit this tool family for the lifetime of this gate/session.
     Session,
+    /// Persist a tool-wide allow rule through the explicitly installed store.
+    Always,
     /// Refuse this call; do not remember the refusal.
     Decline,
 }
@@ -261,6 +274,15 @@ pub trait ScopedToolApprover: Send + Sync {
         tool: &Tool,
         subject: &str,
     ) -> Result<ApprovalChoice, String>;
+}
+
+/// Opt-in persistence seam for an explicit `Always` approval.
+///
+/// SciAgent never chooses a storage location itself. Front-ends may install
+/// a store that persists the supplied config-style bare allow rule. Store
+/// failure is authorization failure and leaves no session grant behind.
+pub trait PermissionRuleStore: Send + Sync {
+    fn remember_allow(&self, rule: &str) -> Result<(), String>;
 }
 
 /// One-shot resolver with a closed, fail-closed outcome vocabulary.
@@ -278,13 +300,15 @@ pub trait ToolApprover: Send + Sync {
 /// Session approval follows the DeepSeek harness contract: choosing `Session`
 /// remembers the normalized tool name, not the individual parameters. The
 /// memory is process-local, shared only by clones of this gate, and never
-/// persisted. Static `Deny` rules are evaluated first and therefore always
-/// override a remembered session approval.
+/// persisted unless the operator explicitly chooses `Always` and a
+/// [`PermissionRuleStore`] is installed. Static `Deny` and explicit `Ask` rules
+/// keep their precedence over remembered grants.
 #[derive(Clone)]
 pub struct PermissionGate {
     policy: PermissionPolicy,
     approver: Option<Arc<dyn ToolApprover>>,
     scoped_approver: Option<Arc<dyn ScopedToolApprover>>,
+    rule_store: Option<Arc<dyn PermissionRuleStore>>,
     session_approved_tools: Arc<RwLock<HashSet<String>>>,
 }
 
@@ -294,6 +318,7 @@ impl PermissionGate {
             policy,
             approver: None,
             scoped_approver: None,
+            rule_store: None,
             session_approved_tools: Arc::new(RwLock::new(HashSet::new())),
         }
     }
@@ -308,11 +333,12 @@ impl PermissionGate {
             policy,
             approver: Some(approver),
             scoped_approver: None,
+            rule_store: None,
             session_approved_tools: Arc::new(RwLock::new(HashSet::new())),
         }
     }
 
-    /// Install an approver that can return `Once`, `Session`, or `Decline`.
+    /// Install an approver that can return `Once`, `Session`, `Always`, or `Decline`.
     pub fn with_scoped_approver(
         policy: PermissionPolicy,
         approver: Arc<dyn ScopedToolApprover>,
@@ -321,12 +347,19 @@ impl PermissionGate {
             policy,
             approver: None,
             scoped_approver: Some(approver),
+            rule_store: None,
             session_approved_tools: Arc::new(RwLock::new(HashSet::new())),
         }
     }
 
     pub fn policy(&self) -> &PermissionPolicy {
         &self.policy
+    }
+
+    /// Install the opt-in persistence sink used only for `ApprovalChoice::Always`.
+    pub fn with_rule_store(mut self, store: Arc<dyn PermissionRuleStore>) -> Self {
+        self.rule_store = Some(store);
+        self
     }
 
     /// Remember one tool family for this in-memory session.
@@ -402,7 +435,8 @@ impl ToolPolicy for PermissionGate {
             ),
             PermissionDecision::Ask =>
             {
-                if self.is_tool_approved_for_session(&call.tool)?
+                if !self.policy.explicitly_asks(call)
+                    && self.is_tool_approved_for_session(&call.tool)?
                 {
                     return Ok(());
                 }
@@ -416,6 +450,23 @@ impl ToolPolicy for PermissionGate {
                         ApprovalChoice::Session =>
                         {
                             self.approve_tool_for_session(&call.tool)?;
+                            Ok(())
+                        },
+                        ApprovalChoice::Always =>
+                        {
+                            let rule = session_tool_key(&call.tool)?;
+                            let Some(store) = self.rule_store.as_ref()
+                            else
+                            {
+                                return Err(
+                                    "persistent approval requested but no permission rule store is configured; refusing to execute"
+                                        .to_string(),
+                                );
+                            };
+                            store
+                                .remember_allow(&rule)
+                                .map_err(|error| format!("failed to persist approval rule: {error}"))?;
+                            self.approve_tool_for_session(&rule)?;
                             Ok(())
                         },
                         ApprovalChoice::Decline => Err(
@@ -567,8 +618,8 @@ fn glob_matches(pattern: &str, value: &str) -> bool {
 mod tests {
     use super::*;
     use std::collections::{HashMap, VecDeque};
-    use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex;
 
     fn call(tool: &str, params: &[(&str, &str)]) -> ToolCall {
         ToolCall::new(
@@ -946,5 +997,99 @@ mod tests {
         gate.before_execute(&call("read", &[("path", "README.md")]), &tool("read"))
             .expect("reader should be allowed by fallback");
         assert_eq!(approver.calls.load(Ordering::SeqCst), 0);
+    }
+
+    struct MemoryRuleStore {
+        rules: Mutex<Vec<String>>,
+        fail: bool,
+    }
+
+    impl MemoryRuleStore {
+        fn new(fail: bool) -> Self {
+            Self {
+                rules: Mutex::new(Vec::new()),
+                fail,
+            }
+        }
+
+        fn rules(&self) -> Vec<String> {
+            self.rules.lock().unwrap().clone()
+        }
+    }
+
+    impl PermissionRuleStore for MemoryRuleStore {
+        fn remember_allow(&self, rule: &str) -> Result<(), String> {
+            if self.fail
+            {
+                return Err("rule store unavailable".to_string());
+            }
+            self.rules
+                .lock()
+                .map_err(|_| "rule store poisoned".to_string())?
+                .push(rule.to_string());
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn persistent_choice_requires_an_explicit_store() {
+        let approver = Arc::new(SequenceScopedApprover::new([ApprovalChoice::Always]));
+        let gate = PermissionGate::with_scoped_approver(PermissionPolicy::default(), approver);
+        let error = gate
+            .before_execute(&call("build", &[("crate", "scirust-core")]), &tool("build"))
+            .expect_err("Always without a store must fail closed");
+        assert!(error.contains("no permission rule store"), "{error}");
+        assert!(gate.session_approved_tools().unwrap().is_empty());
+    }
+
+    #[test]
+    fn persistent_choice_stores_bare_rule_and_grants_current_session() {
+        let approver = Arc::new(SequenceScopedApprover::new([ApprovalChoice::Always]));
+        let store = Arc::new(MemoryRuleStore::new(false));
+        let gate = PermissionGate::with_scoped_approver(PermissionPolicy::default(), approver.clone())
+            .with_rule_store(store.clone());
+
+        gate.before_execute(&call("build", &[("crate", "scirust-core")]), &tool("build"))
+            .expect("persistent approval should authorize the call");
+        gate.before_execute(
+            &call("build", &[("crate", "scirust-stats")]),
+            &tool("build"),
+        )
+        .expect("persistent approval should grant the current session");
+
+        assert_eq!(store.rules(), vec!["build"]);
+        assert_eq!(gate.session_approved_tools().unwrap(), vec!["build"]);
+        assert_eq!(approver.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn persistent_store_failure_fails_closed_without_session_grant() {
+        let approver = Arc::new(SequenceScopedApprover::new([ApprovalChoice::Always]));
+        let gate = PermissionGate::with_scoped_approver(PermissionPolicy::default(), approver)
+            .with_rule_store(Arc::new(MemoryRuleStore::new(true)));
+        let error = gate
+            .before_execute(&call("build", &[("crate", "scirust-core")]), &tool("build"))
+            .expect_err("store failure must fail closed");
+        assert!(error.contains("failed to persist approval rule"), "{error}");
+        assert!(gate.session_approved_tools().unwrap().is_empty());
+    }
+
+    #[test]
+    fn static_ask_overrides_remembered_session_approval() {
+        let policy = PermissionPolicy::new(
+            PermissionDecision::Ask,
+            Vec::new(),
+            vec![rule("build(secret-*)")],
+            Vec::new(),
+        );
+        let gate = PermissionGate::new(policy);
+        gate.approve_tool_for_session("build").unwrap();
+
+        gate.before_execute(&call("build", &[("crate", "scirust-core")]), &tool("build"))
+            .expect("fallback ask may be satisfied by remembered approval");
+        let error = gate
+            .before_execute(&call("build", &[("crate", "secret-model")]), &tool("build"))
+            .expect_err("explicit ask must still require approval");
+        assert!(error.contains("no approval service is available"), "{error}");
     }
 }
