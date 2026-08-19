@@ -36,6 +36,22 @@ jobs:
           Path('/tmp/apply_sandbox_escalation_1266.py').write_text(script)
           PY
           python3 /tmp/apply_sandbox_escalation_1266.py
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('scirust-sciagent/src/agentic/sandbox.rs')
+          text = path.read_text()
+          obsolete = '''    fn from_env() -> Result<Self, String> {
+        Self::from_env_with_override(None)
+    }
+
+'''
+          if text.count(obsolete) != 1:
+              raise SystemExit(
+                  f'obsolete SandboxConfig::from_env wrapper: expected 1 match, found {text.count(obsolete)}'
+              )
+          path.write_text(text.replace(obsolete, '', 1))
+          PY
           cargo +nightly-2026-07-02 fmt --all
           git diff --check
       - name: Validate SciAgent escalation seam
