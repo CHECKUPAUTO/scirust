@@ -9,6 +9,7 @@ pub mod permission;
 pub mod policy_store;
 mod sandbox;
 pub mod sandbox_approval;
+pub mod secrets;
 pub mod tool_runtime;
 pub mod tools;
 pub use approval_audit::{
@@ -42,6 +43,7 @@ pub use sandbox_approval::{
     NoSandboxApprovalService, SandboxApprovalError, SandboxApprovalRequest, SandboxApprovalService,
     SandboxPermission, SandboxPermissionGate,
 };
+pub use secrets::{SecretGrant, SecretHandle, SecretId, SecretStore};
 pub use tool_runtime::{
     AllowAllPolicy, JUSTIFICATION_METADATA, SANDBOX_PERMISSIONS_METADATA, ToolCall, ToolPolicy,
     ToolRuntime, ToolRuntimeError,
