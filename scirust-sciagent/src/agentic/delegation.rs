@@ -53,7 +53,8 @@ fn normalized_workspace_components(value: &str) -> Option<Vec<OsString>> {
         match component
         {
             Component::ParentDir => return None,
-            Component::CurDir => {},
+            Component::CurDir =>
+            {},
             Component::Prefix(prefix) => components.push(prefix.as_os_str().to_os_string()),
             Component::RootDir => components.push(OsString::from(std::path::MAIN_SEPARATOR_STR)),
             Component::Normal(part) => components.push(part.to_os_string()),
