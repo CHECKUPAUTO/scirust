@@ -18,7 +18,7 @@ timing, and verifies empty post-run occupancy.
 Immutable candidate inputs:
 
 - SciRust base: `a8c4739bc3a657cf9ee18e0defa7e3c88c09d456`;
-- FLAT candidate: `0ffdbde743f86feb6d67b1aeaa177bcbfe28794f`;
+- FLAT candidate: `43b4c0ba08e109ac7025a01a01837da6927d05d0`;
 - FLAT PR: #86.
 
 No result is accepted until the exact SciRust PR head and workflow run are
