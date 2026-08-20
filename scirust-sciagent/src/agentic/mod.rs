@@ -1,11 +1,16 @@
 pub mod approval_audit;
 pub mod approval_request;
+pub mod approval_service;
+pub mod deepseek_bridge;
+pub mod delegation;
 pub mod durable_audit;
+pub mod enterprise;
 pub mod guard;
 pub mod permission;
 pub mod policy_store;
 mod sandbox;
 pub mod sandbox_approval;
+pub mod secrets;
 pub mod tool_runtime;
 pub mod tools;
 pub use approval_audit::{
@@ -14,7 +19,22 @@ pub use approval_audit::{
     InMemoryApprovalAudit,
 };
 pub use approval_request::{APPROVAL_REQUEST_ID_CHARS, ApprovalRequestId, ApprovalRequestIdError};
+pub use approval_service::{
+    ApprovalAnswer, ApprovalAnswerer, ApprovalRequest, ApprovalRequestWire, ApprovalService,
+    ApprovalServiceRequest, CancellationToken, PendingApprovals, ResolvedApproval,
+};
+pub use deepseek_bridge::{
+    BRIDGE_SCHEMA_VERSION, BridgeApprovalOutcome, BridgeError, BridgeEvent, DeepSeekBridge,
+    ParameterDefinition, ToolCallWire, ToolDefinition,
+};
+pub use delegation::{
+    ChildRequest, DelegationContext, DelegationError, ResourceBudget, SecretCapability,
+};
 pub use durable_audit::{AUDIT_GENESIS_HASH, DurableAuditEntry, FileApprovalAudit};
+pub use enterprise::{
+    EnterpriseAction, EnterpriseDecision, EnterpriseIdentity, EnterprisePolicyGate, EnterpriseRule,
+    OrgId, ProjectId, TenantId, WorkspaceId,
+};
 pub use guard::{ConformalGuard, GuardVerdict};
 pub use permission::{
     ApprovalChoice, ApprovalOutcome, ApprovalPolicy, PermissionDecision, PermissionGate,
@@ -28,6 +48,7 @@ pub use sandbox_approval::{
     NoSandboxApprovalService, SandboxApprovalError, SandboxApprovalRequest, SandboxApprovalService,
     SandboxPermission, SandboxPermissionGate,
 };
+pub use secrets::{SecretGrant, SecretHandle, SecretId, SecretStore};
 pub use tool_runtime::{
     AllowAllPolicy, JUSTIFICATION_METADATA, SANDBOX_PERMISSIONS_METADATA, ToolCall, ToolPolicy,
     ToolRuntime, ToolRuntimeError,
