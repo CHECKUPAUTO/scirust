@@ -41,7 +41,8 @@ impl KvRepresentationId {
     /// `epg.so4.structural`.
     pub fn new(value: impl Into<String>) -> Result<Self, KvRepresentationError> {
         let value = value.into();
-        if value.trim().is_empty() {
+        if value.trim().is_empty()
+        {
             return Err(KvRepresentationError::EmptyRepresentationId);
         }
         Ok(Self(value))
@@ -129,14 +130,17 @@ impl KvRepresentationMetadata {
     /// contract. Contract changes retain a dedicated diagnostic because they
     /// must never be silently committed at the current epoch.
     pub fn validate_successor(&self, target: &Self) -> Result<(), KvRepresentationError> {
-        if target.epoch < self.epoch {
+        if target.epoch < self.epoch
+        {
             return Err(KvRepresentationError::EpochRegression {
                 from: self.epoch,
                 to: target.epoch,
             });
         }
-        if target.epoch == self.epoch {
-            if self.same_contract(target) {
+        if target.epoch == self.epoch
+        {
+            if self.same_contract(target)
+            {
                 return Err(KvRepresentationError::MaterializationMustAdvanceEpoch {
                     from: self.epoch,
                     to: target.epoch,
@@ -226,14 +230,14 @@ impl KvMaterializationDescriptor {
         match (
             self.representation.key_transform_scope,
             self.key_encoding_order,
-        ) {
+        )
+        {
             (KvKeyTransformScope::Raw, KvKeyEncodingOrder::Raw) => Ok(()),
-            (KvKeyTransformScope::Raw, _) => {
-                Err(KvRepresentationError::RawKeyHasTransformEncoding)
-            }
-            (_, KvKeyEncodingOrder::Raw) => {
+            (KvKeyTransformScope::Raw, _) => Err(KvRepresentationError::RawKeyHasTransformEncoding),
+            (_, KvKeyEncodingOrder::Raw) =>
+            {
                 Err(KvRepresentationError::TransformedKeyMissingEncoding)
-            }
+            },
             _ => Ok(()),
         }
     }
@@ -243,8 +247,7 @@ impl KvMaterializationDescriptor {
     /// As on [`KvRepresentationMetadata`], this is necessary but not sufficient
     /// for complete cross-query cache reuse.
     pub const fn key_transform_is_query_independent(&self) -> bool {
-        self.representation
-            .key_transform_is_query_independent()
+        self.representation.key_transform_is_query_independent()
     }
 
     /// Validate a replacement descriptor.
@@ -298,17 +301,21 @@ pub enum KvRepresentationError {
 
 impl fmt::Display for KvRepresentationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::EmptyRepresentationId => {
+        match self
+        {
+            Self::EmptyRepresentationId =>
+            {
                 write!(f, "KV representation identifier must not be empty")
-            }
+            },
             Self::EpochOverflow => write!(f, "KV representation epoch overflow"),
-            Self::RawKeyHasTransformEncoding => {
+            Self::RawKeyHasTransformEncoding =>
+            {
                 write!(f, "raw K must use the raw key-encoding order")
-            }
-            Self::TransformedKeyMissingEncoding => {
+            },
+            Self::TransformedKeyMissingEncoding =>
+            {
                 write!(f, "transformed K must declare a non-raw key-encoding order")
-            }
+            },
             Self::ContractChangeMustAdvanceEpoch { from, to } => write!(
                 f,
                 "changing KV representation contract must advance epoch ({} -> {})",
@@ -391,12 +398,14 @@ mod tests {
     #[test]
     fn materialization_descriptor_requires_explicit_transform_order() {
         let raw = meta("raw.f16", 1, KvKeyTransformScope::Raw);
-        assert!(KvMaterializationDescriptor::new(
-            raw.clone(),
-            KvKeyEncodingOrder::Raw,
-            KvRematerializationSource::None,
-        )
-        .is_ok());
+        assert!(
+            KvMaterializationDescriptor::new(
+                raw.clone(),
+                KvKeyEncodingOrder::Raw,
+                KvRematerializationSource::None,
+            )
+            .is_ok()
+        );
         assert_eq!(
             KvMaterializationDescriptor::new(
                 raw,
