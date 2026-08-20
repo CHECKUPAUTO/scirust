@@ -45,8 +45,8 @@ No child may widen its parent's authority.
 | G | Safe child-agent delegation | MERGED | #1274 (`fcb8c9da`) | Monotonic `DelegationContext`, child ⊆ parent ceilings, nested preserved |
 | H-1 | CCOS Enterprise identity/RBAC/isolation | MERGED | #1278 (`babdc2b7`) | TenantId/OrgId/ProjectId/WorkspaceId, tenant-scoped rules, workspace path isolation |
 | H-2 | Scoped secret capability store | MERGED | #1279 (`e6bdfeae`) | Opaque handles, explicit grants, revocable, audit views never contain values |
-| H-3 | Resource budgets + explicit egress | OPEN PR | #1280 (`56cc0b36`) | EgressPolicy deny-all default, ResourceBackend capability seam, fail-closed |
-| H-4 | Correlated enterprise audit trail | OPEN PR | #1281 (`663e5e38`) | SHA-256 chained, tenant..artifact correlation, tamper-evident |
+| H-3 | Resource budgets + explicit egress | MERGED | #1280 (`80c7d694`) | EgressPolicy deny-all default, ResourceBackend capability seam, fail-closed |
+| H-4 | Correlated enterprise audit trail | MERGED | #1281 (`bbae8850`) | SHA-256 chained, tenant..artifact correlation, tamper-evident |
 | I | Scientific autonomy (generalize optimizer) | PARTIAL | PR #1254 MERGED | CPU/SIMD/CUDA/WGPU generalization TODO |
 | — | Evidence-driven optimization loop | MERGED | #1254 (`c55dcc04`) | baseline -> generate -> compile -> verify -> benchmark -> promote |
 | — | Typed ToolRuntime contracts | MERGED | #1256 | typed ToolCall, registry, validation, policy hooks |
