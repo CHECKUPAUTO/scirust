@@ -37,13 +37,16 @@ No child may widen its parent's authority.
 | Phase | Capability | Status | PR / SHA | Notes |
 |-------|-----------|--------|----------|-------|
 | A | ApprovalPolicy Ask/Never | MERGED | #1270 (`c57c7ecd`) | `Ask` default, `Never` rejects before approver, fail-closed, shared across clones |
-| B | Durable approval policy per session | OPEN PR | #1271 (`ec2a186b`) | `FileApprovalPolicyStore` JSONL + SHA-256 chain, last-valid-event wins, fail-closed replay |
-| C | ApprovalRequestId | OPEN PR | #1272 (`a7436775`) | 128-bit strong id, independent from call_id, serde round-trip, CSPRNG + counter |
-| D | Durable approval audit / session event store | OPEN PR | #1273 (`2fb50b21`) | `FileApprovalAudit`, append-only, SHA-256 chained, pairing, replay, fail-closed |
-| E | Complete ApprovalService abstraction | OPEN PR | #1274 (`dd95fe48`) | Neutral `ApprovalAnswerer` seam, cancellation races, closed vocabulary, wire view |
-| F | DeepSeek Harness bridge | LOCAL | branch `feat/sciagent-approval-service` (`a897b2e8`) | `deepseek_bridge.rs`, tool defs/calls, approval, session, streaming events, error protocol |
-| G | Safe child-agent delegation | OPEN PR | #1275 (`012389f4`) | Monotonic `DelegationContext`, child ⊆ parent ceilings, nested preserved |
-| H | CCOS Enterprise hardening | TODO | — | identity, RBAC, secrets, budgets, egress, multi-tenant, attestation correlation |
+| B | Durable approval policy per session | MERGED | #1271 (`ec2a186b`) | `FileApprovalPolicyStore` JSONL + SHA-256 chain, last-valid-event wins, fail-closed replay |
+| C | ApprovalRequestId | MERGED | #1272 (`a7436775`) | 128-bit strong id, independent from call_id, serde round-trip, CSPRNG + counter |
+| D | Durable approval audit / session event store | MERGED | #1273 (`1e809e84`) | `FileApprovalAudit`, append-only, SHA-256 chained, pairing, replay, fail-closed |
+| E | Complete ApprovalService abstraction | MERGED | #1274 (`cd1f9782`) | Neutral `ApprovalAnswerer` seam, cancellation races, closed vocabulary, wire view |
+| F | DeepSeek Harness bridge | MERGED | #1277 (`bcddddf9`) | `deepseek_bridge.rs`, tool defs/calls, approval, session, streaming events, error protocol |
+| G | Safe child-agent delegation | MERGED | #1274 (`fcb8c9da`) | Monotonic `DelegationContext`, child ⊆ parent ceilings, nested preserved |
+| H-1 | CCOS Enterprise identity/RBAC/isolation | MERGED | #1278 (`babdc2b7`) | TenantId/OrgId/ProjectId/WorkspaceId, tenant-scoped rules, workspace path isolation |
+| H-2 | Scoped secret capability store | MERGED | #1279 (`e6bdfeae`) | Opaque handles, explicit grants, revocable, audit views never contain values |
+| H-3 | Resource budgets + explicit egress | OPEN PR | #1280 (`56cc0b36`) | EgressPolicy deny-all default, ResourceBackend capability seam, fail-closed |
+| H-4 | Correlated enterprise audit trail | OPEN PR | #1281 (`663e5e38`) | SHA-256 chained, tenant..artifact correlation, tamper-evident |
 | I | Scientific autonomy (generalize optimizer) | PARTIAL | PR #1254 MERGED | CPU/SIMD/CUDA/WGPU generalization TODO |
 | — | Evidence-driven optimization loop | MERGED | #1254 (`c55dcc04`) | baseline -> generate -> compile -> verify -> benchmark -> promote |
 | — | Typed ToolRuntime contracts | MERGED | #1256 | typed ToolCall, registry, validation, policy hooks |
@@ -57,6 +60,7 @@ No child may widen its parent's authority.
 | — | Structured approval audit lifecycle | MERGED | #1267 | bounded in-memory journal |
 | — | Persistent approval scope | MERGED | #1268 | Once / Session / Always / Decline |
 | — | Clippy 1.89 CI compatibility | MERGED | #1269 (`32842ffc`) | |
+| — | Agentic runtime roadmap doc | MERGED | #1276 (`d36d1399`) | this document |
 
 ## Gap analysis vs DeepSeek Harness (SHA `141eb6fe`)
 
