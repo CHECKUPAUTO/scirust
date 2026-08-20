@@ -36,6 +36,9 @@
 //!      Pol limit-cycle oscillator;
 //!    - [`stochastic`] — geometric Brownian motion, Ornstein–Uhlenbeck,
 //!      and an M/M/1 queue by discrete-event simulation;
+//!    - [`operational`] — deterministic utilization, Little/forced-flow,
+//!      interactive-response, service-demand, and bottleneck laws for measured
+//!      service systems;
 //!    - [`pharmacokinetics`] — oral one-compartment and IV two-compartment
 //!      drug models (closed-form and AUC oracles);
 //!    - [`rigid_body`] — torque-free rotation (Euler's equations), with
@@ -124,6 +127,7 @@ pub mod grid;
 pub mod hvac;
 pub mod laser;
 pub mod mechanics;
+pub mod operational;
 pub mod orbital;
 pub mod pharmacokinetics;
 pub mod photodiode;
