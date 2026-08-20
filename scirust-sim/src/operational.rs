@@ -15,8 +15,7 @@
 
 use crate::engine::SimError;
 
-fn check_finite(name: &str, value: f64) -> Result<(), SimError>
-{
+fn check_finite(name: &str, value: f64) -> Result<(), SimError> {
     if value.is_finite()
     {
         Ok(())
@@ -29,8 +28,7 @@ fn check_finite(name: &str, value: f64) -> Result<(), SimError>
     }
 }
 
-fn check_non_negative(name: &str, value: f64) -> Result<(), SimError>
-{
+fn check_non_negative(name: &str, value: f64) -> Result<(), SimError> {
     check_finite(name, value)?;
     if value >= 0.0
     {
@@ -44,8 +42,7 @@ fn check_non_negative(name: &str, value: f64) -> Result<(), SimError>
     }
 }
 
-fn check_positive(name: &str, value: f64) -> Result<(), SimError>
-{
+fn check_positive(name: &str, value: f64) -> Result<(), SimError> {
     check_finite(name, value)?;
     if value > 0.0
     {
@@ -65,8 +62,7 @@ fn check_positive(name: &str, value: f64) -> Result<(), SimError>
 /// busy service time per completion. The returned utilization is constrained
 /// to `[0, 1]`; a larger product indicates measurements or a model that are
 /// inconsistent with a single unit-capacity service center.
-pub fn utilization_law(throughput: f64, mean_service_time: f64) -> Result<f64, SimError>
-{
+pub fn utilization_law(throughput: f64, mean_service_time: f64) -> Result<f64, SimError> {
     check_non_negative("throughput", throughput)?;
     check_non_negative("mean_service_time", mean_service_time)?;
     let utilization = throughput * mean_service_time;
@@ -87,8 +83,7 @@ pub fn utilization_law(throughput: f64, mean_service_time: f64) -> Result<f64, S
 
 /// Apply Little's law `N = X·R` to obtain mean population from throughput and
 /// mean response/sojourn time.
-pub fn little_mean_population(throughput: f64, mean_response_time: f64) -> Result<f64, SimError>
-{
+pub fn little_mean_population(throughput: f64, mean_response_time: f64) -> Result<f64, SimError> {
     check_non_negative("throughput", throughput)?;
     check_non_negative("mean_response_time", mean_response_time)?;
     let population = throughput * mean_response_time;
@@ -107,8 +102,7 @@ pub fn little_mean_population(throughput: f64, mean_response_time: f64) -> Resul
 /// Rearrange Little's law to obtain mean response/sojourn time `R = N/X`.
 ///
 /// Throughput must be strictly positive.
-pub fn little_mean_response_time(mean_population: f64, throughput: f64) -> Result<f64, SimError>
-{
+pub fn little_mean_response_time(mean_population: f64, throughput: f64) -> Result<f64, SimError> {
     check_non_negative("mean_population", mean_population)?;
     check_positive("throughput", throughput)?;
     Ok(mean_population / throughput)
@@ -119,8 +113,7 @@ pub fn little_mean_response_time(mean_population: f64, throughput: f64) -> Resul
 /// `system_throughput` is the completion rate at the reference/system level;
 /// `visit_ratio` is the mean number of visits to the service center per system
 /// completion.
-pub fn forced_flow(system_throughput: f64, visit_ratio: f64) -> Result<f64, SimError>
-{
+pub fn forced_flow(system_throughput: f64, visit_ratio: f64) -> Result<f64, SimError> {
     check_non_negative("system_throughput", system_throughput)?;
     check_non_negative("visit_ratio", visit_ratio)?;
     let throughput = system_throughput * visit_ratio;
@@ -145,8 +138,7 @@ pub fn interactive_response_time(
     active_population: f64,
     system_throughput: f64,
     think_time: f64,
-) -> Result<f64, SimError>
-{
+) -> Result<f64, SimError> {
     check_non_negative("active_population", active_population)?;
     check_positive("system_throughput", system_throughput)?;
     check_non_negative("think_time", think_time)?;
@@ -162,18 +154,15 @@ pub fn interactive_response_time(
 
 /// Mean service demand of one service center: `D = V·S`.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ServiceDemand
-{
+pub struct ServiceDemand {
     visit_ratio: f64,
     mean_service_time: f64,
 }
 
-impl ServiceDemand
-{
+impl ServiceDemand {
     /// Construct a service demand from a non-negative visit ratio and mean
     /// service time.
-    pub fn new(visit_ratio: f64, mean_service_time: f64) -> Result<Self, SimError>
-    {
+    pub fn new(visit_ratio: f64, mean_service_time: f64) -> Result<Self, SimError> {
         check_non_negative("visit_ratio", visit_ratio)?;
         check_non_negative("mean_service_time", mean_service_time)?;
         Ok(Self {
@@ -183,28 +172,24 @@ impl ServiceDemand
     }
 
     /// Mean number of visits per system completion.
-    pub fn visit_ratio(self) -> f64
-    {
+    pub fn visit_ratio(self) -> f64 {
         self.visit_ratio
     }
 
     /// Mean service time per visit.
-    pub fn mean_service_time(self) -> f64
-    {
+    pub fn mean_service_time(self) -> f64 {
         self.mean_service_time
     }
 
     /// Service demand `V·S` per system completion.
-    pub fn demand(self) -> f64
-    {
+    pub fn demand(self) -> f64 {
         self.visit_ratio * self.mean_service_time
     }
 }
 
 /// Deterministic bottleneck summary for a collection of service demands.
 #[derive(Debug, Clone, PartialEq)]
-pub struct BottleneckAnalysis
-{
+pub struct BottleneckAnalysis {
     /// Index of the first service center attaining maximum demand.
     pub bottleneck_index: usize,
     /// Maximum service demand among the centers.
@@ -221,8 +206,7 @@ pub struct BottleneckAnalysis
 ///
 /// At least one strictly positive demand is required. Ties are deterministic:
 /// the smallest index is returned as `bottleneck_index`.
-pub fn analyze_bottleneck(demands: &[ServiceDemand]) -> Result<BottleneckAnalysis, SimError>
-{
+pub fn analyze_bottleneck(demands: &[ServiceDemand]) -> Result<BottleneckAnalysis, SimError> {
     if demands.is_empty()
     {
         return Err(SimError::BadInput(
@@ -266,13 +250,11 @@ pub fn analyze_bottleneck(demands: &[ServiceDemand]) -> Result<BottleneckAnalysi
 }
 
 #[cfg(test)]
-mod tests
-{
+mod tests {
     use super::*;
 
     #[test]
-    fn utilization_and_little_laws_match_exact_examples()
-    {
+    fn utilization_and_little_laws_match_exact_examples() {
         assert_eq!(utilization_law(2.0, 0.25).unwrap(), 0.5);
         assert_eq!(little_mean_population(2.0, 3.0).unwrap(), 6.0);
         assert_eq!(little_mean_response_time(6.0, 2.0).unwrap(), 3.0);
@@ -281,8 +263,7 @@ mod tests
     }
 
     #[test]
-    fn denning_buzen_bottleneck_example_is_reproduced()
-    {
+    fn denning_buzen_bottleneck_example_is_reproduced() {
         let demands = [
             ServiceDemand::new(20.0, 0.05).unwrap(),
             ServiceDemand::new(11.0, 0.08).unwrap(),
@@ -296,8 +277,7 @@ mod tests
     }
 
     #[test]
-    fn invalid_operational_inputs_are_rejected()
-    {
+    fn invalid_operational_inputs_are_rejected() {
         assert!(utilization_law(2.0, 0.75).is_err());
         assert!(utilization_law(f64::NAN, 0.1).is_err());
         assert!(little_mean_response_time(1.0, 0.0).is_err());
