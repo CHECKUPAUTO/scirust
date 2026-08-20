@@ -39,6 +39,9 @@ pub mod knuth_bendix;
 /// Lie groups, Lie algebras and Clifford/geometric algebra.
 #[rustfmt::skip]
 pub mod lie;
+/// Partial orders, lattices, product orders, and antichains.
+#[rustfmt::skip]
+pub mod order;
 /// Presented groups and fixed-capacity coset enumeration.
 #[rustfmt::skip]
 pub mod presented;
@@ -56,4 +59,8 @@ pub mod representation;
 pub mod wigner;
 
 pub use crate::core::{AbelianGroup, Field, Group, Magma, Monoid, Ring, Semigroup};
+pub use crate::order::{
+    Antichain, JoinSemilattice, Lattice, MeetSemilattice, PartiallyOrdered, ProductOrder2,
+    TotalOrder,
+};
 pub use crate::semiring::{BooleanSemiring, CommutativeSemiring, RingSemiring, Semiring};
