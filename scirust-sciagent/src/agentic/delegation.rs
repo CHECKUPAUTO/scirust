@@ -8,6 +8,8 @@
 use super::permission::ApprovalPolicy;
 use super::sandbox_approval::SandboxPermission;
 use std::collections::BTreeSet;
+use std::ffi::OsString;
+use std::path::{Component, Path};
 
 /// Resource ceilings for one delegated agent.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -37,6 +39,46 @@ impl ResourceBudget {
         let gpu_ok = !self.gpu_allowed || ceiling.gpu_allowed;
         time_ok && memory_ok && processes_ok && gpu_ok
     }
+}
+
+fn normalized_workspace_components(value: &str) -> Option<Vec<OsString>> {
+    if value.is_empty()
+    {
+        return None;
+    }
+
+    let mut components = Vec::new();
+    for component in Path::new(value).components()
+    {
+        match component
+        {
+            Component::ParentDir => return None,
+            Component::CurDir => {},
+            Component::Prefix(prefix) => components.push(prefix.as_os_str().to_os_string()),
+            Component::RootDir => components.push(OsString::from(std::path::MAIN_SEPARATOR_STR)),
+            Component::Normal(part) => components.push(part.to_os_string()),
+        }
+    }
+    (!components.is_empty()).then_some(components)
+}
+
+fn workspace_root_is_within(root: &str, parent: &str) -> bool {
+    let Some(root) = normalized_workspace_components(root)
+    else
+    {
+        return false;
+    };
+    let Some(parent) = normalized_workspace_components(parent)
+    else
+    {
+        return false;
+    };
+
+    root.len() >= parent.len()
+        && root
+            .iter()
+            .zip(parent.iter())
+            .all(|(root_component, parent_component)| root_component == parent_component)
 }
 
 /// Secret capability handle: an opaque id the child may reference; the
@@ -134,14 +176,15 @@ impl DelegationContext {
             }
         }
 
-        // Workspace roots: the child's roots must all be inside the parent's.
+        // Workspace roots: compare path components rather than raw string
+        // prefixes. Any `..` component fails closed, so a child cannot turn
+        // `/workspace/../etc` into an apparent descendant of `/workspace`.
         for root in &workspace_roots
         {
-            if !self.workspace_roots.iter().any(|parent| {
-                root == parent
-                    || (root.starts_with(parent)
-                        && root.as_bytes().get(parent.len()) == Some(&b'/'))
-            })
+            if !self
+                .workspace_roots
+                .iter()
+                .any(|parent| workspace_root_is_within(root, parent))
             {
                 return Err(DelegationError::WorkspaceWidening(root.clone()));
             }
@@ -594,10 +637,10 @@ mod tests {
                 ApprovalPolicy::Never,
                 ResourceBudget::default(),
                 BTreeSet::new(),
-                vec!["/workspace/sub".to_string()],
+                vec!["/workspace/./sub/".to_string()],
             ))
-            .expect("subdirectory must be allowed");
-        assert_eq!(child.workspace_roots, vec!["/workspace/sub"]);
+            .expect("normalized subdirectory must be allowed");
+        assert_eq!(child.workspace_roots, vec!["/workspace/./sub/"]);
         let error = parent
             .derive_child(request(
                 "child2",
@@ -612,6 +655,26 @@ mod tests {
         assert_eq!(
             error,
             DelegationError::WorkspaceWidening("/elsewhere".to_string())
+        );
+    }
+
+    #[test]
+    fn workspace_roots_reject_parent_dir_escape() {
+        let parent = owning_root("parent", BTreeSet::new(), vec!["/workspace".to_string()]);
+        let error = parent
+            .derive_child(request(
+                "child",
+                None,
+                SandboxPermission::ReadOnly,
+                ApprovalPolicy::Never,
+                ResourceBudget::default(),
+                BTreeSet::new(),
+                vec!["/workspace/../etc".to_string()],
+            ))
+            .expect_err("parent-dir traversal must never widen a workspace root");
+        assert_eq!(
+            error,
+            DelegationError::WorkspaceWidening("/workspace/../etc".to_string())
         );
     }
 
