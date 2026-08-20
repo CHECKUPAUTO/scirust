@@ -26,6 +26,7 @@ use super::permission::ApprovalPolicy;
 use super::sandbox_approval::SandboxPermission;
 use super::tool_runtime::{ToolCall, ToolRuntime, ToolRuntimeError};
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 /// Wire schema version of the bridge contract.
@@ -250,7 +251,9 @@ impl<P: super::tool_runtime::ToolPolicy> DeepSeekBridge<P> {
             tool: call.tool.clone(),
         });
 
-        // Resolve sandbox metadata into an approval input before execution.
+        // Resolve sandbox metadata into the approval input before execution.
+        // The ApprovalRequested event itself is emitted only after the
+        // ApprovalService has generated the authoritative request id.
         let (configured, requested) = match wire.sandbox_permissions.as_deref()
         {
             None => (None, None),
@@ -261,69 +264,93 @@ impl<P: super::tool_runtime::ToolPolicy> DeepSeekBridge<P> {
                 })?;
                 let configured_perm = super::sandbox::configured_permission()
                     .map_err(BridgeError::SandboxEscalationDenied)?;
-                let justification = wire.justification.as_deref().unwrap_or_default();
-                events(BridgeEvent::ApprovalRequested {
-                    request: ApprovalRequestWire {
-                        request_id: String::new(),
-                        call_id: call.id.clone(),
-                        tool: call.tool.clone(),
-                        subject: None,
-                        reason: Some("sandbox escalation".to_string()),
-                        configured_sandbox: Some(configured_perm.label().to_string()),
-                        requested_sandbox: Some(requested_perm.label().to_string()),
-                        justification: Some(justification.to_string()),
-                        policy: self.approval.policy().label().to_string(),
-                    },
-                });
                 (Some(configured_perm), Some(requested_perm))
             },
         };
 
         // ApprovalService (id generation, policy, answerer, cancellation).
-        let input = ApprovalServiceRequest::new(call.clone())
+        let mut input = ApprovalServiceRequest::new(call.clone())
             .with_reason(format!("tool {} requested by DeepSeek client", call.tool));
-        let input = if let Some(requested) = requested
+        if let Some(requested) = requested
         {
-            input.with_sandbox(configured.unwrap_or(SandboxPermission::ReadOnly), requested)
+            input = input.with_sandbox(
+                configured.unwrap_or(SandboxPermission::ReadOnly),
+                requested,
+            );
         }
-        else
+        if let Some(justification) = wire.justification.as_deref()
         {
-            input
+            input = input.with_justification(justification);
+        }
+
+        let observed_request_id = RefCell::new(None::<String>);
+        let outcome = self.approval.request_resolved(&input, token, &|request| {
+            let request = ApprovalRequestWire::from_request(request);
+            *observed_request_id.borrow_mut() = Some(request.request_id.clone());
+            events(BridgeEvent::ApprovalRequested { request });
+        });
+        let observed_request_id = observed_request_id.into_inner();
+
+        let outcome = match outcome
+        {
+            Ok(outcome) => outcome,
+            Err(_error) =>
+            {
+                if let Some(request_id) = observed_request_id
+                {
+                    events(BridgeEvent::ApprovalResolved {
+                        request_id,
+                        outcome: BridgeApprovalOutcome::Unavailable,
+                    });
+                }
+                return Err(BridgeError::ApprovalUnavailable);
+            },
         };
 
-        // Build the full presentation request for the answerer by asking the
-        // service; it generates the id and enforces policy.
-        let outcome = self
-            .approval
-            .request(&input, token)
-            .map_err(|_error| BridgeError::ApprovalUnavailable)?;
+        let observed_request_id = observed_request_id.ok_or_else(|| {
+            BridgeError::UnknownValue(
+                "approval service resolved without exposing a request id".to_string(),
+            )
+        })?;
 
         match outcome
         {
             None =>
             {
                 events(BridgeEvent::ApprovalResolved {
-                    request_id: String::new(),
+                    request_id: observed_request_id,
                     outcome: BridgeApprovalOutcome::Cancelled,
                 });
                 Err(BridgeError::Cancelled)
             },
-            Some(ApprovalAnswer::Rejected) =>
+            Some(resolved) =>
             {
+                let request_id = resolved.request_id.to_string();
+                if request_id != observed_request_id
+                {
+                    return Err(BridgeError::UnknownValue(
+                        "approval request/resolution correlation mismatch".to_string(),
+                    ));
+                }
+                let bridge_outcome = match resolved.answer
+                {
+                    ApprovalAnswer::AllowedOnce => BridgeApprovalOutcome::AllowedOnce,
+                    ApprovalAnswer::AllowedSession => BridgeApprovalOutcome::AllowedSession,
+                    ApprovalAnswer::AllowedPersistent => BridgeApprovalOutcome::AllowedPersistent,
+                    ApprovalAnswer::Rejected => BridgeApprovalOutcome::Rejected,
+                };
                 events(BridgeEvent::ApprovalResolved {
-                    request_id: String::new(),
-                    outcome: BridgeApprovalOutcome::Rejected,
+                    request_id,
+                    outcome: bridge_outcome,
                 });
-                Err(BridgeError::PolicyDenied(
-                    "approval rejected by the user".to_string(),
-                ))
-            },
-            Some(_) =>
-            {
-                events(BridgeEvent::ApprovalResolved {
-                    request_id: String::new(),
-                    outcome: BridgeApprovalOutcome::AllowedOnce,
-                });
+
+                if resolved.answer == ApprovalAnswer::Rejected
+                {
+                    return Err(BridgeError::PolicyDenied(
+                        "approval rejected by the user".to_string(),
+                    ));
+                }
+
                 events(BridgeEvent::ExecutionStarted {
                     call_id: call.id.clone(),
                 });
@@ -360,21 +387,22 @@ mod tests {
     use crate::agentic::permission::{PermissionDecision, PermissionGate, PermissionPolicy};
     use crate::agentic::sandbox_approval::SandboxPermissionGate;
     use std::cell::RefCell;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
 
     struct AllowAnswerer {
         calls: AtomicUsize,
+        answer: ApprovalAnswer,
     }
 
     impl ApprovalAnswerer for AllowAnswerer {
         fn answer(&self, _request: &ApprovalRequest) -> Result<ApprovalAnswer, String> {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(ApprovalAnswer::AllowedOnce)
+            Ok(self.answer)
         }
     }
 
-    fn test_bridge() -> DeepSeekBridge<SandboxPermissionGate> {
+    fn test_runtime() -> ToolRuntime<SandboxPermissionGate> {
         let gate = PermissionGate::new(PermissionPolicy::new(
             PermissionDecision::Allow,
             Vec::new(),
@@ -382,11 +410,19 @@ mod tests {
             Vec::new(),
         ));
         let policy = SandboxPermissionGate::new(gate);
-        let runtime = ToolRuntime::new(crate::agentic::tools::Tool::builtins(), policy).unwrap();
+        ToolRuntime::new(crate::agentic::tools::Tool::builtins(), policy).unwrap()
+    }
+
+    fn test_bridge_with_answer(answer: ApprovalAnswer) -> DeepSeekBridge<SandboxPermissionGate> {
         let approval = ApprovalService::with_answerer(Arc::new(AllowAnswerer {
             calls: AtomicUsize::new(0),
+            answer,
         }));
-        DeepSeekBridge::new(runtime, approval)
+        DeepSeekBridge::new(test_runtime(), approval)
+    }
+
+    fn test_bridge() -> DeepSeekBridge<SandboxPermissionGate> {
+        test_bridge_with_answer(ApprovalAnswer::AllowedOnce)
     }
 
     #[test]
@@ -522,8 +558,134 @@ mod tests {
             .collect();
         assert!(kinds.contains(&"announced"));
         assert!(kinds.contains(&"started"));
+        assert!(kinds.contains(&"approval_requested"));
+        assert!(kinds.contains(&"approval_resolved"));
         assert!(kinds.contains(&"execution_started"));
         assert!(kinds.contains(&"execution_ended"));
+    }
+
+    #[test]
+    fn approval_stream_uses_real_correlated_request_id() {
+        let bridge = test_bridge();
+        let events = RefCell::new(Vec::new());
+        let mut params = HashMap::new();
+        params.insert("path".to_string(), "Cargo.toml".to_string());
+        bridge
+            .execute(
+                ToolCallWire {
+                    call_id: "call-correlated".to_string(),
+                    tool: "read".to_string(),
+                    params,
+                    sandbox_permissions: None,
+                    justification: None,
+                },
+                &CancellationToken::new(),
+                &|event| events.borrow_mut().push(event),
+            )
+            .unwrap();
+
+        let events = events.borrow();
+        let requested_id = events
+            .iter()
+            .find_map(|event| match event
+            {
+                BridgeEvent::ApprovalRequested { request } => Some(request.request_id.clone()),
+                _ => None,
+            })
+            .expect("approval request event");
+        let (resolved_id, outcome) = events
+            .iter()
+            .find_map(|event| match event
+            {
+                BridgeEvent::ApprovalResolved {
+                    request_id,
+                    outcome,
+                } => Some((request_id.clone(), *outcome)),
+                _ => None,
+            })
+            .expect("approval resolution event");
+        assert!(!requested_id.is_empty());
+        assert_eq!(requested_id, resolved_id);
+        assert_eq!(outcome, BridgeApprovalOutcome::AllowedOnce);
+    }
+
+    #[test]
+    fn approval_scope_is_preserved_on_wire() {
+        for (answer, expected) in [
+            (
+                ApprovalAnswer::AllowedSession,
+                BridgeApprovalOutcome::AllowedSession,
+            ),
+            (
+                ApprovalAnswer::AllowedPersistent,
+                BridgeApprovalOutcome::AllowedPersistent,
+            ),
+        ]
+        {
+            let bridge = test_bridge_with_answer(answer);
+            let events = RefCell::new(Vec::new());
+            let mut params = HashMap::new();
+            params.insert("path".to_string(), "Cargo.toml".to_string());
+            bridge
+                .execute(
+                    ToolCallWire {
+                        call_id: format!("scope-{}", answer.label()),
+                        tool: "read".to_string(),
+                        params,
+                        sandbox_permissions: None,
+                        justification: None,
+                    },
+                    &CancellationToken::new(),
+                    &|event| events.borrow_mut().push(event),
+                )
+                .unwrap();
+            let actual = events
+                .into_inner()
+                .into_iter()
+                .find_map(|event| match event
+                {
+                    BridgeEvent::ApprovalResolved { outcome, .. } => Some(outcome),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn sandbox_justification_reaches_answerer() {
+        let captured: Arc<Mutex<Option<ApprovalRequest>>> = Arc::new(Mutex::new(None));
+        struct CaptureAnswerer(Arc<Mutex<Option<ApprovalRequest>>>);
+        impl ApprovalAnswerer for CaptureAnswerer {
+            fn answer(&self, request: &ApprovalRequest) -> Result<ApprovalAnswer, String> {
+                *self.0.lock().unwrap() = Some(request.clone());
+                Ok(ApprovalAnswer::AllowedOnce)
+            }
+        }
+        let approval =
+            ApprovalService::with_answerer(Arc::new(CaptureAnswerer(captured.clone())));
+        let bridge = DeepSeekBridge::new(test_runtime(), approval);
+        let mut params = HashMap::new();
+        params.insert("path".to_string(), "Cargo.toml".to_string());
+        bridge
+            .execute(
+                ToolCallWire {
+                    call_id: "call-justification".to_string(),
+                    tool: "read".to_string(),
+                    params,
+                    sandbox_permissions: Some("read-only".to_string()),
+                    justification: Some("read-only inspection requested".to_string()),
+                },
+                &CancellationToken::new(),
+                &|_| {},
+            )
+            .unwrap();
+        let request = captured.lock().unwrap().clone().unwrap();
+        assert_eq!(
+            request.justification.as_deref(),
+            Some("read-only inspection requested")
+        );
+        assert!(request.request_id.is_valid());
     }
 
     #[test]
