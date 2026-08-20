@@ -60,16 +60,22 @@ pub enum KvKeyTransformScope {
     /// Key is stored before positional/structural transformation.
     #[default]
     Raw,
-    /// Key is transformed only from token/page-stable metadata, so it remains
-    /// reusable by arbitrary future queries.
+    /// Key is transformed only from token/page-stable metadata. This proves
+    /// that the transform itself is independent of a future query; it does not
+    /// by itself prove cross-query reuse compatibility.
     TokenStable,
     /// Key materialization depends on a particular query or future context.
     QueryDependent,
 }
 
 impl KvKeyTransformScope {
-    /// Whether the materialization is reusable for arbitrary future queries.
-    pub const fn reusable_for_future_queries(self) -> bool {
+    /// Whether the stored key transform is independent of a future query.
+    ///
+    /// This is a necessary but not sufficient condition for cross-query KV
+    /// reuse. Derivation provenance, model/schema compatibility, positions,
+    /// epochs, and other domain contracts may still make two materializations
+    /// incompatible.
+    pub const fn is_query_independent(self) -> bool {
         !matches!(self, Self::QueryDependent)
     }
 }
@@ -103,9 +109,11 @@ impl KvRepresentationMetadata {
         }
     }
 
-    /// Whether this materialization can be reused by future queries.
-    pub const fn reusable_for_future_queries(&self) -> bool {
-        self.key_transform_scope.reusable_for_future_queries()
+    /// Whether this metadata's key transform is independent of a future query.
+    ///
+    /// This local predicate does not establish complete reuse compatibility.
+    pub const fn key_transform_is_query_independent(&self) -> bool {
+        self.key_transform_scope.is_query_independent()
     }
 
     /// Whether another metadata value names the same representation contract,
@@ -117,19 +125,28 @@ impl KvRepresentationMetadata {
     /// Validate the epoch relationship for replacing this materialization with
     /// `target`.
     ///
-    /// Changing the representation contract must advance the epoch.  Keeping
-    /// the same contract may preserve or advance the epoch, but never regress.
+    /// Every committed replacement materialization must advance the epoch,
+    /// including a re-encode/recompute that keeps the same representation
+    /// contract. Contract changes retain a dedicated diagnostic because they
+    /// must never be silently committed at the current epoch.
     pub fn validate_successor(&self, target: &Self) -> Result<(), KvRepresentationError> {
-        if !self.same_contract(target) && target.epoch <= self.epoch
+        if target.epoch < self.epoch
         {
-            return Err(KvRepresentationError::ContractChangeMustAdvanceEpoch {
+            return Err(KvRepresentationError::EpochRegression {
                 from: self.epoch,
                 to: target.epoch,
             });
         }
-        if self.same_contract(target) && target.epoch < self.epoch
+        if target.epoch == self.epoch
         {
-            return Err(KvRepresentationError::EpochRegression {
+            if self.same_contract(target)
+            {
+                return Err(KvRepresentationError::MaterializationMustAdvanceEpoch {
+                    from: self.epoch,
+                    to: target.epoch,
+                });
+            }
+            return Err(KvRepresentationError::ContractChangeMustAdvanceEpoch {
                 from: self.epoch,
                 to: target.epoch,
             });
@@ -147,6 +164,14 @@ pub enum KvRepresentationError {
     EpochOverflow,
     /// A contract-changing materialization did not advance the epoch.
     ContractChangeMustAdvanceEpoch {
+        /// Source epoch.
+        from: KvRepresentationEpoch,
+        /// Target epoch.
+        to: KvRepresentationEpoch,
+    },
+    /// A replacement materialization using the same contract did not advance
+    /// the epoch.
+    MaterializationMustAdvanceEpoch {
         /// Source epoch.
         from: KvRepresentationEpoch,
         /// Target epoch.
@@ -176,6 +201,12 @@ impl fmt::Display for KvRepresentationError {
                 from.get(),
                 to.get()
             ),
+            Self::MaterializationMustAdvanceEpoch { from, to } => write!(
+                f,
+                "replacing KV materialization must advance epoch ({} -> {})",
+                from.get(),
+                to.get()
+            ),
             Self::EpochRegression { from, to } => write!(
                 f,
                 "KV representation epoch regressed ({} -> {})",
@@ -202,10 +233,11 @@ mod tests {
     }
 
     #[test]
-    fn query_dependent_key_is_not_reusable() {
-        let m = meta("epg.dynamic", 2, KvKeyTransformScope::QueryDependent);
-        assert!(!m.reusable_for_future_queries());
-        assert!(meta("epg.so4", 2, KvKeyTransformScope::TokenStable).reusable_for_future_queries());
+    fn query_independence_is_only_a_local_transform_property() {
+        let query_dependent = meta("epg.dynamic", 2, KvKeyTransformScope::QueryDependent);
+        let token_stable = meta("epg.so4", 2, KvKeyTransformScope::TokenStable);
+        assert!(!query_dependent.key_transform_is_query_independent());
+        assert!(token_stable.key_transform_is_query_independent());
     }
 
     #[test]
@@ -218,5 +250,27 @@ mod tests {
             Err(KvRepresentationError::ContractChangeMustAdvanceEpoch { .. })
         ));
         assert!(from.validate_successor(&good).is_ok());
+    }
+
+    #[test]
+    fn same_contract_replacement_requires_new_epoch() {
+        let from = meta("kv.int4", 4, KvKeyTransformScope::TokenStable);
+        let bad = meta("kv.int4", 4, KvKeyTransformScope::TokenStable);
+        let good = meta("kv.int4", 5, KvKeyTransformScope::TokenStable);
+        assert!(matches!(
+            from.validate_successor(&bad),
+            Err(KvRepresentationError::MaterializationMustAdvanceEpoch { .. })
+        ));
+        assert!(from.validate_successor(&good).is_ok());
+    }
+
+    #[test]
+    fn successor_rejects_epoch_regression_before_contract_diagnostics() {
+        let from = meta("kv.int4", 4, KvKeyTransformScope::TokenStable);
+        let target = meta("kv.int8", 3, KvKeyTransformScope::TokenStable);
+        assert!(matches!(
+            from.validate_successor(&target),
+            Err(KvRepresentationError::EpochRegression { .. })
+        ));
     }
 }
