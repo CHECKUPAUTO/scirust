@@ -173,14 +173,15 @@ mod tests {
         // Coverage is normalized, monotone and submodular. Each item covers a
         // subset of a 4-element universe.
         let masks = [0b0011u8, 0b0110u8, 0b1100u8];
-        let result = greedy_monotone_submodular_cardinality(masks.len(), 2, |selected, candidate| {
-            let before = selected
-                .iter()
-                .fold(0u8, |mask, &index| mask | masks[index]);
-            let after = before | masks[candidate];
-            u64::from(after.count_ones() - before.count_ones())
-        })
-        .unwrap();
+        let result =
+            greedy_monotone_submodular_cardinality(masks.len(), 2, |selected, candidate| {
+                let before = selected
+                    .iter()
+                    .fold(0u8, |mask, &index| mask | masks[index]);
+                let after = before | masks[candidate];
+                u64::from(after.count_ones() - before.count_ones())
+            })
+            .unwrap();
 
         // All three items initially have gain 2, so deterministic tie-breaking
         // selects index 0. Index 2 then contributes two new covered elements,
