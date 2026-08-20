@@ -41,8 +41,7 @@ impl KvRepresentationId {
     /// `epg.so4.structural`.
     pub fn new(value: impl Into<String>) -> Result<Self, KvRepresentationError> {
         let value = value.into();
-        if value.trim().is_empty()
-        {
+        if value.trim().is_empty() {
             return Err(KvRepresentationError::EmptyRepresentationId);
         }
         Ok(Self(value))
@@ -130,17 +129,14 @@ impl KvRepresentationMetadata {
     /// contract. Contract changes retain a dedicated diagnostic because they
     /// must never be silently committed at the current epoch.
     pub fn validate_successor(&self, target: &Self) -> Result<(), KvRepresentationError> {
-        if target.epoch < self.epoch
-        {
+        if target.epoch < self.epoch {
             return Err(KvRepresentationError::EpochRegression {
                 from: self.epoch,
                 to: target.epoch,
             });
         }
-        if target.epoch == self.epoch
-        {
-            if self.same_contract(target)
-            {
+        if target.epoch == self.epoch {
+            if self.same_contract(target) {
                 return Err(KvRepresentationError::MaterializationMustAdvanceEpoch {
                     from: self.epoch,
                     to: target.epoch,
@@ -155,6 +151,116 @@ impl KvRepresentationMetadata {
     }
 }
 
+/// Ordered semantics used to materialize a stored key.
+///
+/// The order is represented explicitly because a positional/structural
+/// transform and a numerical codec or quantizer do not generally commute. A
+/// concrete application may establish an equivalence for a particular pair of
+/// operations, but this generic metadata does not assume one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum KvKeyEncodingOrder {
+    /// K remains in its raw transform domain.
+    #[default]
+    Raw,
+    /// Apply the key transform before the numerical codec/quantizer.
+    TransformThenCodec,
+    /// Apply the numerical codec/domain conversion before the key transform.
+    CodecThenTransform,
+    /// A fused implementation with semantics named by the representation
+    /// contract; no equivalence with either ordered form is implied.
+    FusedDeclared,
+}
+
+/// Descriptive source retained for a future KV rematerialization.
+///
+/// This records scientific/runtime metadata only. It is not an authorization
+/// token and does not prove that a future re-encode or recomputation is safe.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum KvRematerializationSource {
+    /// No independent source is declared.
+    #[default]
+    None,
+    /// A canonical/raw K source is retained independently of this materialized
+    /// representation.
+    StoredCanonicalRaw,
+    /// K may be regenerated from an upstream model state.
+    ModelRecompute,
+    /// A stable application-defined external source is retained.
+    ExternalStableSource,
+}
+
+/// Additive materialization descriptor combining the existing representation
+/// metadata with transform/codec ordering and rematerialization provenance.
+///
+/// This type is deliberately separate from [`KvRepresentationMetadata`] so the
+/// existing SciRust metadata constructor and represented-cache API remain
+/// source-compatible.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KvMaterializationDescriptor {
+    /// Existing representation identity, epoch and transform scope.
+    pub representation: KvRepresentationMetadata,
+    /// Exact ordered semantics used for K materialization.
+    pub key_encoding_order: KvKeyEncodingOrder,
+    /// Descriptive source retained for a later rematerialization.
+    pub rematerialization_source: KvRematerializationSource,
+}
+
+impl KvMaterializationDescriptor {
+    /// Construct and validate a materialization descriptor.
+    pub fn new(
+        representation: KvRepresentationMetadata,
+        key_encoding_order: KvKeyEncodingOrder,
+        rematerialization_source: KvRematerializationSource,
+    ) -> Result<Self, KvRepresentationError> {
+        let descriptor = Self {
+            representation,
+            key_encoding_order,
+            rematerialization_source,
+        };
+        descriptor.validate()?;
+        Ok(descriptor)
+    }
+
+    /// Validate the local transform-scope/encoding-order relationship.
+    pub fn validate(&self) -> Result<(), KvRepresentationError> {
+        match (
+            self.representation.key_transform_scope,
+            self.key_encoding_order,
+        ) {
+            (KvKeyTransformScope::Raw, KvKeyEncodingOrder::Raw) => Ok(()),
+            (KvKeyTransformScope::Raw, _) => {
+                Err(KvRepresentationError::RawKeyHasTransformEncoding)
+            }
+            (_, KvKeyEncodingOrder::Raw) => {
+                Err(KvRepresentationError::TransformedKeyMissingEncoding)
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// Whether the key transform itself is independent of future queries.
+    ///
+    /// As on [`KvRepresentationMetadata`], this is necessary but not sufficient
+    /// for complete cross-query cache reuse.
+    pub const fn key_transform_is_query_independent(&self) -> bool {
+        self.representation
+            .key_transform_is_query_independent()
+    }
+
+    /// Validate a replacement descriptor.
+    ///
+    /// Both descriptors must be locally valid and every replacement must obey
+    /// the existing representation epoch-successor rule. This method describes
+    /// metadata consistency only; it does not perform or authorize the physical
+    /// transformation.
+    pub fn validate_successor(&self, target: &Self) -> Result<(), KvRepresentationError> {
+        self.validate()?;
+        target.validate()?;
+        self.representation
+            .validate_successor(&target.representation)
+    }
+}
+
 /// Invalid representation metadata or epoch transition.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum KvRepresentationError {
@@ -162,6 +268,10 @@ pub enum KvRepresentationError {
     EmptyRepresentationId,
     /// Epoch counter cannot be incremented further.
     EpochOverflow,
+    /// A raw key declared a transform/codec encoding order.
+    RawKeyHasTransformEncoding,
+    /// A transformed key failed to declare a non-raw encoding order.
+    TransformedKeyMissingEncoding,
     /// A contract-changing materialization did not advance the epoch.
     ContractChangeMustAdvanceEpoch {
         /// Source epoch.
@@ -188,13 +298,17 @@ pub enum KvRepresentationError {
 
 impl fmt::Display for KvRepresentationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self
-        {
-            Self::EmptyRepresentationId =>
-            {
+        match self {
+            Self::EmptyRepresentationId => {
                 write!(f, "KV representation identifier must not be empty")
-            },
+            }
             Self::EpochOverflow => write!(f, "KV representation epoch overflow"),
+            Self::RawKeyHasTransformEncoding => {
+                write!(f, "raw K must use the raw key-encoding order")
+            }
+            Self::TransformedKeyMissingEncoding => {
+                write!(f, "transformed K must declare a non-raw key-encoding order")
+            }
             Self::ContractChangeMustAdvanceEpoch { from, to } => write!(
                 f,
                 "changing KV representation contract must advance epoch ({} -> {})",
@@ -272,5 +386,80 @@ mod tests {
             from.validate_successor(&target),
             Err(KvRepresentationError::EpochRegression { .. })
         ));
+    }
+
+    #[test]
+    fn materialization_descriptor_requires_explicit_transform_order() {
+        let raw = meta("raw.f16", 1, KvKeyTransformScope::Raw);
+        assert!(KvMaterializationDescriptor::new(
+            raw.clone(),
+            KvKeyEncodingOrder::Raw,
+            KvRematerializationSource::None,
+        )
+        .is_ok());
+        assert_eq!(
+            KvMaterializationDescriptor::new(
+                raw,
+                KvKeyEncodingOrder::TransformThenCodec,
+                KvRematerializationSource::None,
+            ),
+            Err(KvRepresentationError::RawKeyHasTransformEncoding)
+        );
+
+        let transformed = meta("epg.so4", 2, KvKeyTransformScope::TokenStable);
+        assert_eq!(
+            KvMaterializationDescriptor::new(
+                transformed,
+                KvKeyEncodingOrder::Raw,
+                KvRematerializationSource::StoredCanonicalRaw,
+            ),
+            Err(KvRepresentationError::TransformedKeyMissingEncoding)
+        );
+    }
+
+    #[test]
+    fn materialization_descriptor_preserves_non_commuting_order_identity() {
+        let transformed = meta("epg.so4.int4", 2, KvKeyTransformScope::TokenStable);
+        let transform_then_codec = KvMaterializationDescriptor::new(
+            transformed.clone(),
+            KvKeyEncodingOrder::TransformThenCodec,
+            KvRematerializationSource::StoredCanonicalRaw,
+        )
+        .unwrap();
+        let codec_then_transform = KvMaterializationDescriptor::new(
+            transformed,
+            KvKeyEncodingOrder::CodecThenTransform,
+            KvRematerializationSource::StoredCanonicalRaw,
+        )
+        .unwrap();
+        assert_ne!(transform_then_codec, codec_then_transform);
+    }
+
+    #[test]
+    fn materialization_successor_keeps_existing_epoch_rule() {
+        let from = KvMaterializationDescriptor::new(
+            meta("epg.so4.int4", 9, KvKeyTransformScope::TokenStable),
+            KvKeyEncodingOrder::TransformThenCodec,
+            KvRematerializationSource::StoredCanonicalRaw,
+        )
+        .unwrap();
+        let same_epoch = KvMaterializationDescriptor::new(
+            meta("epg.so4.int4", 9, KvKeyTransformScope::TokenStable),
+            KvKeyEncodingOrder::CodecThenTransform,
+            KvRematerializationSource::StoredCanonicalRaw,
+        )
+        .unwrap();
+        let next_epoch = KvMaterializationDescriptor::new(
+            meta("epg.so4.int4", 10, KvKeyTransformScope::TokenStable),
+            KvKeyEncodingOrder::CodecThenTransform,
+            KvRematerializationSource::StoredCanonicalRaw,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            from.validate_successor(&same_epoch),
+            Err(KvRepresentationError::MaterializationMustAdvanceEpoch { .. })
+        ));
+        assert!(from.validate_successor(&next_epoch).is_ok());
     }
 }
