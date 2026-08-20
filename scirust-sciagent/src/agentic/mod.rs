@@ -3,6 +3,7 @@ pub mod approval_request;
 pub mod approval_service;
 pub mod delegation;
 pub mod durable_audit;
+pub mod enterprise;
 pub mod guard;
 pub mod permission;
 pub mod policy_store;
@@ -24,6 +25,10 @@ pub use delegation::{
     ChildRequest, DelegationContext, DelegationError, ResourceBudget, SecretCapability,
 };
 pub use durable_audit::{AUDIT_GENESIS_HASH, DurableAuditEntry, FileApprovalAudit};
+pub use enterprise::{
+    EnterpriseAction, EnterpriseDecision, EnterpriseIdentity, EnterprisePolicyGate, EnterpriseRule,
+    OrgId, ProjectId, TenantId, WorkspaceId,
+};
 pub use guard::{ConformalGuard, GuardVerdict};
 pub use permission::{
     ApprovalChoice, ApprovalOutcome, ApprovalPolicy, PermissionDecision, PermissionGate,
