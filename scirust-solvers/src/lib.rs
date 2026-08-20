@@ -16,6 +16,8 @@
 //! - **Optimisation** : BFGS, descente de gradient avec recherche linéaire,
 //!   Nelder-Mead sans dérivée, gradient projeté spectral (SPG) sous
 //!   contraintes de boîte.
+//! - **Optimisation combinatoire** : clustering medoid certifié et sélection
+//!   exacte 0/1 sous budget par frontière de Pareto sparse.
 //! - **Quadrature** : Simpson adaptatif, Gauss-Legendre.
 //! - **Polynômes** : évaluation Horner, racines via matrice compagnon.
 //! - **API unifiée** : `solve(expr, var)` dispatch symbolique → numérique.
@@ -24,6 +26,8 @@
 
 #![allow(clippy::needless_range_loop)]
 
+#[path = "combinatorial/budgeted_selection.rs"]
+pub mod budgeted_selection;
 pub mod combinatorial;
 pub mod linalg;
 pub mod nonlinear;
@@ -56,7 +60,7 @@ pub enum SolverError {
     NotSpd,
 
     #[error("no sign change in interval [{a}, {b}] for bisection: f(a)={fa:.3e}, f(b)={fb:.3e}")]
-    NoSignChange { a: f64, b: f64, fa: f64, fb: f64 },
+    NoSignChange { a: f64, fa: f64, b: f64, fb: f64 },
 
     #[error("derivative is zero at x={x} — Newton step undefined")]
     ZeroDerivative { x: f64 },
