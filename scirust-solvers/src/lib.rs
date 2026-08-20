@@ -16,8 +16,10 @@
 //! - **Optimisation** : BFGS, descente de gradient avec recherche linéaire,
 //!   Nelder-Mead sans dérivée, gradient projeté spectral (SPG) sous
 //!   contraintes de boîte.
-//! - **Optimisation combinatoire** : clustering medoid certifié et sélection
-//!   exacte 0/1 sous budget par frontière de Pareto sparse.
+//! - **Optimisation combinatoire** : clustering medoid certifié, sélection
+//!   exacte 0/1 sous budget par frontière de Pareto sparse, et maximisation
+//!   gloutonne déterministe d'objectifs monotones sous-modulaires sous
+//!   contrainte de cardinalité.
 //! - **Quadrature** : Simpson adaptatif, Gauss-Legendre.
 //! - **Polynômes** : évaluation Horner, racines via matrice compagnon.
 //! - **API unifiée** : `solve(expr, var)` dispatch symbolique → numérique.
@@ -38,6 +40,8 @@ pub mod quadrature;
 pub mod roots;
 pub mod scientific;
 pub mod solve;
+#[path = "combinatorial/submodular.rs"]
+pub mod submodular;
 
 pub use linalg::Matrix;
 
