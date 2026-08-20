@@ -41,7 +41,8 @@ impl KvRepresentationId {
     /// `epg.so4.structural`.
     pub fn new(value: impl Into<String>) -> Result<Self, KvRepresentationError> {
         let value = value.into();
-        if value.trim().is_empty() {
+        if value.trim().is_empty()
+        {
             return Err(KvRepresentationError::EmptyRepresentationId);
         }
         Ok(Self(value))
@@ -119,13 +120,15 @@ impl KvRepresentationMetadata {
     /// Changing the representation contract must advance the epoch.  Keeping
     /// the same contract may preserve or advance the epoch, but never regress.
     pub fn validate_successor(&self, target: &Self) -> Result<(), KvRepresentationError> {
-        if !self.same_contract(target) && target.epoch <= self.epoch {
+        if !self.same_contract(target) && target.epoch <= self.epoch
+        {
             return Err(KvRepresentationError::ContractChangeMustAdvanceEpoch {
                 from: self.epoch,
                 to: target.epoch,
             });
         }
-        if self.same_contract(target) && target.epoch < self.epoch {
+        if self.same_contract(target) && target.epoch < self.epoch
+        {
             return Err(KvRepresentationError::EpochRegression {
                 from: self.epoch,
                 to: target.epoch,
@@ -160,8 +163,12 @@ pub enum KvRepresentationError {
 
 impl fmt::Display for KvRepresentationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::EmptyRepresentationId => write!(f, "KV representation identifier must not be empty"),
+        match self
+        {
+            Self::EmptyRepresentationId =>
+            {
+                write!(f, "KV representation identifier must not be empty")
+            },
             Self::EpochOverflow => write!(f, "KV representation epoch overflow"),
             Self::ContractChangeMustAdvanceEpoch { from, to } => write!(
                 f,
@@ -198,7 +205,9 @@ mod tests {
     fn query_dependent_key_is_not_reusable() {
         let m = meta("epg.dynamic", 2, KvKeyTransformScope::QueryDependent);
         assert!(!m.reusable_for_future_queries());
-        assert!(meta("epg.so4", 2, KvKeyTransformScope::TokenStable).reusable_for_future_queries());
+        assert!(
+            meta("epg.so4", 2, KvKeyTransformScope::TokenStable).reusable_for_future_queries()
+        );
     }
 
     #[test]
