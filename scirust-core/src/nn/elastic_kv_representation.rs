@@ -205,9 +205,7 @@ mod tests {
     fn query_dependent_key_is_not_reusable() {
         let m = meta("epg.dynamic", 2, KvKeyTransformScope::QueryDependent);
         assert!(!m.reusable_for_future_queries());
-        assert!(
-            meta("epg.so4", 2, KvKeyTransformScope::TokenStable).reusable_for_future_queries()
-        );
+        assert!(meta("epg.so4", 2, KvKeyTransformScope::TokenStable).reusable_for_future_queries());
     }
 
     #[test]
