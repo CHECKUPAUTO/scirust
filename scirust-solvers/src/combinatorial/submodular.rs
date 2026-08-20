@@ -158,8 +158,7 @@ where
             marginal_evaluations,
             requested_cardinality: cardinality,
             effective_cardinality,
-            guarantee:
-                SubmodularApproximationGuarantee::OneMinusInvEIfNormalizedMonotoneSubmodular,
+            guarantee: SubmodularApproximationGuarantee::OneMinusInvEIfNormalizedMonotoneSubmodular,
         },
     })
 }
