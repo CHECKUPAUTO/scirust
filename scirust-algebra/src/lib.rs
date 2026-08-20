@@ -45,6 +45,9 @@ pub mod presented;
 /// Deterministic orbit/transversal and stabilizer-chain algorithms.
 #[rustfmt::skip]
 pub mod schreier;
+/// General semiring abstractions and adapters.
+#[rustfmt::skip]
+pub mod semiring;
 /// Finite-group representation helpers and harmonic-analysis primitives.
 #[rustfmt::skip]
 pub mod representation;
@@ -53,3 +56,4 @@ pub mod representation;
 pub mod wigner;
 
 pub use crate::core::{AbelianGroup, Field, Group, Magma, Monoid, Ring, Semigroup};
+pub use crate::semiring::{BooleanSemiring, CommutativeSemiring, RingSemiring, Semiring};
