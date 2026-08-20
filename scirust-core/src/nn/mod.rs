@@ -56,6 +56,7 @@ pub mod peft;
 pub mod pinn;
 pub mod pool;
 pub mod positional_encoding;
+pub mod represented_elastic_kv_cache;
 pub mod residual;
 pub mod residual_latent_kv_backend;
 #[allow(clippy::too_many_arguments)]
