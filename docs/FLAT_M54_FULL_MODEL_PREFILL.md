@@ -74,6 +74,21 @@ The GitHub workflow must:
 
 The default protocol uses one warm-up and five measured repeats per route because this is a 304M full-model benchmark rather than a microkernel sweep.
 
+## Accepted physical Thor evidence (2026-08-19)
+
+GitHub Actions run `32308929421` on exact SciRust head `e7640173cf3c9680710683753f24a5d98753cdf4` (PR #1283, FLAT pinned to `43b4c0ba08e109ac7025a01a01837da6927d05d0`) executed successfully on persistent physical runner `tarek-scirust-arm64-01`, adapter `NVIDIA Tegra NVIDIA Thor`, backend Vulkan, driver 580.00. The full protocol was enforced: exact-head checkout, compile before GPU reservation, `/dev/nvidia0` lock, 300-second idle window, order-rotated portable/vec4 measurements, and empty post-run occupancy.
+
+Recorded rows (304M SCIAGENT model, 1 warmup, 5 repeats, medians in milliseconds):
+
+| prompt | portable median ms | portable p95 ms | vec4 median ms | vec4 p95 ms | portable / vec4 | different_logits | max abs | portable token | vec4 token |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 128 | 553.350 | 566.970 | 554.375 | 558.238 | 0.998150 | 0 | 0.0 | 1203 | 1203 |
+| 512 | 2532.007 | 2536.655 | 2486.439 | 2495.846 | 1.018327 | 0 | 0.0 | 19704 | 19704 |
+
+The full-model evidence: at prompt 128 the vec4 route is effectively neutral (0.998x, within measurement noise); at prompt 512 it is 1.8% faster (1.018x). Both lengths produce **bit-identical final vocabulary logits and identical greedy next-token argmax** (max abs 0.0).
+
+Per the promotion rule, the model-level median does not materially improve at prompt 128 and improves only 1.8% at prompt 512. The M53 vec4 kernel therefore remains **opt-in, bounded attention evidence** and is not promoted to default routing on the basis of its microbenchmark gain. `performance_claim=none` remains in force.
+
 ## Promotion rule
 
 M53 remains opt-in. M54 does not change routing.
