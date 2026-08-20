@@ -1,6 +1,7 @@
 pub mod approval_audit;
 pub mod approval_request;
 pub mod approval_service;
+pub mod deepseek_bridge;
 pub mod delegation;
 pub mod durable_audit;
 pub mod enterprise;
@@ -20,7 +21,11 @@ pub use approval_audit::{
 pub use approval_request::{APPROVAL_REQUEST_ID_CHARS, ApprovalRequestId, ApprovalRequestIdError};
 pub use approval_service::{
     ApprovalAnswer, ApprovalAnswerer, ApprovalRequest, ApprovalRequestWire, ApprovalService,
-    CancellationToken, PendingApprovals, ResolvedApproval,
+    ApprovalServiceRequest, CancellationToken, PendingApprovals, ResolvedApproval,
+};
+pub use deepseek_bridge::{
+    BRIDGE_SCHEMA_VERSION, BridgeApprovalOutcome, BridgeError, BridgeEvent, DeepSeekBridge,
+    ParameterDefinition, ToolCallWire, ToolDefinition,
 };
 pub use delegation::{
     ChildRequest, DelegationContext, DelegationError, ResourceBudget, SecretCapability,
