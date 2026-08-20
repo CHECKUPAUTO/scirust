@@ -95,4 +95,4 @@ M53 remains opt-in. M54 does not change routing.
 
 A future routing change requires a real full-model improvement on physical Thor with the exact-head evidence preserved. If the model-level median does not improve, the M53 kernel remains useful only as bounded attention evidence and must not be promoted on the basis of its microbenchmark gain.
 
-`performance_claim=none` remains in force until physical M54 evidence is inspected and accepted.
+The physical M54 evidence above has been inspected and accepted for its bounded scope. `performance_claim=none` remains in force because M54 does not justify a default-routing or general product-performance claim.
