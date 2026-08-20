@@ -273,10 +273,8 @@ impl<P: super::tool_runtime::ToolPolicy> DeepSeekBridge<P> {
             .with_reason(format!("tool {} requested by DeepSeek client", call.tool));
         if let Some(requested) = requested
         {
-            input = input.with_sandbox(
-                configured.unwrap_or(SandboxPermission::ReadOnly),
-                requested,
-            );
+            input =
+                input.with_sandbox(configured.unwrap_or(SandboxPermission::ReadOnly), requested);
         }
         if let Some(justification) = wire.justification.as_deref()
         {
@@ -662,8 +660,7 @@ mod tests {
                 Ok(ApprovalAnswer::AllowedOnce)
             }
         }
-        let approval =
-            ApprovalService::with_answerer(Arc::new(CaptureAnswerer(captured.clone())));
+        let approval = ApprovalService::with_answerer(Arc::new(CaptureAnswerer(captured.clone())));
         let bridge = DeepSeekBridge::new(test_runtime(), approval);
         let mut params = HashMap::new();
         params.insert("path".to_string(), "Cargo.toml".to_string());
