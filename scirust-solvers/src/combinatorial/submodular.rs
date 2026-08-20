@@ -173,17 +173,13 @@ mod tests {
         // Coverage is normalized, monotone and submodular. Each item covers a
         // subset of a 4-element universe.
         let masks = [0b0011u8, 0b0110u8, 0b1100u8];
-        let result = greedy_monotone_submodular_cardinality(
-            masks.len(),
-            2,
-            |selected, candidate| {
-                let before = selected
-                    .iter()
-                    .fold(0u8, |mask, &index| mask | masks[index]);
-                let after = before | masks[candidate];
-                u64::from(after.count_ones() - before.count_ones())
-            },
-        )
+        let result = greedy_monotone_submodular_cardinality(masks.len(), 2, |selected, candidate| {
+            let before = selected
+                .iter()
+                .fold(0u8, |mask, &index| mask | masks[index]);
+            let after = before | masks[candidate];
+            u64::from(after.count_ones() - before.count_ones())
+        })
         .unwrap();
 
         // All three items initially have gain 2, so deterministic tie-breaking
@@ -199,16 +195,16 @@ mod tests {
 
     #[test]
     fn ties_resolve_to_smallest_index() {
-        let result = greedy_monotone_submodular_cardinality(4, 2, |_selected, _candidate| 1)
-            .unwrap();
+        let result =
+            greedy_monotone_submodular_cardinality(4, 2, |_selected, _candidate| 1).unwrap();
         assert_eq!(result.selected_indices, vec![0, 1]);
         assert_eq!(result.total_gain, 2);
     }
 
     #[test]
     fn zero_gain_stops_early() {
-        let result = greedy_monotone_submodular_cardinality(5, 5, |_selected, _candidate| 0)
-            .unwrap();
+        let result =
+            greedy_monotone_submodular_cardinality(5, 5, |_selected, _candidate| 0).unwrap();
         assert!(result.selected_indices.is_empty());
         assert_eq!(result.total_gain, 0);
         assert_eq!(result.certificate.marginal_evaluations, 5);
@@ -216,8 +212,8 @@ mod tests {
 
     #[test]
     fn cardinality_is_clamped_to_ground_set() {
-        let result = greedy_monotone_submodular_cardinality(2, 9, |_selected, _candidate| 1)
-            .unwrap();
+        let result =
+            greedy_monotone_submodular_cardinality(2, 9, |_selected, _candidate| 1).unwrap();
         assert_eq!(result.selected_indices, vec![0, 1]);
         assert_eq!(result.certificate.requested_cardinality, 9);
         assert_eq!(result.certificate.effective_cardinality, 2);
@@ -225,8 +221,8 @@ mod tests {
 
     #[test]
     fn empty_ground_set_is_valid() {
-        let result = greedy_monotone_submodular_cardinality(0, 3, |_selected, _candidate| 1)
-            .unwrap();
+        let result =
+            greedy_monotone_submodular_cardinality(0, 3, |_selected, _candidate| 1).unwrap();
         assert!(result.selected_indices.is_empty());
         assert_eq!(result.total_gain, 0);
         assert_eq!(result.certificate.marginal_evaluations, 0);
