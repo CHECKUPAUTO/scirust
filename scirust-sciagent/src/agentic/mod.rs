@@ -6,6 +6,7 @@ pub mod deepseek_bridge;
 pub mod delegation;
 pub mod durable_audit;
 pub mod enterprise;
+pub mod enterprise_audit;
 pub mod guard;
 pub mod permission;
 pub mod policy_store;
@@ -40,6 +41,7 @@ pub use enterprise::{
     EnterpriseAction, EnterpriseDecision, EnterpriseIdentity, EnterprisePolicyGate, EnterpriseRule,
     OrgId, ProjectId, TenantId, WorkspaceId,
 };
+pub use enterprise_audit::{ENTERPRISE_AUDIT_GENESIS, EnterpriseAuditEvent, EnterpriseAuditTrail};
 pub use guard::{ConformalGuard, GuardVerdict};
 pub use permission::{
     ApprovalChoice, ApprovalOutcome, ApprovalPolicy, PermissionDecision, PermissionGate,
