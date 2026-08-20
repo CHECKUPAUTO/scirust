@@ -54,6 +54,9 @@ pub mod semiring;
 /// Finite-group representation helpers and harmonic-analysis primitives.
 #[rustfmt::skip]
 pub mod representation;
+/// Deterministic `SO(4)` and `Spin(4)` rotation primitives.
+#[rustfmt::skip]
+pub mod so4;
 /// Complex Wigner D elements and complex spherical harmonics.
 #[rustfmt::skip]
 pub mod wigner;
