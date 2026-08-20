@@ -22,18 +22,18 @@ impl ResourceBudget {
     /// A budget fits inside a ceiling when every field is at most the
     /// ceiling's (None = unbounded ceiling).
     fn fits_in(&self, ceiling: &ResourceBudget) -> bool {
-        let time_ok = ceiling.wall_time_seconds.is_none()
-            || self
-                .wall_time_seconds
-                .is_none_or(|value| ceiling.wall_time_seconds.is_none_or(|c| value <= c));
-        let memory_ok = ceiling.memory_bytes.is_none()
-            || self
-                .memory_bytes
-                .is_none_or(|value| ceiling.memory_bytes.is_none_or(|c| value <= c));
-        let processes_ok = ceiling.max_processes.is_none()
-            || self
-                .max_processes
-                .is_none_or(|value| ceiling.max_processes.is_none_or(|c| value <= c));
+        fn limit_fits<T: PartialOrd>(requested: Option<T>, ceiling: Option<T>) -> bool {
+            match (requested, ceiling)
+            {
+                (_, None) => true,
+                (Some(value), Some(limit)) => value <= limit,
+                (None, Some(_)) => false,
+            }
+        }
+
+        let time_ok = limit_fits(self.wall_time_seconds, ceiling.wall_time_seconds);
+        let memory_ok = limit_fits(self.memory_bytes, ceiling.memory_bytes);
+        let processes_ok = limit_fits(self.max_processes, ceiling.max_processes);
         let gpu_ok = !self.gpu_allowed || ceiling.gpu_allowed;
         time_ok && memory_ok && processes_ok && gpu_ok
     }
@@ -452,6 +452,42 @@ mod tests {
             ))
             .expect_err("larger wall time must fail");
         assert_eq!(error, DelegationError::ResourceWidening);
+    }
+
+    #[test]
+    fn child_cannot_drop_finite_resource_ceiling() {
+        let finite_budgets = [
+            ResourceBudget {
+                wall_time_seconds: Some(60),
+                ..ResourceBudget::default()
+            },
+            ResourceBudget {
+                memory_bytes: Some(1024),
+                ..ResourceBudget::default()
+            },
+            ResourceBudget {
+                max_processes: Some(4),
+                ..ResourceBudget::default()
+            },
+        ];
+
+        for resource_budget in finite_budgets
+        {
+            let mut parent = rooted("parent", None);
+            parent.resource_budget = resource_budget;
+            let error = parent
+                .derive_child(request(
+                    "child",
+                    None,
+                    SandboxPermission::ReadOnly,
+                    ApprovalPolicy::Never,
+                    ResourceBudget::default(),
+                    BTreeSet::new(),
+                    Vec::new(),
+                ))
+                .expect_err("removing a finite parent resource ceiling must fail");
+            assert_eq!(error, DelegationError::ResourceWidening);
+        }
     }
 
     #[test]
