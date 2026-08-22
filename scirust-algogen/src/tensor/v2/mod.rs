@@ -8,6 +8,7 @@ pub mod canonical;
 pub mod compat;
 pub mod interpret;
 pub mod ir;
+pub mod simplify;
 pub mod types;
 pub mod verify;
 
@@ -19,6 +20,7 @@ pub use interpret::{
     ExecutionError, ExecutionPolicy, ExecutionResult, FloatPolicy, ValueTensor, execute_program,
 };
 pub use ir::{Bin, IR_VERSION, Op, Ref, ResearchProgram, Section, Un, ValueId};
+pub use simplify::{MAX_SIMPLIFY_PASSES, SimplifyStats, canonicalize};
 pub use types::{DType, ScalarValue, ShapeError, ValueType};
 pub use verify::{ProgramError, SectionKind, VerificationLimits, VerifiedProgram, verify_program};
 
