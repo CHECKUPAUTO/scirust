@@ -47,8 +47,18 @@ fn normalized_workspace_components(value: &str) -> Option<Vec<OsString>> {
         return None;
     }
 
+    let path = Path::new(value);
     let mut components = Vec::new();
-    for component in Path::new(value).components()
+
+    // Anchor every relative workspace root to the same explicit current-dir
+    // component.  This keeps `.`, `./`, `sub` and `./sub` comparable without
+    // weakening the fail-closed rejection of `..`.
+    if path.is_relative()
+    {
+        components.push(OsString::from("."));
+    }
+
+    for component in path.components()
     {
         match component
         {
@@ -656,6 +666,48 @@ mod tests {
         assert_eq!(
             error,
             DelegationError::WorkspaceWidening("/elsewhere".to_string())
+        );
+    }
+
+    #[test]
+    fn current_directory_workspace_root_contains_relative_descendants() {
+        let parent = owning_root("parent", BTreeSet::new(), vec![".".to_string()]);
+
+        for root in [".", "./", "sub", "./sub"]
+        {
+            parent
+                .derive_child(request(
+                    "child",
+                    None,
+                    SandboxPermission::ReadOnly,
+                    ApprovalPolicy::Never,
+                    ResourceBudget::default(),
+                    BTreeSet::new(),
+                    vec![root.to_string()],
+                ))
+                .unwrap_or_else(|error| {
+                    panic!("relative root {root:?} must stay within '.': {error}")
+                });
+        }
+    }
+
+    #[test]
+    fn current_directory_workspace_root_still_rejects_parent_escape() {
+        let parent = owning_root("parent", BTreeSet::new(), vec!["./".to_string()]);
+        let error = parent
+            .derive_child(request(
+                "child",
+                None,
+                SandboxPermission::ReadOnly,
+                ApprovalPolicy::Never,
+                ResourceBudget::default(),
+                BTreeSet::new(),
+                vec!["../outside".to_string()],
+            ))
+            .expect_err("relative parent-dir traversal must fail closed");
+        assert_eq!(
+            error,
+            DelegationError::WorkspaceWidening("../outside".to_string())
         );
     }
 
