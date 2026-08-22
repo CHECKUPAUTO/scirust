@@ -21,6 +21,7 @@ mod population;
 mod problem;
 mod report;
 mod rng;
+pub mod v2;
 mod verify;
 
 pub use active::analyze_active;
