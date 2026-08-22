@@ -382,7 +382,9 @@ impl<P: super::tool_runtime::ToolPolicy> DeepSeekBridge<P> {
 mod tests {
     use super::*;
     use crate::agentic::approval_service::{ApprovalAnswerer, ApprovalRequest};
-    use crate::agentic::permission::{PermissionDecision, PermissionGate, PermissionPolicy};
+    use crate::agentic::permission::{
+        ApprovalOutcome, PermissionDecision, PermissionGate, PermissionPolicy,
+    };
     use crate::agentic::sandbox_approval::SandboxPermissionGate;
     use std::cell::RefCell;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -400,6 +402,18 @@ mod tests {
         }
     }
 
+    /// Approver stub so escalated tool calls can complete execution in tests.
+    struct AlwaysAllowSandboxApprover;
+
+    impl crate::agentic::sandbox_approval::SandboxApprovalService for AlwaysAllowSandboxApprover {
+        fn request_approval(
+            &self,
+            _request: &crate::agentic::sandbox_approval::SandboxApprovalRequest,
+        ) -> Result<ApprovalOutcome, String> {
+            Ok(ApprovalOutcome::AllowedOnce)
+        }
+    }
+
     fn test_runtime() -> ToolRuntime<SandboxPermissionGate> {
         let gate = PermissionGate::new(PermissionPolicy::new(
             PermissionDecision::Allow,
@@ -407,7 +421,10 @@ mod tests {
             Vec::new(),
             Vec::new(),
         ));
-        let policy = SandboxPermissionGate::new(gate);
+        let policy = SandboxPermissionGate::with_approval_service(
+            gate,
+            Arc::new(AlwaysAllowSandboxApprover),
+        );
         ToolRuntime::new(crate::agentic::tools::Tool::builtins(), policy).unwrap()
     }
 
@@ -663,15 +680,19 @@ mod tests {
         let approval = ApprovalService::with_answerer(Arc::new(CaptureAnswerer(captured.clone())));
         let bridge = DeepSeekBridge::new(test_runtime(), approval);
         let mut params = HashMap::new();
+        // `grep` executes through the process sandbox (unlike `read`), so the
+        // escalation metadata survives the full announce -> approve -> execute
+        // path and the justification reaches the answerer verbatim.
+        params.insert("pattern".to_string(), "version".to_string());
         params.insert("path".to_string(), "Cargo.toml".to_string());
         bridge
             .execute(
                 ToolCallWire {
                     call_id: "call-justification".to_string(),
-                    tool: "read".to_string(),
+                    tool: "grep".to_string(),
                     params,
-                    sandbox_permissions: Some("read-only".to_string()),
-                    justification: Some("read-only inspection requested".to_string()),
+                    sandbox_permissions: Some("danger-full-access".to_string()),
+                    justification: Some("full access escalation requested".to_string()),
                 },
                 &CancellationToken::new(),
                 &|_| {},
@@ -680,7 +701,7 @@ mod tests {
         let request = captured.lock().unwrap().clone().unwrap();
         assert_eq!(
             request.justification.as_deref(),
-            Some("read-only inspection requested")
+            Some("full access escalation requested")
         );
         assert!(request.request_id.is_valid());
     }
