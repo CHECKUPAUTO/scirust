@@ -220,6 +220,11 @@ impl CudaModel {
     /// (`t×kv_dim`), matching `GpuChain::gqa_attention`: apply RoPE independently inside every logical head,
     /// then per head `softmax((qs·ksᵀ)/√dh [+causal])·vs`, placed into the head's
     /// `d_model` slot and summed.
+    ///
+    /// Raw scores use the same shape-invariant left-to-right fp32 kernel as the
+    /// cached prefill and one-token decode paths so the naive full-recompute
+    /// reference and the resident KV cache share one numerical contract and
+    /// greedy token parity stays exact.
     fn attention(&self, q: &CudaMatrix, k: &CudaMatrix, v: &CudaMatrix) -> CudaMatrix {
         let dh = self.d_model / self.n_heads;
         let seq = q.rows();
@@ -234,7 +239,7 @@ impl CudaModel {
             let qs = self.chain.slice_cols(&qr, head * dh, dh);
             let ks = self.chain.slice_cols(&kr, kv * dh, dh);
             let vs = self.chain.slice_cols(v, kv * dh, dh);
-            let scores = self.chain.matmul_bt(&qs, &ks);
+            let scores = self.chain.attention_scores_ltr(&qs, &ks);
             let scaled = self.chain.scale_causal_mask(&scores, scale, self.causal);
             let weights = self.chain.softmax(&scaled);
             heads.push(self.chain.attention_context(&weights, &vs));
