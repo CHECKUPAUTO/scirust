@@ -14,7 +14,7 @@ use core::fmt;
 
 use scirust_compute::DType;
 
-use crate::{Graph, NodeId};
+use crate::{Graph, NodeId, TensorType};
 
 /// Stable identifier of one representation declared in a
 /// [`RepresentationPlan`].
@@ -57,6 +57,34 @@ impl StorageBits {
     }
 }
 
+/// Typed reference to one representation declared in a [`RepresentationPlan`].
+///
+/// The [`RepresentationId`] identifies the physical representation family,
+/// while `logical_type` describes the value represented by this particular
+/// component. Keeping the type here allows one future composite representation
+/// to contain components with shapes different from the parent tensor.
+///
+/// Instances are constructed through [`RepresentationPlan::component`], which
+/// validates that the identifier exists and is compatible with the component's
+/// logical type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepresentationComponent {
+    logical_type: TensorType,
+    representation: RepresentationId,
+}
+
+impl RepresentationComponent {
+    /// Logical tensor type represented by this component.
+    pub const fn logical_type(&self) -> &TensorType {
+        &self.logical_type
+    }
+
+    /// Interned physical representation assigned to this component.
+    pub const fn representation(&self) -> RepresentationId {
+        self.representation
+    }
+}
+
 /// Primitive physical representation of one logical tensor value.
 ///
 /// The enum is intentionally non-exhaustive: later phases may add block
@@ -86,27 +114,36 @@ impl PrimitiveRepresentation {
         }
     }
 
+    /// Validate that this physical representation can represent `logical`.
+    ///
+    /// Dense storage is currently an identity representation: changing dtype
+    /// would require an explicitly defined conversion/quantization family.
+    fn validate_for(&self, logical: &TensorType) -> Result<(), RepresentationError> {
+        match self
+        {
+            Self::Dense { storage_dtype } if *storage_dtype != logical.dtype =>
+            {
+                Err(RepresentationError::DenseDTypeMismatch {
+                    logical: logical.dtype,
+                    storage: *storage_dtype,
+                })
+            },
+            Self::Dense { .. } => Ok(()),
+        }
+    }
+
     /// Return the exact physical storage required for `logical`.
     ///
     /// Dense storage uses the logical tensor shape and this representation's
     /// physical scalar dtype. The calculation is fully checked and never uses
     /// floating-point arithmetic.
-    pub fn storage_bits(
-        &self,
-        logical: &crate::TensorType,
-    ) -> Result<StorageBits, RepresentationError> {
+    pub fn storage_bits(&self, logical: &TensorType) -> Result<StorageBits, RepresentationError> {
+        self.validate_for(logical)?;
+
         let storage_dtype = match self
         {
             Self::Dense { storage_dtype } => *storage_dtype,
         };
-
-        if storage_dtype != logical.dtype
-        {
-            return Err(RepresentationError::DenseDTypeMismatch {
-                logical: logical.dtype,
-                storage: storage_dtype,
-            });
-        }
 
         let elements = logical
             .shape
@@ -149,6 +186,11 @@ pub enum RepresentationError {
         /// Scalar dtype requested by the dense physical representation.
         storage: DType,
     },
+    /// A component referenced a representation not declared by its plan.
+    InvalidRepresentationId {
+        /// Unknown representation identifier.
+        id: RepresentationId,
+    },
 }
 
 impl fmt::Display for RepresentationError {
@@ -172,6 +214,14 @@ impl fmt::Display for RepresentationError {
                 write!(
                     formatter,
                     "dense storage dtype {storage:?} does not match logical dtype {logical:?}"
+                )
+            },
+            Self::InvalidRepresentationId { id } =>
+            {
+                write!(
+                    formatter,
+                    "representation identifier {} is not declared by this plan",
+                    id.get()
                 )
             },
         }
@@ -251,6 +301,27 @@ impl RepresentationPlan {
     pub fn representation_for(&self, node: NodeId) -> Option<&PrimitiveRepresentation> {
         self.assignment(node).and_then(|id| self.representation(id))
     }
+
+    /// Construct a typed component referencing an interned representation.
+    ///
+    /// This validates both identifier membership and compatibility between the
+    /// physical representation and the component's logical tensor type.
+    pub fn component(
+        &self,
+        logical_type: TensorType,
+        representation: RepresentationId,
+    ) -> Result<RepresentationComponent, RepresentationError> {
+        let physical = self
+            .representation(representation)
+            .ok_or(RepresentationError::InvalidRepresentationId { id: representation })?;
+
+        physical.validate_for(&logical_type)?;
+
+        Ok(RepresentationComponent {
+            logical_type,
+            representation,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -327,6 +398,68 @@ mod tests {
         assert_eq!(plan.representations().len(), 2);
         assert_eq!(plan.assignment(first), Some(RepresentationId::new(0)));
         assert_eq!(plan.assignment(third), Some(RepresentationId::new(1)));
+    }
+
+    #[test]
+    fn typed_component_preserves_its_own_logical_type() {
+        let mut graph = Graph::new();
+        let matrix_type = TensorType::new(DType::F32, Shape::new(vec![2, 2]));
+        let vector_type = TensorType::new(DType::F32, Shape::new(vec![4]));
+
+        let matrix = graph.add_input("matrix", matrix_type.clone()).unwrap();
+        let vector = graph.add_input("vector", vector_type.clone()).unwrap();
+        graph.set_outputs(vec![matrix, vector]).unwrap();
+
+        let plan = RepresentationPlan::dense(&graph).unwrap();
+
+        let matrix_id = plan.assignment(matrix).unwrap();
+        let vector_id = plan.assignment(vector).unwrap();
+
+        // Representation identity is reusable across shapes.
+        assert_eq!(matrix_id, vector_id);
+
+        let matrix_component = plan.component(matrix_type.clone(), matrix_id).unwrap();
+        let vector_component = plan.component(vector_type.clone(), vector_id).unwrap();
+
+        assert_eq!(matrix_component.logical_type(), &matrix_type);
+        assert_eq!(vector_component.logical_type(), &vector_type);
+        assert_eq!(matrix_component.representation(), matrix_id);
+        assert_eq!(vector_component.representation(), vector_id);
+    }
+
+    #[test]
+    fn typed_component_rejects_unknown_representation_id() {
+        let graph = Graph::new();
+        let plan = RepresentationPlan::dense(&graph).unwrap();
+        let unknown = RepresentationId::new(7);
+
+        assert_eq!(
+            plan.component(TensorType::new(DType::F32, Shape::new(vec![2, 2])), unknown,),
+            Err(RepresentationError::InvalidRepresentationId { id: unknown })
+        );
+    }
+
+    #[test]
+    fn typed_component_rejects_incompatible_dense_dtype() {
+        let mut graph = Graph::new();
+        let node = graph
+            .add_input("f32", TensorType::new(DType::F32, Shape::new(vec![2, 2])))
+            .unwrap();
+        graph.set_outputs(vec![node]).unwrap();
+
+        let plan = RepresentationPlan::dense(&graph).unwrap();
+        let dense_f32 = plan.assignment(node).unwrap();
+
+        assert_eq!(
+            plan.component(
+                TensorType::new(DType::F16, Shape::new(vec![2, 2])),
+                dense_f32,
+            ),
+            Err(RepresentationError::DenseDTypeMismatch {
+                logical: DType::F16,
+                storage: DType::F32,
+            })
+        );
     }
 
     #[test]
