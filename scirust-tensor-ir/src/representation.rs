@@ -36,6 +36,27 @@ impl RepresentationId {
     }
 }
 
+/// Exact number of physical storage bits required by a representation.
+///
+/// This is an integer count, not an entropy estimate or an average
+/// bits-per-value rate. Representation metadata that physically occupies
+/// storage must eventually be included in this count by the representation
+/// family that owns it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct StorageBits(u64);
+
+impl StorageBits {
+    /// Construct an exact storage-bit count.
+    pub const fn new(bits: u64) -> Self {
+        Self(bits)
+    }
+
+    /// Return the exact number of bits.
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
 /// Primitive physical representation of one logical tensor value.
 ///
 /// The enum is intentionally non-exhaustive: later phases may add block
@@ -64,6 +85,47 @@ impl PrimitiveRepresentation {
             Self::Dense { storage_dtype } => Some(*storage_dtype),
         }
     }
+
+    /// Return the exact physical storage required for `logical`.
+    ///
+    /// Dense storage uses the logical tensor shape and this representation's
+    /// physical scalar dtype. The calculation is fully checked and never uses
+    /// floating-point arithmetic.
+    pub fn storage_bits(
+        &self,
+        logical: &crate::TensorType,
+    ) -> Result<StorageBits, RepresentationError> {
+        let storage_dtype = match self
+        {
+            Self::Dense { storage_dtype } => *storage_dtype,
+        };
+
+        if storage_dtype != logical.dtype
+        {
+            return Err(RepresentationError::DenseDTypeMismatch {
+                logical: logical.dtype,
+                storage: storage_dtype,
+            });
+        }
+
+        let elements = logical
+            .shape
+            .checked_num_elements()
+            .map_err(|_| RepresentationError::ShapeOverflow)?;
+
+        let elements =
+            u64::try_from(elements).map_err(|_| RepresentationError::StorageSizeOverflow)?;
+
+        let bytes_per_element = u64::try_from(storage_dtype.size_bytes())
+            .map_err(|_| RepresentationError::StorageSizeOverflow)?;
+
+        let bits = elements
+            .checked_mul(bytes_per_element)
+            .and_then(|bytes| bytes.checked_mul(8))
+            .ok_or(RepresentationError::StorageSizeOverflow)?;
+
+        Ok(StorageBits::new(bits))
+    }
 }
 
 /// Failure while constructing a representation plan.
@@ -72,6 +134,21 @@ impl PrimitiveRepresentation {
 pub enum RepresentationError {
     /// The representation identifier space exceeded `u32`.
     TooManyRepresentations,
+    /// The logical tensor shape cannot be represented by `usize`.
+    ShapeOverflow,
+    /// The exact physical storage-bit count cannot be represented by `u64`.
+    StorageSizeOverflow,
+    /// Dense physical storage does not match the tensor's logical dtype.
+    ///
+    /// This initial IR phase models only identity dense storage. Any lossy or
+    /// converting representation must be introduced explicitly by a later
+    /// representation family with defined semantics.
+    DenseDTypeMismatch {
+        /// Logical scalar dtype declared by the canonical tensor type.
+        logical: DType,
+        /// Scalar dtype requested by the dense physical representation.
+        storage: DType,
+    },
 }
 
 impl fmt::Display for RepresentationError {
@@ -81,6 +158,21 @@ impl fmt::Display for RepresentationError {
             Self::TooManyRepresentations =>
             {
                 write!(formatter, "representation identifier space exhausted")
+            },
+            Self::ShapeOverflow =>
+            {
+                write!(formatter, "logical tensor shape overflows usize")
+            },
+            Self::StorageSizeOverflow =>
+            {
+                write!(formatter, "representation storage size overflows u64 bits")
+            },
+            Self::DenseDTypeMismatch { logical, storage } =>
+            {
+                write!(
+                    formatter,
+                    "dense storage dtype {storage:?} does not match logical dtype {logical:?}"
+                )
             },
         }
     }
@@ -235,5 +327,64 @@ mod tests {
         assert_eq!(plan.representations().len(), 2);
         assert_eq!(plan.assignment(first), Some(RepresentationId::new(0)));
         assert_eq!(plan.assignment(third), Some(RepresentationId::new(1)));
+    }
+
+    #[test]
+    fn dense_f32_matrix_has_exact_storage_bits() {
+        let logical = TensorType::new(DType::F32, Shape::new(vec![2, 2]));
+        let representation = PrimitiveRepresentation::dense(DType::F32);
+
+        assert_eq!(
+            representation.storage_bits(&logical),
+            Ok(StorageBits::new(128))
+        );
+    }
+
+    #[test]
+    fn dense_storage_rejects_implicit_dtype_conversion() {
+        let logical = TensorType::new(DType::F32, Shape::new(vec![2, 2]));
+        let representation = PrimitiveRepresentation::dense(DType::F16);
+
+        assert_eq!(
+            representation.storage_bits(&logical),
+            Err(RepresentationError::DenseDTypeMismatch {
+                logical: DType::F32,
+                storage: DType::F16,
+            })
+        );
+    }
+
+    #[test]
+    fn dense_f64_scalar_has_exact_storage_bits() {
+        let logical = TensorType::new(DType::F64, Shape::scalar());
+        let representation = PrimitiveRepresentation::dense(DType::F64);
+
+        assert_eq!(
+            representation.storage_bits(&logical),
+            Ok(StorageBits::new(64))
+        );
+    }
+
+    #[test]
+    fn storage_accounting_preserves_shape_overflow_as_a_structured_error() {
+        let logical = TensorType::new(DType::F32, Shape::new(vec![usize::MAX, 2]));
+        let representation = PrimitiveRepresentation::dense(DType::F32);
+
+        assert_eq!(
+            representation.storage_bits(&logical),
+            Err(RepresentationError::ShapeOverflow)
+        );
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn storage_accounting_rejects_bit_count_overflow() {
+        let logical = TensorType::new(DType::U8, Shape::new(vec![usize::MAX]));
+        let representation = PrimitiveRepresentation::dense(DType::U8);
+
+        assert_eq!(
+            representation.storage_bits(&logical),
+            Err(RepresentationError::StorageSizeOverflow)
+        );
     }
 }
