@@ -2,12 +2,16 @@
 //! non-finite policy, recurrence execution and multi-output programs.
 
 use super::compat::from_v1;
+use super::generate::{
+    GenerationRequest, Grammar, GrammarProfile, OperatorClass, StateInitializer, StateSpec,
+};
 use super::interpret::{
     ExecutionError, ExecutionPolicy, FloatPolicy, TensorDataError, ValueTensor, execute_program,
 };
 use super::ir::{
     AxisOp, Bin, Narrow, Op, Permute, Reduce, Ref, ResearchProgram, Section, ShapeTo, Ter, Un,
 };
+use super::search::evaluate_on_counterexamples;
 use super::semantics::NumericalSemantics;
 use super::types::{DType, ScalarValue, ValueType};
 use super::verify::{ProgramError, SectionKind, VerificationLimits, verify_program};
@@ -2363,4 +2367,82 @@ fn overflowing_narrow_range_is_rejected_and_displayable() {
     // Formatting must not panic (debug builds check integer overflow).
     let rendered = error.to_string();
     assert!(rendered.contains("exceeds axis"));
+}
+
+// ---------------------------------------------------------------------------
+// Discovery tooling integration (CEGIS over the standard search)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn cegis_refines_counterexamples_and_finds_the_sum_recurrence() {
+    use super::cegis::{CegisConfig, cedis_discover};
+    use super::evolve::MutationConfig;
+    let _ = MutationConfig::default();
+
+    // Reuse the honest sum-discovery setup: the target oracle is the
+    // reference recurrence; its AST is never handed to the generator.
+    let target = super::reference::compensated_sum_recurrence(3);
+    let value_type = ValueType::scalar(DType::F64);
+    let mut grammar = Grammar::profile(GrammarProfile::StreamingRecurrence);
+    grammar.allowed_classes = vec![
+        OperatorClass::Constant,
+        OperatorClass::Arithmetic,
+        OperatorClass::Shape,
+    ];
+    grammar.allowed_dtypes = vec![DType::F64];
+    grammar.constants = vec![
+        ScalarValue::F64(-1.0),
+        ScalarValue::F64(0.0),
+        ScalarValue::F64(1.0),
+    ];
+    grammar.max_operations = 8;
+    grammar.max_values = 8;
+    grammar.max_depth = 3;
+    grammar.max_shape_ops = 4;
+    let config = CegisConfig {
+        base: super::search::ExperimentConfig {
+            source_revision: "cegis-test".to_string(),
+            seed: 0x00CE_6155,
+            max_candidates: 192,
+            archive_capacity: 16,
+            stop_on_exact: true,
+            grammar,
+            request: GenerationRequest {
+                inputs: vec![],
+                items: vec![value_type.clone()],
+                state: vec![StateSpec {
+                    value_type: value_type.clone(),
+                    initializer: StateInitializer::Constant(ScalarValue::F64(0.0)),
+                }],
+                steps: 3,
+                output_types: vec![value_type],
+                min_random_step_ops: 1,
+                max_random_step_ops: 1,
+                min_random_finalize_ops: 0,
+                max_random_finalize_ops: 0,
+                require_state_update: true,
+            },
+            verification_limits: VerificationLimits::default(),
+            execution_policy: ExecutionPolicy::default(),
+        },
+        max_rounds: 3,
+    };
+
+    let outcome = cedis_discover(&target, &config).expect("target must be executable");
+    assert!(!outcome.rounds.is_empty());
+    assert!(outcome.dataset.cases.len() >= outcome.rounds[0].dataset_cases);
+    // Determinism of the whole loop:
+    let replay = cedis_discover(&target, &config).unwrap();
+    assert_eq!(outcome, replay);
+    if let Some(found) = &outcome.discovered
+    {
+        // Exact on every case of the final refined dataset.
+        let fitness = evaluate_on_counterexamples(
+            found,
+            &outcome.dataset,
+            ExecutionPolicy::default(),
+            VerificationLimits::default(),
+        );
+        assert!(fitness.correctness.exact);
+    }
 }
