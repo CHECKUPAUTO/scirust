@@ -6,8 +6,8 @@
 
 use scirust_compute::{DType, Shape};
 use scirust_tensor_ir::{
-    Graph, PrimitiveRepresentation, RepresentationError, RepresentationId, RepresentationPlan,
-    StorageBits, TensorType,
+    Graph, NodeId, PrimitiveRepresentation, RepresentationError, RepresentationId,
+    RepresentationPlan, StorageBits, TensorType,
 };
 
 fn tensor_type(dtype: DType, dims: &[usize]) -> TensorType {
@@ -149,4 +149,56 @@ fn incompatible_bindings_rejected_atomically_through_the_public_surface() {
         })
     );
     assert_eq!(plan.assignment(weight), Some(dense_default));
+}
+
+#[test]
+fn plans_reject_graphs_they_were_not_seeded_from() {
+    let mut graph = Graph::new();
+    let weight = graph
+        .add_input(
+            "weight",
+            TensorType::new(DType::F32, Shape::new(vec![8, 8])),
+        )
+        .unwrap();
+    graph.set_outputs(vec![weight]).unwrap();
+
+    let mut plan = RepresentationPlan::dense(&graph).unwrap();
+
+    // A rewritten graph that retypes the value must be rejected instead of
+    // being silently planned against stale assumptions.
+    let mut retyped = Graph::new();
+    let f16_weight = retyped
+        .add_input(
+            "weight",
+            TensorType::new(DType::F16, Shape::new(vec![8, 8])),
+        )
+        .unwrap();
+    retyped.set_outputs(vec![f16_weight]).unwrap();
+
+    assert!(plan.ensure_compatible_with(&retyped).is_err());
+    assert!(plan.node_storage_bits(&retyped, NodeId::new(0)).is_err());
+    assert!(plan.total_storage_bits(&retyped).is_err());
+
+    assert_eq!(
+        plan.total_storage_bits(&retyped),
+        Err(RepresentationError::GraphNodeTypeMismatch {
+            node: NodeId::new(0),
+            expected: TensorType::new(DType::F32, Shape::new(vec![8, 8])),
+            actual: TensorType::new(DType::F16, Shape::new(vec![8, 8])),
+        })
+    );
+
+    // An identically rebuilt graph remains fully usable.
+    let mut rebuilt = Graph::new();
+    let same = rebuilt
+        .add_input(
+            "weight",
+            TensorType::new(DType::F32, Shape::new(vec![8, 8])),
+        )
+        .unwrap();
+    rebuilt.set_outputs(vec![same]).unwrap();
+
+    let dense_f32 = plan.assignment(NodeId::new(0)).unwrap();
+    plan.assign(&rebuilt, NodeId::new(0), dense_f32).unwrap();
+    assert_eq!(plan.assignment(NodeId::new(0)), Some(dense_f32));
 }
