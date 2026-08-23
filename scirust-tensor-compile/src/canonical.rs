@@ -7,7 +7,10 @@ use core::fmt;
 
 use scirust_tensor_ir::{Graph, GraphError, NodeId, Operation, TensorType};
 
-use crate::memory::{MemoryPlan, ValueStorage};
+use crate::{
+    compiler_ir::{CompilerIr, CompilerIrError, verify_compiler_ir},
+    memory::{MemoryPlan, ValueStorage},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompileError {
@@ -78,6 +81,83 @@ impl ExecutionPlan {
 
     pub const fn stats(&self) -> CompileStats {
         self.stats
+    }
+
+    /// Temporary compatibility projection used while logical lowering migrates
+    /// from canonical instructions to compiler SSA.
+    ///
+    /// Operations and operand edges come from the *current* [`CompilerIr`], so
+    /// compiler rewrites are preserved. The supplied memory plan is the
+    /// post-pass plan already validated by the compiler-IR lowering adapter.
+    /// This projected execution plan never escapes that adapter; its DCE stats
+    /// are therefore intentionally local to the retained compiler program.
+    pub(crate) fn project_compiler_ir(
+        ir: &CompilerIr,
+        memory: MemoryPlan,
+    ) -> Result<Self, CompilerIrError> {
+        verify_compiler_ir(ir)?;
+
+        let mut instructions = Vec::with_capacity(ir.operations().len());
+        for operation in ir.operations()
+        {
+            let result_id = operation.result();
+            let result = ir.value(result_id).ok_or(CompilerIrError::InvalidValue {
+                operation: operation.id(),
+                value: result_id,
+            })?;
+
+            let inputs = operation
+                .operands()
+                .iter()
+                .map(|&operand| {
+                    ir.value(operand).map(|value| value.canonical_node()).ok_or(
+                        CompilerIrError::InvalidValue {
+                            operation: operation.id(),
+                            value: operand,
+                        },
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+            instructions.push(Instruction {
+                id: operation.canonical_node(),
+                operation: operation.operation().clone(),
+                inputs,
+                output: result.tensor_type().clone(),
+            });
+        }
+
+        let outputs = ir
+            .outputs()
+            .iter()
+            .map(|&output| {
+                ir.value(output)
+                    .map(|value| value.canonical_node())
+                    .ok_or(CompilerIrError::InvalidOutputValue { value: output })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let retained_nodes = instructions.len();
+        let buffered_values = memory
+            .allocations()
+            .iter()
+            .filter(|allocation| matches!(allocation.storage, ValueStorage::Buffer(_)))
+            .count();
+        let allocated_buffer_slots = memory.slots().len();
+
+        Ok(Self {
+            instructions,
+            outputs,
+            stats: CompileStats {
+                original_nodes: retained_nodes,
+                retained_nodes,
+                eliminated_nodes: 0,
+                allocated_buffer_slots,
+                reused_buffer_values: buffered_values.saturating_sub(allocated_buffer_slots),
+                peak_live_buffers: memory.peak_live_buffers(),
+            },
+            memory,
+        })
     }
 }
 
