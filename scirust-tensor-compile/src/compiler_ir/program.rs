@@ -15,9 +15,11 @@ use super::{
 };
 
 mod pass;
+mod rewrite;
 pub use pass::{
     CompilerPass, PassManager, PassManagerStats, PassResult, ScaleZeroCanonicalizationPass,
 };
+pub use rewrite::{OperationRewrite, RewriteStats, Rewriter};
 
 /// Identifier namespace whose deterministic `u32` space overflowed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,6 +79,11 @@ pub enum CompilerIrError {
         space: CompilerIrIdentifierSpace,
         expected: u32,
         actual: u32,
+    },
+    OperationArityMismatch {
+        operation: IrOperationId,
+        expected: usize,
+        actual: usize,
     },
     NonSsaOperand {
         operation: IrOperationId,
@@ -153,6 +160,15 @@ impl fmt::Display for CompilerIrError {
             } => write!(
                 formatter,
                 "compiler IR {space} identifier mismatch: expected {expected}, got {actual}"
+            ),
+            Self::OperationArityMismatch {
+                operation,
+                expected,
+                actual,
+            } => write!(
+                formatter,
+                "compiler IR operation {} arity mismatch: expected {expected}, got {actual}",
+                operation.get()
             ),
             Self::NonSsaOperand {
                 operation,

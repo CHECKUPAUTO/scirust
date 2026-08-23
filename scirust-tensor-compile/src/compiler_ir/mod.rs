@@ -23,8 +23,9 @@ pub use block::IrBlock;
 pub use ids::{IrBlockId, IrOperationId, IrRegionId, IrValueId};
 pub use operation::IrOperation;
 pub use program::{
-    CompilerIr, CompilerIrError, CompilerIrIdentifierSpace, CompilerPass, PassManager,
-    PassManagerStats, PassResult, ScaleZeroCanonicalizationPass,
+    CompilerIr, CompilerIrError, CompilerIrIdentifierSpace, CompilerPass, OperationRewrite,
+    PassManager, PassManagerStats, PassResult, RewriteStats, Rewriter,
+    ScaleZeroCanonicalizationPass,
 };
 pub use region::IrRegion;
 pub use value::IrValue;
