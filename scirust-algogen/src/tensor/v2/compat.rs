@@ -1,4 +1,5 @@
-//! Compatibility adapter: lift a frozen V1 [`TensorProgram`] into V2.
+//! Compatibility adapter: lift a frozen V1 [`TensorProgram`](crate::tensor::ir::TensorProgram)
+//! into V2.
 //!
 //! V1 remains byte-stable; this adapter is the one-way migration path. The
 //! mapping is exact:
