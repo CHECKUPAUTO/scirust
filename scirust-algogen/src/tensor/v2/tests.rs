@@ -1615,11 +1615,11 @@ fn fused_multiply_add_is_observably_distinct_from_mul_then_add() {
 
 #[test]
 fn min_max_follow_the_documented_deterministic_extrema_contract() {
-    // The kernels are defined by contract (see `deterministic_min_f32`);
-    // this test pins the observable rule for both operand orders, both
-    // dtypes, zeros, infinities and NaNs. On mainstream targets the values
-    // coincide with native `f32::min/max`, which is a continuity property,
-    // not the contract itself.
+    // Normative contract pinned with INDEPENDENT literal bit expectations
+    // (not by mirroring the implementation helpers): negative zero wins min,
+    // positive zero wins max, a lone NaN defers to the numeric operand and
+    // two NaNs collapse onto the canonical quiet NaN 0x7ff8_0000_0000_0000.
+    const QNAN: u64 = 0x7ff8_0000_0000_0000;
     let program = ResearchProgram::expression(
         vec![f64_type(&[]), f64_type(&[])],
         Section::new(vec![
@@ -1628,15 +1628,19 @@ fn min_max_follow_the_documented_deterministic_extrema_contract() {
         ]),
         vec![0, 1],
     );
-    let canonical_nan = f64::NAN.to_bits();
-    for (left, right) in [
-        (0.0f64, -0.0f64),
-        (-0.0f64, 0.0f64),
-        (1.5, -2.5),
-        (f64::INFINITY, f64::NEG_INFINITY),
-        (f64::NAN, 3.0),
-        (3.0, f64::NAN),
-        (f64::NAN, f64::NAN),
+    for (left, right, expected_min, expected_max) in [
+        (0.0f64, -0.0f64, (-0.0f64).to_bits(), 0.0f64.to_bits()),
+        (-0.0f64, 0.0f64, (-0.0f64).to_bits(), 0.0f64.to_bits()),
+        (1.5, -2.5, (-2.5f64).to_bits(), 1.5f64.to_bits()),
+        (
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY.to_bits(),
+            f64::INFINITY.to_bits(),
+        ),
+        (f64::NAN, 3.0, 3.0f64.to_bits(), 3.0f64.to_bits()),
+        (3.0, f64::NAN, 3.0f64.to_bits(), 3.0f64.to_bits()),
+        (f64::NAN, f64::NAN, QNAN, QNAN),
     ]
     {
         for (a, b) in [(left, right), (right, left)]
@@ -1653,16 +1657,24 @@ fn min_max_follow_the_documented_deterministic_extrema_contract() {
             .unwrap();
             assert_eq!(
                 result.outputs[0].data[0].to_bits(),
-                super::interpret::deterministic_min_f64(a, b).to_bits(),
+                expected_min,
                 "min({a:?},{b:?})"
             );
             assert_eq!(
                 result.outputs[1].data[0].to_bits(),
-                super::interpret::deterministic_max_f64(a, b).to_bits(),
+                expected_max,
                 "max({a:?},{b:?})"
             );
         }
-        // Swap-symmetry: operand order must never be observable.
+    }
+    // Swap-symmetry: operand order must never be observable.
+    for (left, right) in [
+        (f64::NAN, 1.0),
+        (0.0, -0.0),
+        (f64::INFINITY, f64::NEG_INFINITY),
+        (f64::NAN, f64::NAN),
+    ]
+    {
         let forward = execute_program(
             &program,
             &[
@@ -1698,21 +1710,6 @@ fn min_max_follow_the_documented_deterministic_extrema_contract() {
             swapped.outputs[1].data[0].to_bits()
         );
     }
-    // Both-NaN extrema collapse onto the canonical quiet NaN.
-    let both_nan = execute_program(
-        &program,
-        &[
-            ValueTensor::scalar_f64(f64::NAN),
-            ValueTensor::scalar_f64(f64::NAN),
-        ],
-        &[],
-        ExecutionPolicy {
-            floats: FloatPolicy::AllowNonFinite,
-        },
-        default_limits(),
-    )
-    .unwrap();
-    assert_eq!(both_nan.outputs[0].data[0].to_bits(), canonical_nan);
 }
 
 #[test]
@@ -1854,21 +1851,21 @@ fn signed_zero_extrema_are_order_independent_in_both_dtypes() {
                 default_limits(),
             )
             .unwrap();
-            let min = super::interpret::deterministic_min_f64(left, right);
+            // Literal oracles: min resolves to -0, max to +0, and
+            // clamp(+0|-0, lo=-5, hi=∓0) inherits the -0 tie-break.
             assert_eq!(
                 result.outputs[0].data[0].to_bits(),
-                min.to_bits(),
+                (-0.0f64).to_bits(),
                 "{dtype:?} min({left},{right})"
             );
             assert_eq!(
                 result.outputs[1].data[0].to_bits(),
-                super::interpret::deterministic_max_f64(left, right).to_bits(),
+                0.0f64.to_bits(),
                 "{dtype:?} max({left},{right})"
             );
-            // clamp(+0, -5, -0): min(+0,-0) = -0 then max(-0,-5) = -0.
             assert_eq!(
                 result.outputs[2].data[0].to_bits(),
-                super::interpret::deterministic_max_f64(min, -5.0).to_bits(),
+                (-0.0f64).to_bits(),
                 "{dtype:?} clamp"
             );
         }
@@ -2101,7 +2098,8 @@ fn reduction_extrema_are_canonical_over_zeros_and_nan() {
     assert_eq!(zeros.outputs[1].data[0].to_bits(), (-0.0f64).to_bits());
 
     // NaN defers to numeric operands; a reduction whose elements are all NaN
-    // keeps its ±Infinity identity (the seed is never displaced).
+    // evaluates to the canonical quiet NaN — never to a synthetic ±Infinity
+    // identity leaking into a non-empty domain.
     let mixed = execute_program(
         &program,
         &[tensor_f64(&[5.0, f64::NAN], &[2])],
@@ -2125,7 +2123,7 @@ fn reduction_extrema_are_canonical_over_zeros_and_nan() {
     .unwrap();
     assert_eq!(
         all_nan.outputs[0].data[0].to_bits(),
-        f64::NEG_INFINITY.to_bits()
+        0x7ff8_0000_0000_0000u64
     );
     // Under the default policy the same program aborts at the producer node.
     let rejected = execute_program(
@@ -2142,6 +2140,140 @@ fn reduction_extrema_are_canonical_over_zeros_and_nan() {
         ),
         "NaN external inputs stay rejected before execution"
     );
+}
+
+/// Full adversarial extrema-reduction matrix over f32 and f64 under
+/// `AllowNonFinite`, with independent literal bit expectations.
+///
+/// Contract: extrema reductions are statically non-empty and seed with the
+/// canonical quiet NaN, so a lone numeric element is returned exactly, a NaN
+/// defers to any numeric element, and an all-NaN domain evaluates to the
+/// canonical quiet NaN (0x7fc0_0000 / 0x7ff8_0000_0000_0000) instead of
+/// leaking a synthetic ±Infinity identity.
+#[test]
+fn extrema_reduction_nan_matrix_matches_literal_contract() {
+    const QNAN_F64: u64 = 0x7ff8_0000_0000_0000;
+    const QNAN_F32: u32 = 0x7fc0_0000;
+    let build = |dtype: DType| {
+        ResearchProgram::expression(
+            vec![ValueType::new(dtype, vec![3])],
+            Section::new(vec![
+                Op::ReduceMax(Reduce {
+                    src: Ref::Input(0),
+                    axis: None,
+                }),
+                Op::ReduceMin(Reduce {
+                    src: Ref::Input(0),
+                    axis: None,
+                }),
+            ]),
+            vec![0, 1],
+        )
+    };
+    // (multiset, expected max, expected min) — expectations hold for every
+    // permutation of the multiset (order independence).
+    let cases: &[(&[f64], u64, u64)] = &[
+        (&[f64::NAN], QNAN_F64, QNAN_F64),
+        (&[f64::NAN, f64::NAN], QNAN_F64, QNAN_F64),
+        (&[f64::NAN, 5.0], 5.0f64.to_bits(), 5.0f64.to_bits()),
+        (&[5.0, f64::NAN], 5.0f64.to_bits(), 5.0f64.to_bits()),
+        (
+            &[f64::NAN, 5.0, f64::NAN],
+            5.0f64.to_bits(),
+            5.0f64.to_bits(),
+        ),
+        (
+            &[7.0, -3.0, f64::NAN],
+            7.0f64.to_bits(),
+            (-3.0f64).to_bits(),
+        ),
+        (&[0.0, -0.0], 0.0f64.to_bits(), (-0.0f64).to_bits()),
+        (&[-0.0, 0.0], 0.0f64.to_bits(), (-0.0f64).to_bits()),
+        (
+            &[f64::INFINITY],
+            f64::INFINITY.to_bits(),
+            f64::INFINITY.to_bits(),
+        ),
+        (
+            &[f64::NEG_INFINITY],
+            f64::NEG_INFINITY.to_bits(),
+            f64::NEG_INFINITY.to_bits(),
+        ),
+        (
+            &[f64::INFINITY, f64::NAN],
+            f64::INFINITY.to_bits(),
+            f64::INFINITY.to_bits(),
+        ),
+        (
+            &[f64::NEG_INFINITY, f64::NAN],
+            f64::NEG_INFINITY.to_bits(),
+            f64::NEG_INFINITY.to_bits(),
+        ),
+    ];
+    for dtype in [DType::F32, DType::F64]
+    {
+        for (values, expected_max, expected_min) in cases
+        {
+            // Every permutation of the multiset must give identical bits:
+            // the deterministic extrema kernels are associative, commutative
+            // and idempotent, so encounter order is unobservable. This does
+            // NOT generalize to ReduceSum/Prod/Mean, which keep fixed order.
+            for permutation in [
+                values.to_vec(),
+                {
+                    let mut v = values.to_vec();
+                    v.reverse();
+                    v
+                },
+                {
+                    let mut v = values.to_vec();
+                    let last = v.len() - 1;
+                    v.swap(0, last);
+                    if v.len() > 1
+                    {
+                        v.swap(0, 1);
+                    }
+                    v
+                },
+            ]
+            {
+                // The f64 carrier stores every binary32 value exactly, so the
+                // same literal u64 expectations hold for both dtypes.
+                let mut tensor_data = permutation.clone();
+                while tensor_data.len() < 3
+                {
+                    // Pad by repeating the last element: idempotent kernels
+                    // make duplicates semantically inert for extrema.
+                    tensor_data.push(*tensor_data.last().unwrap());
+                }
+                let tensor = ValueTensor::new(dtype, vec![3], tensor_data).unwrap();
+                let result = execute_program(
+                    &build(dtype),
+                    std::slice::from_ref(&tensor),
+                    &[],
+                    ExecutionPolicy {
+                        floats: FloatPolicy::AllowNonFinite,
+                    },
+                    default_limits(),
+                )
+                .unwrap();
+                assert_eq!(
+                    result.outputs[0].data[0].to_bits(),
+                    *expected_max,
+                    "{dtype:?} max({values:?})"
+                );
+                assert_eq!(
+                    result.outputs[1].data[0].to_bits(),
+                    *expected_min,
+                    "{dtype:?} min({values:?})"
+                );
+            }
+        }
+    }
+    // The canonical quiet-NaN bit patterns are owned constants, not assumed
+    // from the representation of the source-level NAN constants.
+    assert_eq!(super::interpret::canonical_nan_f64().to_bits(), QNAN_F64);
+    assert_eq!(super::interpret::canonical_nan_f32().to_bits(), QNAN_F32);
 }
 
 /// `Min(x,x)`/`Max(x,x)` collapse only where finite rewrites are admitted;

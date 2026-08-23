@@ -13,7 +13,9 @@
 //! * extrema (`Min`, `Max`, `Clamp`, `ReduceMin`, `ReduceMax`) use explicit
 //!   deterministic kernels (see `deterministic_min_f32` and siblings below)
 //!   whose signed zero and NaN rules are defined by this contract, never by
-//!   unspecified native-min/max platform behaviour;
+//!   unspecified native-min/max platform behaviour; extrema reductions seed
+//!   with the canonical quiet NaN so no synthetic ±Infinity identity can leak
+//!   into a non-empty all-NaN domain;
 //! * under the default [`FloatPolicy::FiniteOutputs`], NaN intermediates and
 //!   non-finite observable outputs abort with precise errors while explicit
 //!   infinity identities may flow internally;
@@ -783,6 +785,21 @@ fn resolve_ref<'a>(
 // Element kernels
 // ---------------------------------------------------------------------------
 
+/// Canonical quiet NaN owned by this contract. Rust does not formally pin the
+/// payload of the source-level `f32::NAN` constant, and canonical bytes encode
+/// raw bit patterns, so the extrema kernels define their collapsing value
+/// explicitly instead of relying on that constant's representation.
+pub(crate) const CANONICAL_NAN_F32_BITS: u32 = 0x7fc0_0000;
+pub(crate) const CANONICAL_NAN_F64_BITS: u64 = 0x7ff8_0000_0000_0000;
+
+pub(crate) fn canonical_nan_f32() -> f32 {
+    f32::from_bits(CANONICAL_NAN_F32_BITS)
+}
+
+pub(crate) fn canonical_nan_f64() -> f64 {
+    f64::from_bits(CANONICAL_NAN_F64_BITS)
+}
+
 /// Deterministic binary32 minimum (`Min`, `ReduceMin` and `Clamp` kernels).
 ///
 /// Normative rule (mirrored by [`deterministic_min_f64`] and the `*_max_*`
@@ -805,7 +822,7 @@ pub(crate) fn deterministic_min_f32(a: f32, b: f32) -> f32 {
     {
         if a.is_nan() && b.is_nan()
         {
-            f32::NAN
+            canonical_nan_f32()
         }
         else if a.is_nan()
         {
@@ -840,7 +857,7 @@ pub(crate) fn deterministic_min_f64(a: f64, b: f64) -> f64 {
     {
         if a.is_nan() && b.is_nan()
         {
-            f64::NAN
+            canonical_nan_f64()
         }
         else if a.is_nan()
         {
@@ -878,7 +895,7 @@ pub(crate) fn deterministic_max_f32(a: f32, b: f32) -> f32 {
     {
         if a.is_nan() && b.is_nan()
         {
-            f32::NAN
+            canonical_nan_f32()
         }
         else if a.is_nan()
         {
@@ -913,7 +930,7 @@ pub(crate) fn deterministic_max_f64(a: f64, b: f64) -> f64 {
     {
         if a.is_nan() && b.is_nan()
         {
-            f64::NAN
+            canonical_nan_f64()
         }
         else if a.is_nan()
         {
@@ -1228,18 +1245,21 @@ fn reduce_op(
     };
 
     let out_elements = shape_elements(&out_shape).unwrap_or(usize::MAX);
-    // Identity elements; max/min identities are unreachable for empty
-    // reductions because the verifier rejects those statically. Extrema fold
-    // through the deterministic kernels, so the accumulated result is
+    // Identity elements. Sum/product keep the classical +0/+1 identities
+    // (empty reductions are legal for them). Extrema reductions are statically
+    // forbidden over empty domains, so they need no synthetic identity:
+    // seeding with the canonical quiet NaN makes NaN the neutral element of
+    // the deterministic kernels (a lone NaN defers to any numeric operand),
+    // and an all-NaN domain therefore evaluates to the canonical NaN instead
+    // of leaking a ±Infinity sentinel into a non-empty reduction. Extrema
+    // fold through the deterministic kernels, so the accumulated result is
     // independent of element encounter order (including opposite-signed
-    // zeros); NaN elements defer to numeric ones, so an all-NaN reduction
-    // keeps its ±Infinity identity.
+    // zeros).
     let identity = match mode
     {
         Accumulation::Sum | Accumulation::Mean => 0.0,
         Accumulation::Product => 1.0,
-        Accumulation::Maximum => f64::NEG_INFINITY,
-        Accumulation::Minimum => f64::INFINITY,
+        Accumulation::Maximum | Accumulation::Minimum => f64::NAN,
     };
     let mut accumulator = vec![identity; out_elements];
 
