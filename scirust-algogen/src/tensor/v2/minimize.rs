@@ -22,6 +22,54 @@ use super::verify::VerificationLimits;
 /// and stopping early is always safe (merely less reduced).
 pub const MAX_MINIMIZATION_PASSES: usize = 64;
 
+/// Why a program cannot be minimized. Generated research programs are
+/// untrusted input: structural malformation is rejected with a structured
+/// error instead of panicking mid-traversal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MinimizationError {
+    /// A section references a local id that does not exist in it.
+    LocalReferenceOutOfRange {
+        /// `"init"`, `"step"` or `"finalize"`.
+        section: &'static str,
+        id: ValueId,
+        section_len: usize,
+    },
+    /// A root list (init_state / next_state / outputs) points outside its
+    /// section.
+    RootOutOfRange {
+        /// `"init_state"`, `"next_state"` or `"outputs"`.
+        role: &'static str,
+        id: ValueId,
+        section_len: usize,
+    },
+}
+
+impl std::fmt::Display for MinimizationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self
+        {
+            Self::LocalReferenceOutOfRange {
+                section,
+                id,
+                section_len,
+            } => write!(
+                formatter,
+                "{section} section references local {id} but has only {section_len} ops"
+            ),
+            Self::RootOutOfRange {
+                role,
+                id,
+                section_len,
+            } => write!(
+                formatter,
+                "{role} root {id} lies outside its section of {section_len} ops"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for MinimizationError {}
+
 /// Statistics of one minimization run.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct MinimizationStats {
@@ -39,11 +87,17 @@ pub struct MinimizationStats {
 /// (wrap [`super::verify_program`] inside it if validity must survive).
 /// Signature fields (`inputs`, `items`, `state`, `steps`, `semantics`) are
 /// preserved verbatim; only unreferenced non-root nodes may disappear.
-#[must_use]
+///
+/// Trust boundary: the program's reference structure is validated once,
+/// up front, so arbitrary malformed IR is rejected with a structured
+/// [`MinimizationError`] instead of panicking. Removals can never break the
+/// established invariant (deleted nodes are by construction unreferenced),
+/// so one validation suffices for every sweep.
 pub fn minimize_program(
     program: &ResearchProgram,
     predicate: &mut dyn FnMut(&ResearchProgram) -> bool,
-) -> (ResearchProgram, MinimizationStats) {
+) -> Result<(ResearchProgram, MinimizationStats), MinimizationError> {
+    validate_structure(program)?;
     let mut current = program.clone();
     let mut stats = MinimizationStats::default();
 
@@ -98,7 +152,72 @@ pub fn minimize_program(
     }
 
     stats.final_node_count = current.node_count();
-    (current, stats)
+    Ok((current, stats))
+}
+
+/// Establish the `Ref::Local(id) ⇒ id < section.ops.len()` and
+/// `root id ⇒ id < section.ops.len()` invariants once, for all sections.
+fn validate_structure(program: &ResearchProgram) -> Result<(), MinimizationError> {
+    let sections = [
+        (
+            "init",
+            &program.init,
+            program.init_state.as_slice(),
+            "init_state",
+        ),
+        (
+            "step",
+            &program.step,
+            program.next_state.as_slice(),
+            "next_state",
+        ),
+        (
+            "finalize",
+            &program.finalize,
+            program.outputs.as_slice(),
+            "outputs",
+        ),
+    ];
+    for (name, section, roots, root_role) in sections
+    {
+        let len = section.ops.len();
+        let mut malformed: Option<MinimizationError> = None;
+        for op in &section.ops
+        {
+            op.for_each_ref(|reference| {
+                if malformed.is_none()
+                {
+                    if let Ref::Local(id) = reference
+                    {
+                        if id >= len
+                        {
+                            malformed = Some(MinimizationError::LocalReferenceOutOfRange {
+                                section: name,
+                                id,
+                                section_len: len,
+                            });
+                        }
+                    }
+                }
+            });
+            if let Some(error) = malformed
+            {
+                return Err(error);
+            }
+        }
+        for &root in roots
+        {
+            if root >= len
+            {
+                return Err(MinimizationError::RootOutOfRange {
+                    role: root_role,
+                    id: root,
+                    section_len: len,
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -217,7 +336,8 @@ mod tests {
         let (minimized, stats) = minimize_program(
             &program,
             &mut verifying_predicate(VerificationLimits::default()),
-        );
+        )
+        .unwrap();
         assert_eq!(minimized.finalize.ops.len(), 1);
         assert_eq!(stats.removed_nodes, 3);
         assert!(stats.passes >= 2, "chained leaves need two sweeps");
@@ -235,7 +355,8 @@ mod tests {
         let (minimized, stats) = minimize_program(
             &program,
             &mut verifying_predicate(VerificationLimits::default()),
-        );
+        )
+        .unwrap();
         assert_eq!(stats.removed_nodes, 0);
         assert_eq!(minimized.finalize.ops.len(), 1);
         assert_eq!(minimized.outputs, vec![0]);
@@ -254,7 +375,7 @@ mod tests {
         // Predicate refuses any change: nothing may be removed even though
         // node 1 is a leaf.
         let mut conservative = |program: &ResearchProgram| program.node_count() == 2;
-        let (minimized, stats) = minimize_program(&program, &mut conservative);
+        let (minimized, stats) = minimize_program(&program, &mut conservative).unwrap();
         assert_eq!(stats.removed_nodes, 0);
         assert_eq!(minimized.node_count(), 2);
     }
@@ -266,7 +387,8 @@ mod tests {
         let (minimized, _) = minimize_program(
             &program,
             &mut verifying_predicate(VerificationLimits::default()),
-        );
+        )
+        .unwrap();
         assert_eq!(minimized.outputs, before_outputs);
         assert_eq!(minimized.steps, program.steps);
         assert_eq!(minimized.state, program.state);
@@ -286,8 +408,70 @@ mod tests {
         let (minimized, stats) = minimize_program(
             &program,
             &mut verifying_predicate(VerificationLimits::default()),
-        );
+        )
+        .unwrap();
         assert_eq!(stats.removed_nodes, 1);
         assert!(matches!(minimized.finalize.ops.first(), Some(Op::Add(_))));
+    }
+
+    /// Regression: a hostile `Ref::Local` beyond the section used to index
+    /// straight out of bounds and panic; it must now be a structured error.
+    #[test]
+    fn malformed_local_reference_is_rejected_not_panic() {
+        let program = ResearchProgram::expression(
+            vec![ValueType::scalar(DType::F64)],
+            Section::new(vec![
+                Op::Abs(Un::new(Ref::Input(0))),
+                Op::Neg(Un::new(Ref::Local(99))),
+            ]),
+            vec![0],
+        );
+        let error = minimize_program(&program, &mut |_| true)
+            .expect_err("malformed reference must be rejected");
+        assert_eq!(
+            error,
+            MinimizationError::LocalReferenceOutOfRange {
+                section: "finalize",
+                id: 99,
+                section_len: 2,
+            }
+        );
+    }
+
+    /// A root pointing outside its section is equally rejected.
+    #[test]
+    fn malformed_root_is_rejected_not_panic() {
+        let program = ResearchProgram::expression(
+            vec![ValueType::scalar(DType::F64)],
+            Section::new(vec![Op::Abs(Un::new(Ref::Input(0)))]),
+            vec![7],
+        );
+        let error = minimize_program(&program, &mut |_| true)
+            .expect_err("out-of-range root must be rejected");
+        assert_eq!(
+            error,
+            MinimizationError::RootOutOfRange {
+                role: "outputs",
+                id: 7,
+                section_len: 1,
+            }
+        );
+    }
+
+    /// Malformed recurrence sections are covered by the same boundary.
+    #[test]
+    fn malformed_step_section_is_rejected() {
+        let mut program = super::super::reference::welford_recurrence(2);
+        program.step = Section::new(vec![]);
+        program.next_state = vec![3];
+        let error = minimize_program(&program, &mut |_| true)
+            .expect_err("empty step section with a root must be rejected");
+        assert!(matches!(
+            error,
+            MinimizationError::RootOutOfRange {
+                role: "next_state",
+                ..
+            }
+        ));
     }
 }
