@@ -8,7 +8,7 @@ use core::fmt;
 use scirust_tensor_ir::{Graph, GraphError, NodeId, Operation, TensorType};
 
 use crate::{
-    compiler_ir::{verify_compiler_ir, CompilerIr, CompilerIrError},
+    compiler_ir::{CompilerIr, CompilerIrError, verify_compiler_ir},
     memory::{MemoryPlan, ValueStorage},
 };
 
@@ -110,12 +110,12 @@ impl ExecutionPlan {
                 .operands()
                 .iter()
                 .map(|&operand| {
-                    ir.value(operand)
-                        .map(|value| value.canonical_node())
-                        .ok_or(CompilerIrError::InvalidValue {
+                    ir.value(operand).map(|value| value.canonical_node()).ok_or(
+                        CompilerIrError::InvalidValue {
                             operation: operation.id(),
                             value: operand,
-                        })
+                        },
+                    )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
 
