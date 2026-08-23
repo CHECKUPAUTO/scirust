@@ -69,6 +69,15 @@ jobs:
               "            },\n",
           )
 
+          # Remove the two existing interpreter rejection-list occurrences before
+          # adding ZerosLike to supported matches, so occurrence counts are exact.
+          replace_exact(
+              "scirust-tensor-reference/src/interpreter.rs",
+              "            | ReferenceOpcode::ZerosLike\n",
+              "",
+              expected=2,
+          )
+
           # Reference preparation/execution. ZerosLike remains unary even though
           # its operand bits do not affect the result.
           replace_exact(
@@ -95,11 +104,12 @@ jobs:
               "            },\n"
               "            ReferenceOpcode::Scale =>\n",
           )
+
+          # Remove the existing invocation rejection first for the same reason.
           replace_exact(
-              "scirust-tensor-reference/src/interpreter.rs",
-              "            | ReferenceOpcode::ZerosLike\n",
+              "scirust-tensor-reference/src/invocation.rs",
+              "        | ReferenceOpcode::ZerosLike\n",
               "",
-              expected=2,
           )
 
           # Invocation-time validation must accept the same opcode/attribute ABI.
@@ -116,11 +126,6 @@ jobs:
               "                ReferenceOpcode::Relu\n"
               "                    | ReferenceOpcode::ZerosLike\n"
               "                    | ReferenceOpcode::Add\n",
-          )
-          replace_exact(
-              "scirust-tensor-reference/src/invocation.rs",
-              "        | ReferenceOpcode::ZerosLike\n",
-              "",
           )
 
           # Reference generation regression.
