@@ -120,6 +120,7 @@ use scirust_tensor_core::TensorND;
 
 mod canonical;
 mod compiler_ir;
+mod compiler_lowering;
 mod lowering;
 mod memory;
 
@@ -131,6 +132,7 @@ pub use compiler_ir::{
     PassResult, RewriteStats, Rewriter, ScaleZeroCanonicalizationPass, UseCountAnalysis, UseCounts,
     verify_compiler_ir,
 };
+pub use compiler_lowering::{CompilerIrLowerer, CompilerIrLoweringError};
 pub use lowering::{
     BinaryKernel, ExternalBinding, ExternalBindings, ExternalValueKind, IdentifierSpace,
     KernelArgument, KernelArgumentAccess, KernelArgumentSource, KernelFamily, KernelLowerer,
