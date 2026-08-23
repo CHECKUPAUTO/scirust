@@ -167,7 +167,7 @@ mod tests {
 
         let mut rewrite = ReluToLogRewrite;
         let stats = Rewriter::new(&mut ir).unwrap().apply(&mut rewrite).unwrap();
-        assert_eq!(stats.operations_rewritten, 1);
+        assert_eq!(stats.rewrites_applied, 1);
 
         let memory = MemoryPlan::from_compiler_ir(&ir).unwrap();
         let lowered = CompilerIrLowerer::new()
