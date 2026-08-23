@@ -11,12 +11,14 @@
 //! [`Graph`] only permits inputs referring to previously created nodes.
 //!
 //! Dense storage remains the identity representation. The composite families
-//! are [`PrimitiveRepresentation::Factorized`] (two contracted matrix factors)
-//! and [`PrimitiveRepresentation::Quantized`] (discrete codes corrected by
-//! continuous scales). Storage is accounted as the exact sum of declared
-//! components. Codebook layouts, block geometry, packed/sub-bit payloads,
-//! sparse representations, cost models and backend-specific materialization
-//! remain intentionally out of scope.
+//! are [`PrimitiveRepresentation::Factorized`] (two contracted matrix factors),
+//! [`PrimitiveRepresentation::Quantized`] (discrete codes corrected by
+//! continuous scales) and [`PrimitiveRepresentation::Sparse`] (integer
+//! positions plus numeric nonzero magnitudes). Storage is accounted as the
+//! exact sum of declared components, aggregatable per graph through
+//! [`RepresentationPlan::total_storage_bits`]. Codebook layouts, block
+//! geometry, packed/sub-bit payloads, storage formats, cost models and
+//! backend-specific materialization remain intentionally out of scope.
 
 use alloc::vec::Vec;
 use core::fmt;
@@ -139,6 +141,22 @@ pub enum PrimitiveRepresentation {
         /// Continuous dequantization factors with a floating dtype.
         scales: RepresentationComponent,
     },
+    /// Sparse storage skeleton: positions of the nonzeros plus their numeric
+    /// values.
+    ///
+    /// The family contract constrains component dtypes only, and is enforced
+    /// once at declaration time: indices must be integer-valued (discrete
+    /// positions) and values must be numeric (magnitudes of any integer or
+    /// floating dtype; boolean masks are predicates, not payloads). Storage
+    /// formats, nnz layout and compression schemes belong to concrete formats
+    /// and stay out of scope; no shape relationship binds the components to
+    /// each other or to the logical tensor type.
+    Sparse {
+        /// Nonzero positions with an integer dtype.
+        indices: RepresentationComponent,
+        /// Nonzero magnitudes with a numeric dtype.
+        values: RepresentationComponent,
+    },
 }
 
 impl PrimitiveRepresentation {
@@ -160,12 +178,17 @@ impl PrimitiveRepresentation {
         Self::Quantized { codes, scales }
     }
 
+    /// Construct a sparse representation from indices and values.
+    pub const fn sparse(indices: RepresentationComponent, values: RepresentationComponent) -> Self {
+        Self::Sparse { indices, values }
+    }
+
     /// Return the dense storage dtype when this is a dense representation.
     pub const fn dense_dtype(&self) -> Option<DType> {
         match self
         {
             Self::Dense { storage_dtype } => Some(*storage_dtype),
-            Self::Factorized { .. } | Self::Quantized { .. } => None,
+            Self::Factorized { .. } | Self::Quantized { .. } | Self::Sparse { .. } => None,
         }
     }
 
@@ -176,18 +199,30 @@ impl PrimitiveRepresentation {
     /// named components so generic passes can audit declaration ordering
     /// without matching every variant.
     pub fn components(&self) -> impl Iterator<Item = &RepresentationComponent> {
-        let (first, second, third): (
-            Option<&RepresentationComponent>,
-            Option<&RepresentationComponent>,
-            Option<&RepresentationComponent>,
-        ) = match self
-        {
-            Self::Dense { .. } => (None, None, None),
-            Self::Factorized { left, right } => (Some(left), Some(right), None),
-            Self::Quantized { codes, scales } => (Some(codes), Some(scales), None),
-        };
+        let mut components: [Option<&RepresentationComponent>; 4] = [None; 4];
 
-        first.into_iter().chain(second).chain(third)
+        match self
+        {
+            Self::Dense { .. } =>
+            {},
+            Self::Factorized { left, right } =>
+            {
+                components[0] = Some(left);
+                components[1] = Some(right);
+            },
+            Self::Quantized { codes, scales } =>
+            {
+                components[0] = Some(codes);
+                components[1] = Some(scales);
+            },
+            Self::Sparse { indices, values } =>
+            {
+                components[0] = Some(indices);
+                components[1] = Some(values);
+            },
+        }
+
+        components.into_iter().flatten()
     }
 
     /// Validate that this physical representation can represent `logical`.
@@ -232,7 +267,7 @@ impl PrimitiveRepresentation {
                     }),
                 }
             },
-            Self::Quantized { .. } => Ok(()),
+            Self::Quantized { .. } | Self::Sparse { .. } => Ok(()),
         }
     }
 
@@ -257,6 +292,23 @@ impl PrimitiveRepresentation {
                     Err(RepresentationError::QuantizedInvalidComponentDTypes {
                         codes: codes_dtype,
                         scales: scales_dtype,
+                    })
+                }
+                else
+                {
+                    Ok(())
+                }
+            },
+            Self::Sparse { indices, values } =>
+            {
+                let indices_dtype = indices.tensor_type().dtype;
+                let values_dtype = values.tensor_type().dtype;
+
+                if !is_integer_dtype(indices_dtype) || !is_numeric_dtype(values_dtype)
+                {
+                    Err(RepresentationError::SparseInvalidComponentDTypes {
+                        indices: indices_dtype,
+                        values: values_dtype,
                     })
                 }
                 else
@@ -297,6 +349,13 @@ fn is_integer_dtype(dtype: DType) -> bool {
 /// Whether `dtype` carries continuous floating-point values.
 fn is_float_dtype(dtype: DType) -> bool {
     matches!(dtype, DType::F16 | DType::Bf16 | DType::F32 | DType::F64)
+}
+
+/// Whether `dtype` carries numeric magnitudes of any width.
+///
+/// `Bool` is excluded: it encodes predicates, not payload values.
+fn is_numeric_dtype(dtype: DType) -> bool {
+    is_integer_dtype(dtype) || is_float_dtype(dtype)
 }
 
 /// Exact bit count of dense scalar storage for `logical`.
@@ -373,12 +432,31 @@ pub enum RepresentationError {
         /// Dtype carried by the scales component.
         scales: DType,
     },
+    /// Sparse component dtypes violate the family contract.
+    ///
+    /// Indices must carry discrete integer positions and values numeric
+    /// magnitudes of any integer or floating dtype.
+    SparseInvalidComponentDTypes {
+        /// Dtype carried by the indices component.
+        indices: DType,
+        /// Dtype carried by the values component.
+        values: DType,
+    },
     /// The node is outside the plan's assignment scope.
     ///
     /// Assignments are indexed by canonical node identifiers; the plan only
     /// covers the nodes of the graph it was seeded from.
     UnknownAssignmentNode {
         /// Node identifier outside the assignment scope.
+        node: NodeId,
+    },
+    /// The node has no representation assignment.
+    ///
+    /// Whole-plan accounting requires every canonical node to carry an
+    /// assignment; freshly declared plans start from a dense seeding pass or
+    /// explicit assignments.
+    MissingAssignment {
+        /// Node identifier without an assignment.
         node: NodeId,
     },
 }
@@ -432,11 +510,26 @@ impl fmt::Display for RepresentationError {
                     "quantized codes dtype {codes:?} must be integer-valued and scales dtype {scales:?} floating-point"
                 )
             },
+            Self::SparseInvalidComponentDTypes { indices, values } =>
+            {
+                write!(
+                    formatter,
+                    "sparse indices dtype {indices:?} must be integer-valued and values dtype {values:?} numeric"
+                )
+            },
             Self::UnknownAssignmentNode { node } =>
             {
                 write!(
                     formatter,
                     "node {} is outside this plan's assignment scope",
+                    node.get()
+                )
+            },
+            Self::MissingAssignment { node } =>
+            {
+                write!(
+                    formatter,
+                    "node {} has no representation assignment",
                     node.get()
                 )
             },
@@ -598,7 +691,47 @@ impl RepresentationPlan {
                     .map(StorageBits::new)
                     .ok_or(RepresentationError::StorageSizeOverflow)
             },
+            PrimitiveRepresentation::Sparse { indices, values } =>
+            {
+                let indices_bits =
+                    self.storage_bits(indices.representation(), indices.tensor_type())?;
+                let values_bits =
+                    self.storage_bits(values.representation(), values.tensor_type())?;
+
+                indices_bits
+                    .get()
+                    .checked_add(values_bits.get())
+                    .map(StorageBits::new)
+                    .ok_or(RepresentationError::StorageSizeOverflow)
+            },
         }
+    }
+
+    /// Return the exact aggregate physical storage implied by the plan for the
+    /// whole canonical graph.
+    ///
+    /// Every canonical node must carry an assignment; the exact per-node
+    /// storage is summed in canonical node order with checked arithmetic. This
+    /// gives cost-aware lowering a single backend-neutral figure without any
+    /// floating-point accounting.
+    pub fn total_storage_bits(&self, graph: &Graph) -> Result<StorageBits, RepresentationError> {
+        let mut total = 0u64;
+
+        for (index, node) in graph.nodes().iter().enumerate()
+        {
+            let id = self.assignments.get(index).copied().ok_or(
+                RepresentationError::MissingAssignment {
+                    node: NodeId::new(index as u32),
+                },
+            )?;
+
+            let bits = self.storage_bits(id, &node.output)?;
+            total = total
+                .checked_add(bits.get())
+                .ok_or(RepresentationError::StorageSizeOverflow)?;
+        }
+
+        Ok(StorageBits::new(total))
     }
 
     /// Construct a typed component referencing an interned representation.
@@ -606,7 +739,7 @@ impl RepresentationPlan {
     /// This validates both identifier membership and compatibility between the
     /// physical representation and the component's own tensor type. Composite
     /// representations name their dependencies through such validated
-    /// components when calling [`RepresentationPlan::declare`].
+    /// components when calling `RepresentationPlan::declare`.
     pub fn component(
         &self,
         tensor_type: TensorType,
@@ -1457,6 +1590,144 @@ mod tests {
     }
 
     #[test]
+    fn sparse_declares_with_integer_indices_and_numeric_values() {
+        let mut plan = empty_plan();
+        let dense_u16 = plan
+            .declare(PrimitiveRepresentation::dense(DType::U16))
+            .unwrap();
+        let dense_u8 = plan
+            .declare(PrimitiveRepresentation::dense(DType::U8))
+            .unwrap();
+        let dense_f32 = plan
+            .declare(PrimitiveRepresentation::dense(DType::F32))
+            .unwrap();
+
+        let indices = plan
+            .component(TensorType::new(DType::U16, Shape::new(vec![12])), dense_u16)
+            .unwrap();
+        let values = plan
+            .component(TensorType::new(DType::F32, Shape::new(vec![12])), dense_f32)
+            .unwrap();
+
+        let sparse = plan
+            .declare(PrimitiveRepresentation::sparse(
+                indices.clone(),
+                values.clone(),
+            ))
+            .unwrap();
+        assert_eq!(sparse, RepresentationId::new(3));
+
+        // Redeclaring an equal composite interns the existing identifier.
+        assert_eq!(
+            plan.declare(PrimitiveRepresentation::sparse(indices, values)),
+            Ok(sparse)
+        );
+
+        // Integer-valued nonzeros are legitimate numeric payloads.
+        let byte_indices = plan
+            .component(TensorType::new(DType::U16, Shape::new(vec![4])), dense_u16)
+            .unwrap();
+        let byte_values = plan
+            .component(TensorType::new(DType::U8, Shape::new(vec![4])), dense_u8)
+            .unwrap();
+        let byte_sparse = plan
+            .declare(PrimitiveRepresentation::sparse(byte_indices, byte_values))
+            .unwrap();
+        assert_ne!(byte_sparse, sparse);
+
+        // Indices and values keep their named roles, dtypes and references.
+        match plan.representation(sparse)
+        {
+            Some(PrimitiveRepresentation::Sparse { indices, values }) =>
+            {
+                assert_eq!(indices.tensor_type().dtype, DType::U16);
+                assert_eq!(indices.representation(), dense_u16);
+                assert_eq!(values.tensor_type().dtype, DType::F32);
+                assert_eq!(values.representation(), dense_f32);
+            },
+            other => panic!("unexpected stored representation: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sparse_declaration_rejects_invalid_component_dtypes_atomically() {
+        let mut plan = empty_plan();
+        let dense_f32 = plan
+            .declare(PrimitiveRepresentation::dense(DType::F32))
+            .unwrap();
+        let dense_u16 = plan
+            .declare(PrimitiveRepresentation::dense(DType::U16))
+            .unwrap();
+        let dense_bool = plan
+            .declare(PrimitiveRepresentation::dense(DType::Bool))
+            .unwrap();
+
+        // Non-integer indices are rejected before interning.
+        assert_eq!(
+            plan.declare(PrimitiveRepresentation::sparse(
+                plan.component(TensorType::new(DType::F32, Shape::new(vec![12])), dense_f32,)
+                    .unwrap(),
+                plan.component(TensorType::new(DType::F32, Shape::new(vec![12])), dense_f32,)
+                    .unwrap(),
+            )),
+            Err(RepresentationError::SparseInvalidComponentDTypes {
+                indices: DType::F32,
+                values: DType::F32,
+            })
+        );
+
+        // Boolean payloads are predicates, not nonzero magnitudes.
+        assert_eq!(
+            plan.declare(PrimitiveRepresentation::sparse(
+                plan.component(TensorType::new(DType::U16, Shape::new(vec![12])), dense_u16,)
+                    .unwrap(),
+                plan.component(
+                    TensorType::new(DType::Bool, Shape::new(vec![12])),
+                    dense_bool,
+                )
+                .unwrap(),
+            )),
+            Err(RepresentationError::SparseInvalidComponentDTypes {
+                indices: DType::U16,
+                values: DType::Bool,
+            })
+        );
+
+        // Rejected declarations never enter the table.
+        assert_eq!(plan.representations().len(), 3);
+    }
+
+    #[test]
+    fn sparse_storage_bits_sum_component_storage_exactly() {
+        let mut plan = empty_plan();
+        let dense_u16 = plan
+            .declare(PrimitiveRepresentation::dense(DType::U16))
+            .unwrap();
+        let dense_f32 = plan
+            .declare(PrimitiveRepresentation::dense(DType::F32))
+            .unwrap();
+
+        let indices = plan
+            .component(TensorType::new(DType::U16, Shape::new(vec![12])), dense_u16)
+            .unwrap();
+        let values = plan
+            .component(TensorType::new(DType::F32, Shape::new(vec![12])), dense_f32)
+            .unwrap();
+        let sparse = plan
+            .declare(PrimitiveRepresentation::sparse(indices, values))
+            .unwrap();
+
+        // The parent dtype is irrelevant to a converting representation.
+        let logical = TensorType::new(DType::F32, Shape::new(vec![4, 3]));
+
+        // 12 index words * 2 bytes * 8 bits + 12 value words * 4 bytes * 8 bits.
+        assert_eq!(
+            plan.storage_bits(sparse, &logical),
+            Ok(StorageBits::new(192 + 384))
+        );
+    }
+
+    #[test]
     fn assign_overrides_dense_defaults_after_validation() {
         let mut graph = Graph::new();
         let weight = graph
@@ -1589,6 +1860,108 @@ mod tests {
                 &TensorType::new(DType::F32, Shape::new(vec![8, 8]))
             ),
             Ok(StorageBits::new(8 * 8 * 8 + 8 * 2 * 8))
+        );
+    }
+
+    #[test]
+    fn total_storage_bits_aggregates_dense_defaults() {
+        let mut graph = Graph::new();
+        let matrix = graph
+            .add_input(
+                "matrix",
+                TensorType::new(DType::F32, Shape::new(vec![2, 2])),
+            )
+            .unwrap();
+        let vector = graph
+            .add_input("vector", TensorType::new(DType::F16, Shape::new(vec![3])))
+            .unwrap();
+        graph.set_outputs(vec![matrix, vector]).unwrap();
+
+        let plan = RepresentationPlan::dense(&graph).unwrap();
+
+        // 2*2 words * 4 bytes * 8 bits + 3 halves * 2 bytes * 8 bits.
+        assert_eq!(
+            plan.total_storage_bits(&graph),
+            Ok(StorageBits::new(128 + 48))
+        );
+    }
+
+    #[test]
+    fn total_storage_bits_reflects_reassigned_composites() {
+        let mut graph = Graph::new();
+        let weight = graph
+            .add_input(
+                "weight",
+                TensorType::new(DType::F32, Shape::new(vec![4, 2])),
+            )
+            .unwrap();
+        let bias = graph
+            .add_input("bias", TensorType::new(DType::F32, Shape::new(vec![4])))
+            .unwrap();
+        graph.set_outputs(vec![weight, bias]).unwrap();
+
+        let mut plan = RepresentationPlan::dense(&graph).unwrap();
+
+        // Dense defaults first: 256 bits for the weight, 128 for the bias.
+        assert_eq!(
+            plan.total_storage_bits(&graph),
+            Ok(StorageBits::new(256 + 128))
+        );
+
+        let (left, right) = factorized_components(&mut plan, DType::F16, 4, 3, 2);
+        let factored = plan
+            .declare(PrimitiveRepresentation::factorized(left, right))
+            .unwrap();
+        plan.assign(&graph, weight, factored).unwrap();
+
+        // Factorized weight: (4*3 + 3*2) halves * 2 bytes * 8 bits = 288.
+        assert_eq!(
+            plan.total_storage_bits(&graph),
+            Ok(StorageBits::new(288 + 128))
+        );
+    }
+
+    #[test]
+    fn total_accounting_requires_full_assignment_coverage() {
+        let mut graph = Graph::new();
+        let node = graph.add_input("x", tensor_type(DType::F32)).unwrap();
+        graph.set_outputs(vec![node]).unwrap();
+
+        let plan = empty_plan();
+
+        assert_eq!(
+            plan.total_storage_bits(&graph),
+            Err(RepresentationError::MissingAssignment {
+                node: NodeId::new(0)
+            })
+        );
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn total_accounting_rejects_checked_sum_overflow() {
+        let mut graph = Graph::new();
+        let two_pow_60 = 1_152_921_504_606_846_976_usize;
+        let first = graph
+            .add_input(
+                "first",
+                TensorType::new(DType::U8, Shape::new(vec![two_pow_60])),
+            )
+            .unwrap();
+        let second = graph
+            .add_input(
+                "second",
+                TensorType::new(DType::U8, Shape::new(vec![two_pow_60])),
+            )
+            .unwrap();
+        graph.set_outputs(vec![first, second]).unwrap();
+
+        let plan = RepresentationPlan::dense(&graph).unwrap();
+
+        // Each node accounts exactly 2^63 bits; the aggregate overflows u64.
+        assert_eq!(
+            plan.total_storage_bits(&graph),
+            Err(RepresentationError::StorageSizeOverflow)
         );
     }
 }
