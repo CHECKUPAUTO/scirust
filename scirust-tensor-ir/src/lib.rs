@@ -33,7 +33,8 @@ pub use optimize::{
     OptimizationConfig, OptimizationError, OptimizationStats, OptimizedGraph, optimize_graph,
 };
 pub use representation::{
-    PrimitiveRepresentation, RepresentationError, RepresentationId, RepresentationPlan, StorageBits,
+    PrimitiveRepresentation, RepresentationComponent, RepresentationError, RepresentationId,
+    RepresentationPlan, StorageBits,
 };
 pub use shard::{
     AxisShard, DeviceMesh, MeshAxis, PartitionSpec, RankShard, ShardError, ShardMapGraph,
