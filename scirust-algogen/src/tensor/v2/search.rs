@@ -486,6 +486,10 @@ pub struct ScientificExperimentArchive {
     pub config: ExperimentConfig,
     pub dataset_id: String,
     pub dataset_digest: String,
+    /// Whether at least one candidate was bit-exact on every case of the
+    /// (training) dataset. This is training fit, NOT a discovery or
+    /// correctness claim off the dataset; CEGIS-level claims require the
+    /// fresh-falsification protocol in [`super::cegis`].
     pub success: bool,
     pub records: Vec<CandidateRecord>,
     pub pareto: Vec<ParetoEntry>,

@@ -149,12 +149,50 @@ fn execute_probed(
     })
 }
 
-/// Content digest of one executed result: output shapes, dtypes and exact
-/// element bits in program order.
+/// Content digest of one executed result plus its **contract context**.
+///
+/// The digest mixes two deliberately distinct ingredients:
+///
+/// 1. *behavior*: output dtypes, shapes and exact element bits in program
+///    order on the standardized probes;
+/// 2. *contract*: numerical-semantics tag, declared step count, probed step
+///    count, and the full input/item/state type signatures.
+///
+/// Encoding the contract prevents bounded prefix probing from aliasing two
+/// semantically different programs onto one digest: an original 4-step
+/// algorithm and a 100-step algorithm whose first four probed steps happen
+/// to agree carry different declared/probed step pairs and can therefore
+/// never share a signature. What remains shared is reserved for programs
+/// with the SAME contract whose observable probe behavior agrees — finite
+/// evidence of behavioral identity on the probe set, never structural or
+/// mathematical identity.
 #[must_use]
-fn result_digest(result: &ExecutionResult) -> String {
+fn behavioral_digest(
+    result: &ExecutionResult,
+    program: &ResearchProgram,
+    probed_steps: u32,
+) -> String {
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"SCIRUST-RIR2-BEHAVIOR\0");
+    bytes.extend_from_slice(b"SCIRUST-RIR2-BEHAVIOR-V2\0");
+    // Contract context.
+    bytes.push(program.semantics.tag());
+    bytes.extend_from_slice(&program.steps.to_le_bytes());
+    bytes.extend_from_slice(&probed_steps.to_le_bytes());
+    let signature_groups: [&Vec<ValueType>; 3] = [&program.inputs, &program.items, &program.state];
+    for types in signature_groups
+    {
+        bytes.extend_from_slice(&(types.len() as u64).to_le_bytes());
+        for value_type in types
+        {
+            bytes.push(value_type.dtype.tag());
+            bytes.extend_from_slice(&(value_type.shape.len() as u64).to_le_bytes());
+            for &dimension in &value_type.shape
+            {
+                bytes.extend_from_slice(&(dimension as u64).to_le_bytes());
+            }
+        }
+    }
+    // Behavior on the probes.
     for output in &result.outputs
     {
         bytes.push(output.dtype.tag());
@@ -172,7 +210,11 @@ fn result_digest(result: &ExecutionResult) -> String {
     hash.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-/// Behavioral signature of a program on the standardized probes.
+/// Behavioral signature of a program on the standardized probes: behavior
+/// on the probe set plus the declared contract context (semantics tag,
+/// declared/probed step counts, input/item/state type signatures).
+/// Equality is bounded behavioral evidence, never a proof of structural or
+/// mathematical identity.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BehavioralSignature {
     pub digest: String,
@@ -185,15 +227,40 @@ pub fn behavioral_signature(
     program: &ResearchProgram,
     limits: VerificationLimits,
 ) -> Option<BehavioralSignature> {
+    let probed_steps = program.steps.min(MAX_PROBED_STEPS);
     probe_execution(program, limits).map(|result| BehavioralSignature {
-        digest: result_digest(&result),
+        digest: behavioral_digest(&result, program, probed_steps),
     })
 }
 
+/// Outcome of looking a program up in an [`AlgorithmRegistry`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Recognition {
+    /// No registered behavior shares this signature.
+    NoKnownMatch,
+    /// Every registered human-readable name whose known behavior matches
+    /// this signature. Behavioral aliasing on a finite probe set is real:
+    /// collisions are preserved as a SET of candidate behaviors instead of
+    /// silently collapsing to whichever name registered last.
+    MatchesKnownBehaviors(Vec<String>),
+}
+
+impl Recognition {
+    /// Whether any known behavior matched.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        matches!(self, Self::NoKnownMatch)
+    }
+}
+
 /// Registry mapping behavioral digests to human-readable algorithm names.
+///
+/// A digest maps to a LIST of names: two distinct known algorithms can
+/// alias on a small finite probe set, and overwriting one name with
+/// another would silently lose that ambiguity.
 #[derive(Debug, Clone, Default)]
 pub struct AlgorithmRegistry {
-    entries: std::collections::BTreeMap<String, String>,
+    entries: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 impl AlgorithmRegistry {
@@ -207,18 +274,29 @@ impl AlgorithmRegistry {
     pub fn register(&mut self, name: &str, program: &ResearchProgram, limits: VerificationLimits) {
         if let Some(signature) = behavioral_signature(program, limits)
         {
-            self.entries.insert(signature.digest, name.to_string());
+            let names = self.entries.entry(signature.digest).or_default();
+            if !names.iter().any(|known| known == name)
+            {
+                names.push(name.to_string());
+            }
         }
     }
 
     /// Look up a program's behavior among registered algorithms.
     #[must_use]
-    pub fn recognize(&self, program: &ResearchProgram, limits: VerificationLimits) -> Option<&str> {
-        let signature = behavioral_signature(program, limits)?;
-        self.entries.get(&signature.digest).map(String::as_str)
+    pub fn recognize(&self, program: &ResearchProgram, limits: VerificationLimits) -> Recognition {
+        match behavioral_signature(program, limits)
+        {
+            Some(signature) => match self.entries.get(&signature.digest)
+            {
+                Some(names) => Recognition::MatchesKnownBehaviors(names.clone()),
+                None => Recognition::NoKnownMatch,
+            },
+            None => Recognition::NoKnownMatch,
+        }
     }
 
-    /// Number of registered behaviors.
+    /// Number of distinct registered behaviors (digests).
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
@@ -291,7 +369,7 @@ mod tests {
         let welford = super::super::reference::welford_recurrence(3);
         assert_eq!(
             registry.recognize(&welford, limits),
-            Some("welford_recurrence")
+            Recognition::MatchesKnownBehaviors(vec!["welford_recurrence".to_string()])
         );
 
         // ...and a structurally different but behaviorally identical variant:
@@ -312,7 +390,7 @@ mod tests {
         assert_ne!(renamed, welford, "variants must differ structurally");
         assert_eq!(
             registry.recognize(&renamed, limits),
-            Some("welford_recurrence"),
+            Recognition::MatchesKnownBehaviors(vec!["welford_recurrence".to_string()]),
             "behavioral identity survives structural variation"
         );
     }
@@ -322,10 +400,81 @@ mod tests {
         let limits = VerificationLimits::default();
         let registry = known_algorithm_registry(limits);
         let sum4 = super::super::reference::reduction_sum_program(5);
-        assert_eq!(
-            registry.recognize(&sum4, limits),
-            None,
+        assert!(
+            registry.recognize(&sum4, limits).is_empty(),
             "different length => different probe shape => unrecognized"
+        );
+    }
+
+    /// Regression: two registered behaviors that alias on the finite probe
+    /// set used to overwrite each other (BTreeMap insert), silently losing
+    /// one human-readable name. Ambiguity is now preserved as a set.
+    #[test]
+    fn ambiguous_registrations_preserve_every_name() {
+        let limits = VerificationLimits::default();
+        // A structurally different but behaviorally identical twin of the
+        // welford fixture: the reshape-passthrough variant from above.
+        let welford = super::super::reference::welford_recurrence(3);
+        let mut variant = welford.clone();
+        let finalize_len = variant.finalize.ops.len();
+        for slot in 0..3
+        {
+            variant
+                .finalize
+                .ops
+                .push(Op::Reshape(super::super::ir::ShapeTo {
+                    src: Ref::StateFinal(slot),
+                    shape: vec![],
+                }));
+            variant.outputs[slot] = finalize_len + slot;
+        }
+        let mut registry = AlgorithmRegistry::new();
+        registry.register("welford_recurrence", &welford, limits);
+        registry.register("welford_variant", &variant, limits);
+        // One aliased digest, two preserved names.
+        assert_eq!(registry.len(), 1);
+        assert_eq!(
+            registry.recognize(&welford, limits),
+            Recognition::MatchesKnownBehaviors(vec![
+                "welford_recurrence".to_string(),
+                "welford_variant".to_string(),
+            ]),
+            "behavioral aliasing must surface every candidate name"
+        );
+        // Duplicate registration of the SAME name stays deduplicated.
+        registry.register("welford_recurrence", &welford, limits);
+        assert_eq!(
+            registry.recognize(&welford, limits),
+            Recognition::MatchesKnownBehaviors(vec![
+                "welford_recurrence".to_string(),
+                "welford_variant".to_string(),
+            ])
+        );
+    }
+
+    /// Regression: bounded prefix probing must not alias different program
+    /// contracts. The digest encodes declared steps, probed steps and the
+    /// full type signature, so distinct contracts stay distinct even when a
+    /// truncated probe prefix would behave identically.
+    #[test]
+    fn different_contracts_never_share_a_signature_via_prefix_truncation() {
+        let limits = VerificationLimits::default();
+        let two_steps = super::super::reference::compensated_sum_recurrence(2);
+        let three_steps = super::super::reference::compensated_sum_recurrence(3);
+        let four_steps = super::super::reference::compensated_sum_recurrence(4);
+        let left = behavioral_signature(&two_steps, limits).unwrap();
+        let middle = behavioral_signature(&three_steps, limits).unwrap();
+        let right = behavioral_signature(&four_steps, limits).unwrap();
+        assert_ne!(left.digest, middle.digest);
+        assert_ne!(middle.digest, right.digest);
+        assert_ne!(left.digest, right.digest);
+        // The probed step count is part of the contract context: a
+        // recurrence beyond MAX_PROBED_STEPS is compared on its probed
+        // prefix but keeps its declared length visible.
+        let long = super::super::reference::compensated_sum_recurrence(MAX_PROBED_STEPS + 2).steps;
+        assert!(
+            long > MAX_PROBED_STEPS,
+            "fixture sanity: the long recurrence exceeds the probe budget"
         );
     }
 
@@ -341,7 +490,10 @@ mod tests {
         assert_eq!(signature.digest.len(), 64);
         let mut registry = AlgorithmRegistry::new();
         registry.register("the_answer", &program, limits);
-        assert_eq!(registry.recognize(&program, limits), Some("the_answer"));
+        assert_eq!(
+            registry.recognize(&program, limits),
+            Recognition::MatchesKnownBehaviors(vec!["the_answer".to_string()])
+        );
     }
 
     #[test]
