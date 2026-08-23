@@ -609,11 +609,16 @@ impl std::fmt::Display for ProgramError {
                 start,
                 len,
                 dimension,
-            } => write!(
-                formatter,
-                "{section} narrow node {node}: range [{start}, {}) exceeds axis {axis} dimension {dimension}",
-                start + len
-            ),
+            } =>
+            {
+                // Saturating on purpose: a hostile `start + len` may overflow
+                // and this formatter must never panic while reporting it.
+                write!(
+                    formatter,
+                    "{section} narrow node {node}: range [{start}, {}) exceeds axis {axis} dimension {dimension}",
+                    start.saturating_add(*len)
+                )
+            },
             Self::RankLimitExceeded {
                 section,
                 node,
