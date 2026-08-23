@@ -78,7 +78,7 @@
 //! * `Add`, `Sub`, `Mul`, `Div` — [`KernelFamily::ElementwiseBinary`];
 //! * `Relu`, `Exp`, `Log`, `Scale` — [`KernelFamily::ElementwiseUnary`];
 //! * `Reshape` — [`KernelFamily::ShapeCopy`];
-//! * `Transpose` — [`KernelFamily::Permute`].
+//! * `Transpose` — [`KernelFamily::Permute`] all operations preserve the lowered plan.
 //!
 //! `Input` and `Constant` never become kernels; they feed the external binding
 //! table ([`ExternalBindings`]) instead.
@@ -125,8 +125,9 @@ mod memory;
 
 pub use canonical::{CanonicalCompiler, CompileError, CompileStats, ExecutionPlan, Instruction};
 pub use compiler_ir::{
-    CompilerIr, CompilerIrError, CompilerIrIdentifierSpace, IrBlock, IrBlockId, IrOperation,
-    IrOperationId, IrRegion, IrRegionId, IrValue, IrValueId, verify_compiler_ir,
+    CompilerIr, CompilerIrError, CompilerIrIdentifierSpace, CompilerPass, IrBlock, IrBlockId,
+    IrOperation, IrOperationId, IrRegion, IrRegionId, IrValue, IrValueId, PassManager,
+    PassManagerStats, PassResult, ScaleZeroCanonicalizationPass, verify_compiler_ir,
 };
 pub use lowering::{
     BinaryKernel, ExternalBinding, ExternalBindings, ExternalValueKind, IdentifierSpace,
