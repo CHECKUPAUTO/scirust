@@ -14,6 +14,7 @@
 mod block;
 mod ids;
 mod operation;
+mod pipeline;
 mod program;
 mod region;
 mod value;
