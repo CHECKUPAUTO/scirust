@@ -22,7 +22,10 @@ mod verify;
 pub use block::IrBlock;
 pub use ids::{IrBlockId, IrOperationId, IrRegionId, IrValueId};
 pub use operation::IrOperation;
-pub use program::{CompilerIr, CompilerIrError, CompilerIrIdentifierSpace};
+pub use program::{
+    CompilerIr, CompilerIrError, CompilerIrIdentifierSpace, CompilerPass, PassManager,
+    PassManagerStats, PassResult, ScaleZeroCanonicalizationPass,
+};
 pub use region::IrRegion;
 pub use value::IrValue;
 pub use verify::verify_compiler_ir;
