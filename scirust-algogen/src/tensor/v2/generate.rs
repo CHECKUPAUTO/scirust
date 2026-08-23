@@ -1829,8 +1829,7 @@ mod tests {
             .iter()
             .map(|proposal| classify_op(&proposal.op))
             .collect();
-        let expected: BTreeSet<OperatorClass> =
-            grammar.allowed_classes.iter().copied().collect();
+        let expected: BTreeSet<OperatorClass> = grammar.allowed_classes.iter().copied().collect();
         assert_eq!(observed, expected);
     }
 }

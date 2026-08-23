@@ -718,28 +718,28 @@ fn resolve_ref<'a>(
 ) -> Result<&'a ValueTensor, ExecutionError> {
     match reference
     {
-        Ref::Input(index) =>
+        Ref::Input(index) => context
+            .inputs
+            .get(index)
+            .ok_or(ExecutionError::Verification(
+                ProgramError::InputOutOfBounds {
+                    section: kind,
+                    node,
+                    input: index,
+                    available: context.inputs.len(),
+                },
+            )),
+        Ref::Local(source) =>
         {
-            context
-                .inputs
-                .get(index)
-                .ok_or(ExecutionError::Verification(
-                    ProgramError::InputOutOfBounds {
-                        section: kind,
-                        node,
-                        input: index,
-                        available: context.inputs.len(),
-                    },
-                ))
+            registers
+                .get(source)
+                .and_then(Option::as_ref)
+                .ok_or(ExecutionError::MissingRegister {
+                    section: kind,
+                    node,
+                    source,
+                })
         },
-        Ref::Local(source) => registers
-            .get(source)
-            .and_then(Option::as_ref)
-            .ok_or(ExecutionError::MissingRegister {
-                section: kind,
-                node,
-                source,
-            }),
         Ref::Item(index) => context
             .items
             .get(context.item_offset + index)
@@ -750,20 +750,14 @@ fn resolve_ref<'a>(
                     available: context.items.len().saturating_sub(context.item_offset),
                 })
             }),
-        Ref::StatePrev(slot) | Ref::StateFinal(slot) =>
-        {
-            context
-                .state
-                .get(slot)
-                .ok_or(ExecutionError::Verification(
-                    ProgramError::StateSlotOutOfBounds {
-                        section: kind,
-                        node,
-                        slot,
-                        available: context.state.len(),
-                    },
-                ))
-        },
+        Ref::StatePrev(slot) | Ref::StateFinal(slot) => context.state.get(slot).ok_or(
+            ExecutionError::Verification(ProgramError::StateSlotOutOfBounds {
+                section: kind,
+                node,
+                slot,
+                available: context.state.len(),
+            }),
+        ),
     }
 }
 
@@ -1500,13 +1494,7 @@ fn eval_op(
             |a, b| a / b,
             |a, b| a / b,
         )?,
-        Op::Pow(_) => binary_float(
-            operands[0],
-            operands[1],
-            &result_type,
-            f32::powf,
-            f64::powf,
-        )?,
+        Op::Pow(_) => binary_float(operands[0], operands[1], &result_type, f32::powf, f64::powf)?,
 
         Op::MulAdd(_) => ternary_float(
             operands[0],

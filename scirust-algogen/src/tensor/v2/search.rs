@@ -138,17 +138,22 @@ impl CounterexampleSet {
         encode_len(&mut bytes, self.id.len());
         bytes.extend_from_slice(self.id.as_bytes());
         encode_len(&mut bytes, self.cases.len());
-        for case in &self.cases {
-            for tensors in [&case.inputs, &case.items, &case.expected_outputs] {
+        for case in &self.cases
+        {
+            for tensors in [&case.inputs, &case.items, &case.expected_outputs]
+            {
                 encode_len(&mut bytes, tensors.len());
-                for tensor in tensors {
+                for tensor in tensors
+                {
                     bytes.push(tensor.dtype.tag());
                     encode_len(&mut bytes, tensor.shape.len());
-                    for &dimension in &tensor.shape {
+                    for &dimension in &tensor.shape
+                    {
                         encode_len(&mut bytes, dimension);
                     }
                     encode_len(&mut bytes, tensor.data.len());
-                    for &value in &tensor.data {
+                    for &value in &tensor.data
+                    {
                         bytes.extend_from_slice(&value.to_bits().to_le_bytes());
                     }
                 }

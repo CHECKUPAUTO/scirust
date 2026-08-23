@@ -817,7 +817,8 @@ pub fn verify_program(
         .max(output_copy_elements)
         .saturating_mul(8);
     let conservative_resident_bytes = context.resident_bytes.saturating_add(root_copy_bytes);
-    if conservative_resident_bytes > limits.max_temporary_bytes {
+    if conservative_resident_bytes > limits.max_temporary_bytes
+    {
         return Err(ProgramError::TemporaryBytesExceeded {
             bytes: conservative_resident_bytes,
             maximum: limits.max_temporary_bytes,
@@ -1026,7 +1027,8 @@ fn infer_section(
                 maximum: context.limits.max_rank,
             });
         }
-        if row_major_strides(&result_type.shape).is_none() {
+        if row_major_strides(&result_type.shape).is_none()
+        {
             return Err(ProgramError::StrideOverflow {
                 section: kind,
                 node,
