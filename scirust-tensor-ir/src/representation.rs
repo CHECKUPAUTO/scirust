@@ -590,7 +590,10 @@ impl RepresentationPlan {
     ///
     /// Redeclaring an equal representation returns the existing identifier, so
     /// interning stays deterministic.
-    pub(crate) fn declare(
+    ///
+    /// This is the extension point representation-aware lowering uses to
+    /// register composite declarations built from validated components.
+    pub fn declare(
         &mut self,
         primitive: PrimitiveRepresentation,
     ) -> Result<RepresentationId, RepresentationError> {
@@ -636,6 +639,15 @@ impl RepresentationPlan {
     /// Resolve a representation identifier.
     pub fn representation(&self, id: RepresentationId) -> Option<&PrimitiveRepresentation> {
         self.representations.get(id.get() as usize)
+    }
+
+    /// Return all node assignments in canonical node order.
+    ///
+    /// Entry `i` is the representation assigned to the node with
+    /// `NodeId::new(i)`; the table is exactly as long as the node set the plan
+    /// was seeded from.
+    pub fn assignments(&self) -> &[RepresentationId] {
+        &self.assignments
     }
 
     /// Resolve the physical representation assigned to `node`.
@@ -770,6 +782,43 @@ impl RepresentationPlan {
         node: NodeId,
         id: RepresentationId,
     ) -> Result<(), RepresentationError> {
+        let logical = self.canonical_logical(graph, node)?;
+
+        self.representation(id)
+            .ok_or(RepresentationError::InvalidRepresentationId { id })?
+            .validate_for(logical)?;
+
+        self.assignments[node.get() as usize] = id;
+
+        Ok(())
+    }
+
+    /// Return the exact physical storage required for `node` under its
+    /// assigned representation.
+    ///
+    /// The node must lie inside the plan's assignment scope; validation and
+    /// checked accounting are shared with [`RepresentationPlan::assign`] and
+    /// [`RepresentationPlan::storage_bits`].
+    pub fn node_storage_bits(
+        &self,
+        graph: &Graph,
+        node: NodeId,
+    ) -> Result<StorageBits, RepresentationError> {
+        let id = self
+            .assignment(node)
+            .ok_or(RepresentationError::UnknownAssignmentNode { node })?;
+        let logical = self.canonical_logical(graph, node)?;
+
+        self.storage_bits(id, logical)
+    }
+
+    /// Return the canonical tensor type `graph` declares for `node`, rejecting
+    /// nodes outside the plan's assignment scope.
+    fn canonical_logical<'a>(
+        &self,
+        graph: &'a Graph,
+        node: NodeId,
+    ) -> Result<&'a TensorType, RepresentationError> {
         let index = node.get() as usize;
         if index >= self.assignments.len()
         {
@@ -778,19 +827,11 @@ impl RepresentationPlan {
 
         // The plan scope guarantees the index, but a mismatched or truncated
         // graph is rejected instead of trusted.
-        let logical = &graph
+        graph
             .nodes()
             .get(index)
-            .ok_or(RepresentationError::UnknownAssignmentNode { node })?
-            .output;
-
-        self.representation(id)
-            .ok_or(RepresentationError::InvalidRepresentationId { id })?
-            .validate_for(logical)?;
-
-        self.assignments[index] = id;
-
-        Ok(())
+            .map(|node| &node.output)
+            .ok_or(RepresentationError::UnknownAssignmentNode { node })
     }
 }
 
