@@ -60,23 +60,24 @@ impl StorageBits {
 /// Typed reference to one representation declared in a [`RepresentationPlan`].
 ///
 /// The [`RepresentationId`] identifies the physical representation family,
-/// while `logical_type` describes the value represented by this particular
-/// component. Keeping the type here allows one future composite representation
-/// to contain components with shapes different from the parent tensor.
+/// while `tensor_type` describes the tensor value carried by this particular
+/// component. A component type is independent of the parent tensor type: future
+/// representations may contain factors, packed payloads, scales, indices or
+/// other typed tensor components with different shapes and dtypes.
 ///
 /// Instances are constructed through [`RepresentationPlan::component`], which
 /// validates that the identifier exists and is compatible with the component's
-/// logical type.
+/// own tensor type.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepresentationComponent {
-    logical_type: TensorType,
+    tensor_type: TensorType,
     representation: RepresentationId,
 }
 
 impl RepresentationComponent {
-    /// Logical tensor type represented by this component.
-    pub const fn logical_type(&self) -> &TensorType {
-        &self.logical_type
+    /// Tensor type carried by this representation component.
+    pub const fn tensor_type(&self) -> &TensorType {
+        &self.tensor_type
     }
 
     /// Interned physical representation assigned to this component.
@@ -305,20 +306,20 @@ impl RepresentationPlan {
     /// Construct a typed component referencing an interned representation.
     ///
     /// This validates both identifier membership and compatibility between the
-    /// physical representation and the component's logical tensor type.
+    /// physical representation and the component's own tensor type.
     pub fn component(
         &self,
-        logical_type: TensorType,
+        tensor_type: TensorType,
         representation: RepresentationId,
     ) -> Result<RepresentationComponent, RepresentationError> {
         let physical = self
             .representation(representation)
             .ok_or(RepresentationError::InvalidRepresentationId { id: representation })?;
 
-        physical.validate_for(&logical_type)?;
+        physical.validate_for(&tensor_type)?;
 
         Ok(RepresentationComponent {
-            logical_type,
+            tensor_type,
             representation,
         })
     }
@@ -401,7 +402,7 @@ mod tests {
     }
 
     #[test]
-    fn typed_component_preserves_its_own_logical_type() {
+    fn typed_component_preserves_its_own_tensor_type() {
         let mut graph = Graph::new();
         let matrix_type = TensorType::new(DType::F32, Shape::new(vec![2, 2]));
         let vector_type = TensorType::new(DType::F32, Shape::new(vec![4]));
@@ -421,8 +422,8 @@ mod tests {
         let matrix_component = plan.component(matrix_type.clone(), matrix_id).unwrap();
         let vector_component = plan.component(vector_type.clone(), vector_id).unwrap();
 
-        assert_eq!(matrix_component.logical_type(), &matrix_type);
-        assert_eq!(vector_component.logical_type(), &vector_type);
+        assert_eq!(matrix_component.tensor_type(), &matrix_type);
+        assert_eq!(vector_component.tensor_type(), &vector_type);
         assert_eq!(matrix_component.representation(), matrix_id);
         assert_eq!(vector_component.representation(), vector_id);
     }
