@@ -10,8 +10,9 @@
 //!   dtype);
 //! * accumulation orders are fixed by construction (ascending row-major flat
 //!   index), so results are bit-reproducible;
-//! * under the default [`FloatPolicy::RejectNonFinite`] the first non-finite
-//!   intermediate aborts evaluation with a precise error;
+//! * under the default [`FloatPolicy::FiniteOutputs`], NaN intermediates and
+//!   non-finite observable outputs abort with precise errors while explicit
+//!   infinity identities may flow internally;
 //! * no FFI, no threads, no panics on hostile input: malformed programs are
 //!   rejected up front, malformed inputs produce structured errors.
 
@@ -39,6 +40,9 @@ use super::verify::{
 pub enum FloatPolicy {
     /// Default discovery regime (see the contract above).
     FiniteOutputs,
+    /// Reject every non-finite input, item, intermediate, and output. This is
+    /// the execution policy matching [`super::semantics::NumericalSemantics::FiniteOnly`].
+    RejectNonFinite,
     /// Research escape hatch: no checks at all; non-finite values may reach
     /// outputs. Never used by the default evaluator.
     AllowNonFinite,
@@ -70,32 +74,60 @@ pub struct ValueTensor {
     pub data: Vec<f64>,
 }
 
+/// Structural payload failure for an externally constructed tensor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TensorDataError {
+    ShapeOverflow {
+        shape: Vec<usize>,
+    },
+    LengthMismatch {
+        shape: Vec<usize>,
+        expected: usize,
+        found: usize,
+    },
+    F32NotRepresentable {
+        element: usize,
+    },
+    InvalidBoolEncoding {
+        element: usize,
+        bits: u64,
+    },
+}
+
+impl std::fmt::Display for TensorDataError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self
+        {
+            Self::ShapeOverflow { shape } => write!(formatter, "shape {shape:?} overflows usize"),
+            Self::LengthMismatch {
+                shape,
+                expected,
+                found,
+            } => write!(
+                formatter,
+                "data length {found} does not match shape {shape:?} ({expected} elements)"
+            ),
+            Self::F32NotRepresentable { element } => write!(
+                formatter,
+                "element {element} is not exactly representable as f32"
+            ),
+            Self::InvalidBoolEncoding { element, bits } => write!(
+                formatter,
+                "Boolean element {element} has invalid f64 bit pattern {bits:#018x}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for TensorDataError {}
+
 impl ValueTensor {
     /// Build a tensor, rejecting data-length mismatches and, for `f32`,
     /// values that are not exactly representable in binary32.
-    pub fn new(dtype: DType, shape: Vec<usize>, data: Vec<f64>) -> Result<Self, String> {
-        let expected =
-            shape_elements(&shape).ok_or_else(|| format!("shape {shape:?} overflows usize"))?;
-        if data.len() != expected
-        {
-            return Err(format!(
-                "data length {} does not match shape {shape:?} ({expected} elements)",
-                data.len()
-            ));
-        }
-        if dtype == DType::F32
-        {
-            for (index, &value) in data.iter().enumerate()
-            {
-                if (value as f32) as f64 != value
-                {
-                    return Err(format!(
-                        "element {index} = {value} is not exactly representable as f32"
-                    ));
-                }
-            }
-        }
-        Ok(Self { dtype, shape, data })
+    pub fn new(dtype: DType, shape: Vec<usize>, data: Vec<f64>) -> Result<Self, TensorDataError> {
+        let tensor = Self { dtype, shape, data };
+        tensor.validate_layout()?;
+        Ok(tensor)
     }
 
     /// Rank-0 scalar from an `f32`.
@@ -132,6 +164,62 @@ impl ValueTensor {
     /// The declared type of this tensor.
     pub fn value_type(&self) -> ValueType {
         ValueType::new(self.dtype, self.shape.clone())
+    }
+
+    /// Revalidate public fields at the trust boundary. This is intentionally
+    /// called for every external tensor because serde and struct literals can
+    /// bypass [`Self::new`].
+    pub fn validate_layout(&self) -> Result<(), TensorDataError> {
+        let expected =
+            shape_elements(&self.shape).ok_or_else(|| TensorDataError::ShapeOverflow {
+                shape: self.shape.clone(),
+            })?;
+        if self.data.len() != expected
+        {
+            return Err(TensorDataError::LengthMismatch {
+                shape: self.shape.clone(),
+                expected,
+                found: self.data.len(),
+            });
+        }
+        match self.dtype
+        {
+            DType::F32 =>
+            {
+                for (element, &value) in self.data.iter().enumerate()
+                {
+                    let round_trip = (value as f32) as f64;
+                    let exact = if value.is_nan()
+                    {
+                        round_trip.is_nan()
+                    }
+                    else
+                    {
+                        round_trip.to_bits() == value.to_bits()
+                    };
+                    if !exact
+                    {
+                        return Err(TensorDataError::F32NotRepresentable { element });
+                    }
+                }
+            },
+            DType::Bool =>
+            {
+                for (element, &value) in self.data.iter().enumerate()
+                {
+                    if value.to_bits() != 0.0f64.to_bits() && value.to_bits() != 1.0f64.to_bits()
+                    {
+                        return Err(TensorDataError::InvalidBoolEncoding {
+                            element,
+                            bits: value.to_bits(),
+                        });
+                    }
+                }
+            },
+            DType::F64 =>
+            {},
+        }
+        Ok(())
     }
 
     /// Compatibility-boundary conversion to a plain `f32` tensor.
@@ -185,6 +273,10 @@ pub enum ExecutionError {
         expected: usize,
         found: usize,
     },
+    ItemCountOverflow {
+        steps: u32,
+        items_per_step: usize,
+    },
     InputTypeMismatch {
         input: usize,
         expected: ValueType,
@@ -194,6 +286,14 @@ pub enum ExecutionError {
         item: usize,
         expected: ValueType,
         found: ValueType,
+    },
+    InvalidInputLayout {
+        input: usize,
+        error: TensorDataError,
+    },
+    InvalidItemLayout {
+        item: usize,
+        error: TensorDataError,
     },
     NonFiniteInput {
         input: usize,
@@ -209,6 +309,11 @@ pub enum ExecutionError {
         node: ValueId,
         element: usize,
     },
+    NonFiniteResult {
+        section: SectionKind,
+        node: ValueId,
+        element: usize,
+    },
     /// An observable output was not fully finite under
     /// [`FloatPolicy::FiniteOutputs`].
     NonFiniteOutput {
@@ -219,6 +324,12 @@ pub enum ExecutionError {
         section: SectionKind,
         node: ValueId,
         source: ValueId,
+    },
+    /// Defensive failure if a verifier-approved root was not materialized.
+    /// This should be unreachable, but remains structured rather than a panic.
+    MissingBinding {
+        section: SectionKind,
+        binding: ValueId,
     },
 }
 
@@ -238,6 +349,13 @@ impl std::fmt::Display for ExecutionError {
                 formatter,
                 "program expects {expected} item tensors, found {found}"
             ),
+            Self::ItemCountOverflow {
+                steps,
+                items_per_step,
+            } => write!(
+                formatter,
+                "item count overflows usize: {steps} steps × {items_per_step} items"
+            ),
             Self::InputTypeMismatch {
                 input,
                 expected,
@@ -254,6 +372,17 @@ impl std::fmt::Display for ExecutionError {
                 formatter,
                 "item {item}: expected type {expected:?}, found {found:?}"
             ),
+            Self::InvalidInputLayout { input, error } =>
+            {
+                write!(
+                    formatter,
+                    "input {input} has invalid tensor layout: {error}"
+                )
+            },
+            Self::InvalidItemLayout { item, error } =>
+            {
+                write!(formatter, "item {item} has invalid tensor layout: {error}")
+            },
             Self::NonFiniteInput { input, element } => write!(
                 formatter,
                 "input {input} contains a non-finite value at element {element}"
@@ -270,6 +399,14 @@ impl std::fmt::Display for ExecutionError {
                 formatter,
                 "{section} node {node} produced NaN at element {element}"
             ),
+            Self::NonFiniteResult {
+                section,
+                node,
+                element,
+            } => write!(
+                formatter,
+                "{section} node {node} produced a non-finite value at element {element}"
+            ),
             Self::NonFiniteOutput { output, element } => write!(
                 formatter,
                 "output {output} contains a non-finite value at element {element}"
@@ -281,6 +418,10 @@ impl std::fmt::Display for ExecutionError {
             } => write!(
                 formatter,
                 "{section} node {node} requires unavailable local value {source}"
+            ),
+            Self::MissingBinding { section, binding } => write!(
+                formatter,
+                "{section} root binding {binding} was not materialized"
             ),
         }
     }
@@ -331,9 +472,13 @@ pub fn execute_program(
         executed_nodes += executed;
         for &binding in &program.init_state
         {
-            let value = registers[binding]
-                .as_ref()
-                .expect("verified init binding")
+            let value = registers
+                .get(binding)
+                .and_then(Option::as_ref)
+                .ok_or(ExecutionError::MissingBinding {
+                    section: SectionKind::Init,
+                    binding,
+                })?
                 .clone();
             state.push(value);
         }
@@ -361,9 +506,13 @@ pub fn execute_program(
         let mut next_state = Vec::with_capacity(program.next_state.len());
         for &binding in &program.next_state
         {
-            let value = registers[binding]
-                .as_ref()
-                .expect("verified next-state binding")
+            let value = registers
+                .get(binding)
+                .and_then(Option::as_ref)
+                .ok_or(ExecutionError::MissingBinding {
+                    section: SectionKind::Step,
+                    binding,
+                })?
                 .clone();
             next_state.push(value);
         }
@@ -389,11 +538,15 @@ pub fn execute_program(
     let mut outputs = Vec::with_capacity(program.outputs.len());
     for (index, &output) in program.outputs.iter().enumerate()
     {
-        let value = registers[output]
-            .as_ref()
-            .expect("verified output binding")
+        let value = registers
+            .get(output)
+            .and_then(Option::as_ref)
+            .ok_or(ExecutionError::MissingBinding {
+                section: SectionKind::Finalize,
+                binding: output,
+            })?
             .clone();
-        if policy.floats == FloatPolicy::FiniteOutputs && value.dtype.is_float()
+        if policy.floats != FloatPolicy::AllowNonFinite && value.dtype.is_float()
         {
             if let Some(element) = value.data.iter().position(|&v| !v.is_finite())
             {
@@ -429,6 +582,12 @@ fn validate_externals(
     }
     for (index, (tensor, declared)) in inputs.iter().zip(&program.inputs).enumerate()
     {
+        tensor
+            .validate_layout()
+            .map_err(|error| ExecutionError::InvalidInputLayout {
+                input: index,
+                error,
+            })?;
         if &tensor.value_type() != declared
         {
             return Err(ExecutionError::InputTypeMismatch {
@@ -437,7 +596,7 @@ fn validate_externals(
                 found: tensor.value_type(),
             });
         }
-        if policy.floats == FloatPolicy::FiniteOutputs && tensor.dtype.is_float()
+        if policy.floats != FloatPolicy::AllowNonFinite && tensor.dtype.is_float()
         {
             if let Some(element) = tensor.data.iter().position(|&value| !value.is_finite())
             {
@@ -449,7 +608,12 @@ fn validate_externals(
         }
     }
 
-    let expected_items = (program.steps as usize) * program.items.len();
+    let expected_items = (program.steps as usize)
+        .checked_mul(program.items.len())
+        .ok_or(ExecutionError::ItemCountOverflow {
+            steps: program.steps,
+            items_per_step: program.items.len(),
+        })?;
     if items.len() != expected_items
     {
         return Err(ExecutionError::ItemArity {
@@ -460,6 +624,9 @@ fn validate_externals(
     let slots_per_step = program.items.len().max(1);
     for (slot, tensor) in items.iter().enumerate()
     {
+        tensor
+            .validate_layout()
+            .map_err(|error| ExecutionError::InvalidItemLayout { item: slot, error })?;
         let declared = &program.items[slot % slots_per_step];
         if &tensor.value_type() != declared
         {
@@ -469,7 +636,7 @@ fn validate_externals(
                 found: tensor.value_type(),
             });
         }
-        if policy.floats == FloatPolicy::FiniteOutputs && tensor.dtype.is_float()
+        if policy.floats != FloatPolicy::AllowNonFinite && tensor.dtype.is_float()
         {
             if let Some(element) = tensor.data.iter().position(|&value| !value.is_finite())
             {
@@ -516,7 +683,7 @@ fn eval_section(
 
         // Resolve operands in reference order; failures are deterministic and
         // cannot occur for verified programs, but stay structured regardless.
-        let mut operands: Vec<ValueTensor> = Vec::with_capacity(3);
+        let mut operands: Vec<&ValueTensor> = Vec::with_capacity(3);
         let mut failure: Option<ExecutionError> = None;
         op.for_each_ref(|reference| {
             if failure.is_some()
@@ -542,13 +709,13 @@ fn eval_section(
     Ok((registers, executed))
 }
 
-fn resolve_ref(
+fn resolve_ref<'a>(
     reference: Ref,
     node: ValueId,
     kind: SectionKind,
-    registers: &Registers,
-    context: &SectionContext<'_>,
-) -> Result<ValueTensor, ExecutionError> {
+    registers: &'a Registers,
+    context: &'a SectionContext<'a>,
+) -> Result<&'a ValueTensor, ExecutionError> {
     match reference
     {
         Ref::Input(index) =>
@@ -556,7 +723,6 @@ fn resolve_ref(
             context
                 .inputs
                 .get(index)
-                .cloned()
                 .ok_or(ExecutionError::Verification(
                     ProgramError::InputOutOfBounds {
                         section: kind,
@@ -569,7 +735,6 @@ fn resolve_ref(
         Ref::Local(source) => registers
             .get(source)
             .and_then(Option::as_ref)
-            .cloned()
             .ok_or(ExecutionError::MissingRegister {
                 section: kind,
                 node,
@@ -578,7 +743,6 @@ fn resolve_ref(
         Ref::Item(index) => context
             .items
             .get(context.item_offset + index)
-            .cloned()
             .ok_or_else(|| {
                 ExecutionError::Verification(ProgramError::ItemOutOfBounds {
                     node,
@@ -591,7 +755,6 @@ fn resolve_ref(
             context
                 .state
                 .get(slot)
-                .cloned()
                 .ok_or(ExecutionError::Verification(
                     ProgramError::StateSlotOutOfBounds {
                         section: kind,
@@ -1295,7 +1458,7 @@ fn eval_op(
     node: ValueId,
     kind: SectionKind,
     result_type: ValueType,
-    operands: &[ValueTensor],
+    operands: &[&ValueTensor],
     policy: ExecutionPolicy,
 ) -> Result<ValueTensor, ExecutionError> {
     // Constants are explicit IEEE bit patterns, not computed results: they
@@ -1310,146 +1473,146 @@ fn eval_op(
     {
         Op::Const(_) => unreachable!("constants are returned before this match"),
         Op::Add(_) => binary_float(
-            &operands[0],
-            &operands[1],
+            operands[0],
+            operands[1],
             &result_type,
             |a, b| a + b,
             |a, b| a + b,
         )?,
         Op::Sub(_) => binary_float(
-            &operands[0],
-            &operands[1],
+            operands[0],
+            operands[1],
             &result_type,
             |a, b| a - b,
             |a, b| a - b,
         )?,
         Op::Mul(_) => binary_float(
-            &operands[0],
-            &operands[1],
+            operands[0],
+            operands[1],
             &result_type,
             |a, b| a * b,
             |a, b| a * b,
         )?,
         Op::Div(_) => binary_float(
-            &operands[0],
-            &operands[1],
+            operands[0],
+            operands[1],
             &result_type,
             |a, b| a / b,
             |a, b| a / b,
         )?,
         Op::Pow(_) => binary_float(
-            &operands[0],
-            &operands[1],
+            operands[0],
+            operands[1],
             &result_type,
             f32::powf,
             f64::powf,
         )?,
 
         Op::MulAdd(_) => ternary_float(
-            &operands[0],
-            &operands[1],
-            &operands[2],
+            operands[0],
+            operands[1],
+            operands[2],
             &result_type,
             f32::mul_add,
             f64::mul_add,
         )?,
 
-        Op::Neg(_) => unary_float(&operands[0], |a| -a, |a| -a)?,
-        Op::Abs(_) => unary_float(&operands[0], f32::abs, f64::abs)?,
-        Op::Exp(_) => unary_float(&operands[0], f32::exp, f64::exp)?,
-        Op::Exp2(_) => unary_float(&operands[0], f32::exp2, f64::exp2)?,
-        Op::Expm1(_) => unary_float(&operands[0], f32::exp_m1, f64::exp_m1)?,
-        Op::Log(_) => unary_float(&operands[0], f32::ln, f64::ln)?,
-        Op::Log2(_) => unary_float(&operands[0], f32::log2, f64::log2)?,
-        Op::Log1p(_) => unary_float(&operands[0], f32::ln_1p, f64::ln_1p)?,
-        Op::Sqrt(_) => unary_float(&operands[0], f32::sqrt, f64::sqrt)?,
-        Op::Rsqrt(_) => unary_float(&operands[0], |a| 1.0 / a.sqrt(), |a| 1.0 / a.sqrt())?,
-        Op::Sin(_) => unary_float(&operands[0], f32::sin, f64::sin)?,
-        Op::Cos(_) => unary_float(&operands[0], f32::cos, f64::cos)?,
-        Op::Tanh(_) => unary_float(&operands[0], f32::tanh, f64::tanh)?,
+        Op::Neg(_) => unary_float(operands[0], |a| -a, |a| -a)?,
+        Op::Abs(_) => unary_float(operands[0], f32::abs, f64::abs)?,
+        Op::Exp(_) => unary_float(operands[0], f32::exp, f64::exp)?,
+        Op::Exp2(_) => unary_float(operands[0], f32::exp2, f64::exp2)?,
+        Op::Expm1(_) => unary_float(operands[0], f32::exp_m1, f64::exp_m1)?,
+        Op::Log(_) => unary_float(operands[0], f32::ln, f64::ln)?,
+        Op::Log2(_) => unary_float(operands[0], f32::log2, f64::log2)?,
+        Op::Log1p(_) => unary_float(operands[0], f32::ln_1p, f64::ln_1p)?,
+        Op::Sqrt(_) => unary_float(operands[0], f32::sqrt, f64::sqrt)?,
+        Op::Rsqrt(_) => unary_float(operands[0], |a| 1.0 / a.sqrt(), |a| 1.0 / a.sqrt())?,
+        Op::Sin(_) => unary_float(operands[0], f32::sin, f64::sin)?,
+        Op::Cos(_) => unary_float(operands[0], f32::cos, f64::cos)?,
+        Op::Tanh(_) => unary_float(operands[0], f32::tanh, f64::tanh)?,
 
-        Op::Min(_) => binary_float(&operands[0], &operands[1], &result_type, f32::min, f64::min)?,
-        Op::Max(_) => binary_float(&operands[0], &operands[1], &result_type, f32::max, f64::max)?,
+        Op::Min(_) => binary_float(operands[0], operands[1], &result_type, f32::min, f64::min)?,
+        Op::Max(_) => binary_float(operands[0], operands[1], &result_type, f32::max, f64::max)?,
 
         Op::Clamp(_) => ternary_float(
-            &operands[0],
-            &operands[1],
-            &operands[2],
+            operands[0],
+            operands[1],
+            operands[2],
             &result_type,
             |x, lo, hi| x.min(hi).max(lo),
             |x, lo, hi| x.min(hi).max(lo),
         )?,
 
-        Op::Select(_) => select(&operands[0], &operands[1], &operands[2], &result_type)?,
+        Op::Select(_) => select(operands[0], operands[1], operands[2], &result_type)?,
 
         Op::Eq(_) => compare(
-            &operands[0],
-            &operands[1],
+            operands[0],
+            operands[1],
             &result_type,
             |a, b| a == b,
             |a, b| a == b,
         )?,
         Op::Ne(_) => compare(
-            &operands[0],
-            &operands[1],
+            operands[0],
+            operands[1],
             &result_type,
             |a, b| a != b,
             |a, b| a != b,
         )?,
         Op::Lt(_) => compare(
-            &operands[0],
-            &operands[1],
+            operands[0],
+            operands[1],
             &result_type,
             |a, b| a < b,
             |a, b| a < b,
         )?,
         Op::Le(_) => compare(
-            &operands[0],
-            &operands[1],
+            operands[0],
+            operands[1],
             &result_type,
             |a, b| a <= b,
             |a, b| a <= b,
         )?,
         Op::Gt(_) => compare(
-            &operands[0],
-            &operands[1],
+            operands[0],
+            operands[1],
             &result_type,
             |a, b| a > b,
             |a, b| a > b,
         )?,
         Op::Ge(_) => compare(
-            &operands[0],
-            &operands[1],
+            operands[0],
+            operands[1],
             &result_type,
             |a, b| a >= b,
             |a, b| a >= b,
         )?,
 
-        Op::And(_) => logic_and_or(&operands[0], &operands[1], &result_type, false)?,
-        Op::Or(_) => logic_and_or(&operands[0], &operands[1], &result_type, true)?,
-        Op::Not(_) => logic_not(&operands[0])?,
+        Op::And(_) => logic_and_or(operands[0], operands[1], &result_type, false)?,
+        Op::Or(_) => logic_and_or(operands[0], operands[1], &result_type, true)?,
+        Op::Not(_) => logic_not(operands[0])?,
 
-        Op::ReduceSum(reduce) => reduce_op(&operands[0], reduce.axis, Accumulation::Sum)?,
-        Op::ReduceProd(reduce) => reduce_op(&operands[0], reduce.axis, Accumulation::Product)?,
-        Op::ReduceMax(reduce) => reduce_op(&operands[0], reduce.axis, Accumulation::Maximum)?,
-        Op::ReduceMin(reduce) => reduce_op(&operands[0], reduce.axis, Accumulation::Minimum)?,
-        Op::ReduceMean(reduce) => reduce_op(&operands[0], reduce.axis, Accumulation::Mean)?,
+        Op::ReduceSum(reduce) => reduce_op(operands[0], reduce.axis, Accumulation::Sum)?,
+        Op::ReduceProd(reduce) => reduce_op(operands[0], reduce.axis, Accumulation::Product)?,
+        Op::ReduceMax(reduce) => reduce_op(operands[0], reduce.axis, Accumulation::Maximum)?,
+        Op::ReduceMin(reduce) => reduce_op(operands[0], reduce.axis, Accumulation::Minimum)?,
+        Op::ReduceMean(reduce) => reduce_op(operands[0], reduce.axis, Accumulation::Mean)?,
 
-        Op::Dot(_) => dot(&operands[0], &operands[1])?,
-        Op::MatVec(_) => mat_like(&operands[0], &operands[1], MatKind::MatVec)?,
-        Op::VecMat(_) => mat_like(&operands[0], &operands[1], MatKind::VecMat)?,
-        Op::MatMul(_) => mat_like(&operands[0], &operands[1], MatKind::MatMul)?,
-        Op::BatchedMatMul(_) => batched_mat_mul(&operands[0], &operands[1])?,
-        Op::Outer(_) => outer(&operands[0], &operands[1])?,
+        Op::Dot(_) => dot(operands[0], operands[1])?,
+        Op::MatVec(_) => mat_like(operands[0], operands[1], MatKind::MatVec)?,
+        Op::VecMat(_) => mat_like(operands[0], operands[1], MatKind::VecMat)?,
+        Op::MatMul(_) => mat_like(operands[0], operands[1], MatKind::MatMul)?,
+        Op::BatchedMatMul(_) => batched_mat_mul(operands[0], operands[1])?,
+        Op::Outer(_) => outer(operands[0], operands[1])?,
 
-        Op::Reshape(to) => reshape_copy(&operands[0], &to.shape),
-        Op::Squeeze(_) | Op::Unsqueeze(_) => reshape_copy(&operands[0], &result_type.shape),
-        Op::Transpose(permute) => transpose(&operands[0], &permute.perm, &result_type.shape)?,
-        Op::BroadcastTo(to) => broadcast_copy(&operands[0], &to.shape)?,
-        Op::Concat { axis, .. } => concat(&operands[0], &operands[1], *axis, &result_type.shape)?,
+        Op::Reshape(to) => reshape_copy(operands[0], &to.shape),
+        Op::Squeeze(_) | Op::Unsqueeze(_) => reshape_copy(operands[0], &result_type.shape),
+        Op::Transpose(permute) => transpose(operands[0], &permute.perm, &result_type.shape)?,
+        Op::BroadcastTo(to) => broadcast_copy(operands[0], &to.shape)?,
+        Op::Concat { axis, .. } => concat(operands[0], operands[1], *axis, &result_type.shape)?,
         Op::Narrow(window) =>
         {
-            slice_narrow(&operands[0], window.axis, window.start, &result_type.shape)?
+            slice_narrow(operands[0], window.axis, window.start, &result_type.shape)?
         },
     };
 
@@ -1464,11 +1627,19 @@ fn gate_non_finite(
     node: ValueId,
     policy: ExecutionPolicy,
 ) -> Result<ValueTensor, ExecutionError> {
-    if policy.floats == FloatPolicy::FiniteOutputs && tensor.dtype.is_float()
+    if tensor.dtype.is_float()
     {
         for (element, &value) in tensor.data.iter().enumerate()
         {
-            if value.is_nan()
+            if policy.floats == FloatPolicy::RejectNonFinite && !value.is_finite()
+            {
+                return Err(ExecutionError::NonFiniteResult {
+                    section: kind,
+                    node,
+                    element,
+                });
+            }
+            if policy.floats == FloatPolicy::FiniteOutputs && value.is_nan()
             {
                 return Err(ExecutionError::NanResult {
                     section: kind,

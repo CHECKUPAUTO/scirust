@@ -307,3 +307,115 @@ ranking with structural tiebreaks.
 
 The architecture specification for that IR follows in
 `SCIRUST_ALGOGEN_IR_V2_ARCHITECTURE.md`.
+
+---
+
+## 10. V2 implementation follow-up and hostile self-review
+
+The sections above remain the mission-start V1 audit. After implementing the
+additive V2 namespace, a second source-level review found and corrected several
+issues that ordinary positive tests did not expose:
+
+1. The initial V2 init-section reference decoder accidentally rejected
+   `Local`, despite init being a straight-line section. This prevented a tensor
+   state initializer from using `Const` followed by `BroadcastTo`. Init locals
+   are now legal, causal, inferred, and regression-tested.
+2. `ValueTensor` has public serde fields. Its constructor validated shape/data,
+   binary32 exactness, and Boolean encoding, but a struct literal/deserialized
+   payload could bypass the constructor. Every external input/item and
+   counterexample tensor is now revalidated at the interpreter/search trust
+   boundary with structured payload errors.
+3. Early V2 canonical bytes versioned the encoding but did not include IR,
+   canonicalization, and numerical-regime identifiers. All three are now in
+   the canonical header; changing a regime changes identity.
+4. The first rewrite framework treated several floating identities as if one
+   domain covered all uses. Rules now have stable ids, ordered application
+   records, and explicit Strict/finite/real applicability. A new negative test
+   caught and fixed a leak that briefly allowed floating commutative sorting in
+   Strict IEEE while Boolean sorting was being enabled.
+5. The initial structural cost draft scaled step work inside the section tally
+   and again at aggregation. It also extracted matrix dimensions incorrectly.
+   Exact recurrence and `m*k*n` tests now pin scaling, per-step FLOPs, and state
+   footprint.
+6. Verified root extraction used `expect`. Although verification and liveness
+   made the condition unreachable, the interpreter now uses checked lookups and
+   a structured `MissingBinding` defensive error. Generated artifacts cannot
+   make a root lookup panic.
+7. Rich operator enumeration can grow cubically for ternary operations. The
+   grammar has a whole-program proposal cap, per-class/depth/expensive budgets,
+   deterministic truncation/rejection counters, and typed filtering before
+   selection. Exhaustion is a visible error, not an implicit budget increase.
+
+### Hostile questions and current answers
+
+- **Did V2 become a generic programming language?** No. It has three closed
+  straight-line sections and one fixed-trip state fold. There are no functions,
+  arbitrary control flow, recursion, effects, dynamic allocation requests, or
+  dynamic shapes.
+- **Is recurrence expressive enough?** It represents multiple scalar/tensor
+  state components and multiple per-step items. Online softmax, Welford,
+  compensated sum, bounded Newton, and `(m,l,o)` attention folds verify and
+  execute. It deliberately lacks early exit and scan-output materialization.
+- **Are target algorithms hidden in the IR/search?** No magic operations exist,
+  and search does not import the reference constructors. Profiles contain only
+  class/budget constraints.
+- **Can malformed programs reach interpreter panics?** Verification rejects
+  malformed refs, shapes, axes, state, and budgets before execution; external
+  payloads are revalidated; defensive register/root failures are structured.
+  Safe internal kernels rely on verified checked element products. No unsafe
+  code or host effect is reachable.
+- **Are broadcasting/type rules ambiguous?** No: concrete shapes and NumPy
+  trailing-axis rules are implemented once in shared helpers and used by
+  inference. Select allows mask broadcasting but requires exact branch shape.
+- **Are rewrites treating floats as reals?** Strict does not reorder float
+  add/mul or remove float identities sensitive to exceptional/signed-zero
+  values. No regime reassociates, distributes, or contracts FMA.
+- **Can hash collisions collapse candidates?** No. FNV/SHA are hints/labels;
+  canonical bytes are retained and compared for deduplication and archive
+  identity. A forced same-digest/different-bytes test covers the policy.
+- **Can recurrence allocate without bound?** Trip count, state count, signature
+  elements, register elements, and conservative host bytes are verifier
+  budgets. The fold retains state only and reports zero materialized sequence
+  elements.
+- **Do mutation/crossover produce garbage?** Mutation enumerates compatible
+  changes then whole-program verifies; crossover exchanges section+binding
+  units only across identical semantic/state contexts. Both are seeded and
+  tested for replay.
+- **Has the grammar become unusably broad?** GeneralScientific is broad but
+  bounded; narrower named curricula are the intended starting point. Proposal,
+  rejection, duplicate, interpreter, and archive counters expose pressure.
+  Useful large-attention search performance is not claimed.
+- **Can parallelism change ordering?** The new V2 experiment runner is
+  sequential. V1's optional parallel evaluator restores indexed input order.
+  V2 introduces no schedule-dependent archive update.
+- **Do old bytes silently change meaning?** V1 is untouched. V2 JSON requires a
+  versioned envelope and rejects bare/mismatched payloads. No automatic V1
+  archive migration occurs.
+- **Is ADA readiness asserted or executed?** A1–A10 map to verifier-backed
+  programs; core recurrences run against numerical fixtures. The document
+  explicitly distinguishes representability from discovery/proof/integration.
+
+### Security/trust result
+
+The semantic IR has no opcode capable of shell, filesystem, network, FFI,
+dynamic Rust, unsafe callback, pointer, or host-object access. Indices in V2 are
+static `Narrow` attributes checked against concrete dimensions. There is no
+unbounded loop or recursive evaluator. Resource budgets cover signatures and
+produced registers before kernels allocate. This is a bounded scientific IR,
+not a sandbox for an otherwise general language.
+
+### Remaining audit risks
+
+- `ValueTensor` exposes a convenience `to_f32_tensor` compatibility conversion
+  that asserts its dtype; generated programs cannot call Rust APIs, and the
+  interpreter never uses it, but a future API cleanup should add a fallible
+  public conversion.
+- Transcendental last-bit portability depends on Rust target/toolchain libm.
+- The conservative resident-byte verifier counts signature and register
+  carriers but is not a proof of allocator peak during every cloned kernel
+  operand. Structural liveness provides a better phase estimate; a future
+  interpreter can borrow operands to tighten the bound.
+- Dynamic sparse/index operations, casts/mixed precision, and formal range
+  proof are absent rather than weakly specified.
+- Bounded tests and replay establish implementation evidence, not mathematical
+  equivalence or discovery completeness.

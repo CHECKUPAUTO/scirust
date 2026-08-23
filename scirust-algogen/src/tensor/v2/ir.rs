@@ -22,6 +22,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::semantics::NumericalSemantics;
 use super::types::{ScalarValue, ValueType};
 
 /// Version of the V2 IR. Bump on any semantic change to the operator set or
@@ -166,7 +167,7 @@ pub enum Op {
     Min(Bin),
     Max(Bin),
     Clamp(Ter),
-    /// Masked selection: `a` where mask is true else `c`; `b` is the mask.
+    /// Masked selection: `b` where Boolean mask `a` is true, otherwise `c`.
     Select(Ter),
 
     // ---- comparisons (float operands, Boolean result) -----------------------
@@ -498,6 +499,9 @@ impl Section {
 /// A complete scientific algorithm candidate.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ResearchProgram {
+    /// Equivalence regime governing canonicalization and rewrite validity.
+    /// It is part of canonical identity.
+    pub semantics: NumericalSemantics,
     /// Types of outer program inputs.
     pub inputs: Vec<ValueType>,
     /// Types of per-step incoming values (stream signature). May be empty.
@@ -529,6 +533,7 @@ impl ResearchProgram {
     /// finalize section reading directly from the inputs.
     pub fn expression(inputs: Vec<ValueType>, finalize: Section, outputs: Vec<ValueId>) -> Self {
         Self {
+            semantics: NumericalSemantics::StrictIeee,
             inputs,
             items: Vec::new(),
             state: Vec::new(),
@@ -540,6 +545,13 @@ impl ResearchProgram {
             finalize,
             outputs,
         }
+    }
+
+    /// Change the declared equivalence regime explicitly.
+    #[must_use]
+    pub fn with_semantics(mut self, semantics: NumericalSemantics) -> Self {
+        self.semantics = semantics;
+        self
     }
 
     /// Total number of defined values across all sections.
