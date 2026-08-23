@@ -121,6 +121,21 @@ impl PrimitiveRepresentation {
         }
     }
 
+    /// Iterate the validated [`RepresentationComponent`] dependencies this
+    /// representation is declared over, in canonical field order.
+    ///
+    /// Dense storage declares no dependencies. Composite families yield their
+    /// named components so generic passes can audit declaration ordering
+    /// without matching every variant.
+    pub fn components(&self) -> impl Iterator<Item = &RepresentationComponent> {
+        let dependencies: &[&RepresentationComponent] = match self
+        {
+            Self::Dense { .. } => &[],
+        };
+
+        dependencies.iter().copied()
+    }
+
     /// Validate that this physical representation can represent `logical`.
     ///
     /// Dense storage is currently an identity representation: changing dtype
@@ -246,10 +261,6 @@ impl std::error::Error for RepresentationError {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepresentationPlan {
     representations: Vec<PrimitiveRepresentation>,
-    /// Validated components each declared representation is defined over,
-    /// parallel to `representations`. Dense declarations carry none; future
-    /// composite families declare their typed components here.
-    components: Vec<Vec<RepresentationComponent>>,
     assignments: Vec<RepresentationId>,
 }
 
@@ -262,14 +273,13 @@ impl RepresentationPlan {
     pub fn dense(graph: &Graph) -> Result<Self, RepresentationError> {
         let mut plan = Self {
             representations: Vec::new(),
-            components: Vec::new(),
             assignments: Vec::with_capacity(graph.nodes().len()),
         };
 
         for node in graph.nodes()
         {
             let representation = PrimitiveRepresentation::dense(node.output.dtype);
-            let id = plan.declare(representation, &[])?;
+            let id = plan.declare(representation)?;
             plan.assignments.push(id);
         }
 
@@ -281,64 +291,50 @@ impl RepresentationPlan {
         &self.representations
     }
 
-    /// Return the validated components a declared representation is defined
-    /// over, in declaration order.
-    pub fn components(&self, id: RepresentationId) -> Option<&[RepresentationComponent]> {
-        self.components.get(id.get() as usize).map(Vec::as_slice)
-    }
-
-    /// Declare and intern one representation with its component dependencies.
+    /// Declare and intern one representation.
     ///
-    /// Every component must have been constructed from this plan through
-    /// [`RepresentationPlan::component`] (or an identical earlier plan state)
-    /// and must reference a representation declared strictly before the one
-    /// being created here. Unknown identifiers, forward references,
-    /// self-references and incompatible component tensor types are all
-    /// rejected. Because identifiers are assigned in increasing declaration
-    /// order, dependencies always point backwards and cycles are impossible by
-    /// construction.
+    /// Every [`RepresentationComponent`] the representation is declared over
+    /// must reference a representation already declared by this plan and must
+    /// be compatible with its own tensor type. Unknown identifiers, forward
+    /// references, self-references and incompatible component types are all
+    /// rejected at this single insertion point. Because identifiers are
+    /// assigned in increasing declaration order, dependencies always point
+    /// strictly backwards and cycles are impossible by construction.
     ///
-    /// A declaration is identified by both the physical representation and its
-    /// components: redeclaring an equal pair returns the existing identifier,
-    /// so interning stays deterministic.
+    /// Redeclaring an equal representation returns the existing identifier, so
+    /// interning stays deterministic.
     pub(crate) fn declare(
         &mut self,
         primitive: PrimitiveRepresentation,
-        components: &[RepresentationComponent],
     ) -> Result<RepresentationId, RepresentationError> {
         let next = u32::try_from(self.representations.len())
             .map_err(|_| RepresentationError::TooManyRepresentations)?;
 
-        for component in components
+        let declared = self.representations.len();
+        for dependency in primitive.components()
         {
-            let dependency = component.representation();
-            if dependency.get() as usize >= self.representations.len()
+            let id = dependency.representation();
+            if id.get() as usize >= declared
             {
-                return Err(RepresentationError::InvalidRepresentationId { id: dependency });
+                return Err(RepresentationError::InvalidRepresentationId { id });
             }
 
-            // Bounds checked above; the dependency is a declared identifier.
-            let physical = &self.representations[dependency.get() as usize];
-            physical.validate_for(component.tensor_type())?;
+            // Bounds checked above; the identifier is declared by this plan.
+            let physical = &self.representations[id.get() as usize];
+            physical.validate_for(dependency.tensor_type())?;
         }
 
-        for (index, (declared, declared_components)) in self
+        if let Some(index) = self
             .representations
             .iter()
-            .zip(&self.components)
-            .enumerate()
+            .position(|declared| *declared == primitive)
         {
-            if *declared == primitive && declared_components.as_slice() == components
-            {
-                return Ok(RepresentationId::new(
-                    u32::try_from(index)
-                        .map_err(|_| RepresentationError::TooManyRepresentations)?,
-                ));
-            }
+            return Ok(RepresentationId::new(
+                u32::try_from(index).map_err(|_| RepresentationError::TooManyRepresentations)?,
+            ));
         }
 
         self.representations.push(primitive);
-        self.components.push(components.to_vec());
 
         Ok(RepresentationId::new(next))
     }
@@ -582,22 +578,8 @@ mod tests {
     fn empty_plan() -> RepresentationPlan {
         RepresentationPlan {
             representations: Vec::new(),
-            components: Vec::new(),
             assignments: Vec::new(),
         }
-    }
-
-    fn seeded_plan() -> (RepresentationPlan, RepresentationId, RepresentationId) {
-        let mut graph = Graph::new();
-        let u8_node = graph.add_input("u8", tensor_type(DType::U8)).unwrap();
-        let f32_node = graph.add_input("f32", tensor_type(DType::F32)).unwrap();
-        graph.set_outputs(vec![u8_node, f32_node]).unwrap();
-
-        let plan = RepresentationPlan::dense(&graph).unwrap();
-        let dense_u8 = plan.assignment(u8_node).unwrap();
-        let dense_f32 = plan.assignment(f32_node).unwrap();
-
-        (plan, dense_u8, dense_f32)
     }
 
     #[test]
@@ -605,22 +587,22 @@ mod tests {
         let mut plan = empty_plan();
 
         let dense_f32 = plan
-            .declare(PrimitiveRepresentation::dense(DType::F32), &[])
+            .declare(PrimitiveRepresentation::dense(DType::F32))
             .unwrap();
         assert_eq!(dense_f32, RepresentationId::new(0));
 
         let dense_u8 = plan
-            .declare(PrimitiveRepresentation::dense(DType::U8), &[])
+            .declare(PrimitiveRepresentation::dense(DType::U8))
             .unwrap();
         assert_eq!(dense_u8, RepresentationId::new(1));
 
         // Redeclaring an equal representation returns the interned identifier.
         assert_eq!(
-            plan.declare(PrimitiveRepresentation::dense(DType::F32), &[]),
+            plan.declare(PrimitiveRepresentation::dense(DType::F32)),
             Ok(dense_f32)
         );
         assert_eq!(
-            plan.declare(PrimitiveRepresentation::dense(DType::U8), &[]),
+            plan.declare(PrimitiveRepresentation::dense(DType::U8)),
             Ok(dense_u8)
         );
 
@@ -628,58 +610,20 @@ mod tests {
         // first-use order.
         let mut twin = empty_plan();
         assert_eq!(
-            twin.declare(PrimitiveRepresentation::dense(DType::F32), &[]),
+            twin.declare(PrimitiveRepresentation::dense(DType::F32)),
             Ok(dense_f32)
         );
         assert_eq!(
-            twin.declare(PrimitiveRepresentation::dense(DType::U8), &[]),
+            twin.declare(PrimitiveRepresentation::dense(DType::U8)),
             Ok(dense_u8)
         );
-    }
-
-    #[test]
-    fn declaration_identity_includes_declared_components() {
-        let (mut plan, dense_u8, dense_f32) = seeded_plan();
-
-        // Redeclaring the exact dense declaration interns the existing id.
-        assert_eq!(
-            plan.declare(PrimitiveRepresentation::dense(DType::F32), &[]),
-            Ok(dense_f32)
-        );
-
-        let codes = plan
-            .component(TensorType::new(DType::U8, Shape::new(vec![4])), dense_u8)
-            .unwrap();
-        let scales = plan
-            .component(TensorType::new(DType::F32, Shape::new(vec![1])), dense_f32)
-            .unwrap();
-
-        // Until composite families exist, dense primitives carrying components
-        // are used purely to exercise declaration identity: equal component
-        // lists share an id, unequal ones do not.
-        let packed_codes = plan
-            .declare(
-                PrimitiveRepresentation::dense(DType::F16),
-                core::slice::from_ref(&codes),
-            )
-            .unwrap();
-        let packed_scales = plan
-            .declare(PrimitiveRepresentation::dense(DType::F16), &[scales])
-            .unwrap();
-        let packed_again = plan
-            .declare(PrimitiveRepresentation::dense(DType::F16), &[codes])
-            .unwrap();
-
-        assert_ne!(packed_codes, packed_scales);
-        assert_eq!(packed_codes, packed_again);
-        assert_ne!(packed_codes, dense_f32);
     }
 
     #[test]
     fn typed_component_rejects_forward_and_self_references() {
         let mut plan = empty_plan();
         let dense_f32 = plan
-            .declare(PrimitiveRepresentation::dense(DType::F32), &[])
+            .declare(PrimitiveRepresentation::dense(DType::F32))
             .unwrap();
 
         // The next identifier to be assigned is exactly the identifier a
@@ -698,80 +642,6 @@ mod tests {
     }
 
     #[test]
-    fn declare_rejects_components_referencing_undeclared_representations() {
-        let (source, _, dense_f32) = seeded_plan();
-        let stale = source
-            .component(tensor_type(DType::F32), dense_f32)
-            .unwrap();
-
-        // The target plan has not declared the referenced representation yet,
-        // so the dependency points forward and must be rejected.
-        let mut target = empty_plan();
-        assert_eq!(
-            target.declare(
-                PrimitiveRepresentation::dense(DType::F16),
-                core::slice::from_ref(&stale)
-            ),
-            Err(RepresentationError::InvalidRepresentationId { id: dense_f32 })
-        );
-
-        // Plans are append-only: once the target reaches the same declaration
-        // state, the very same component becomes a legitimate backward
-        // reference.
-        target
-            .declare(PrimitiveRepresentation::dense(DType::U8), &[])
-            .unwrap();
-        target
-            .declare(PrimitiveRepresentation::dense(DType::F32), &[])
-            .unwrap();
-        assert_eq!(
-            target.declare(PrimitiveRepresentation::dense(DType::F16), &[stale]),
-            Ok(RepresentationId::new(2))
-        );
-    }
-
-    #[test]
-    fn declared_components_reuse_earlier_representations_and_preserve_tensor_types() {
-        let (mut plan, dense_u8, dense_f32) = seeded_plan();
-
-        let codes = plan
-            .component(TensorType::new(DType::U8, Shape::new(vec![2, 8])), dense_u8)
-            .unwrap();
-        let scales = plan
-            .component(TensorType::new(DType::F32, Shape::new(vec![2])), dense_f32)
-            .unwrap();
-
-        let composite = plan
-            .declare(
-                PrimitiveRepresentation::dense(DType::F16),
-                &[codes.clone(), scales.clone(), codes.clone()],
-            )
-            .unwrap();
-
-        // Reuse of earlier representations is legitimate; the new identifier
-        // strictly postdates every dependency.
-        assert!(composite.get() > dense_u8.get());
-        assert!(composite.get() > dense_f32.get());
-
-        let stored = plan.components(composite).unwrap();
-        assert_eq!(stored.len(), 3);
-        assert_eq!(stored[0], codes);
-        assert_eq!(stored[1].tensor_type().dtype, DType::F32);
-        assert_eq!(stored[1].representation(), dense_f32);
-        assert_eq!(stored[2], codes);
-
-        // Every declared dependency points strictly backwards.
-        for index in 0..plan.representations().len()
-        {
-            let id = RepresentationId::new(index as u32);
-            for component in plan.components(id).unwrap_or(&[])
-            {
-                assert!(component.representation().get() < id.get());
-            }
-        }
-    }
-
-    #[test]
     fn declaring_representations_does_not_disturb_existing_assignments() {
         let mut graph = Graph::new();
         let f32_node = graph.add_input("f32", tensor_type(DType::F32)).unwrap();
@@ -783,7 +653,7 @@ mod tests {
         let f16_id = plan.assignment(f16_node).unwrap();
         let before = plan.representations().to_vec();
 
-        plan.declare(PrimitiveRepresentation::dense(DType::U8), &[])
+        plan.declare(PrimitiveRepresentation::dense(DType::U8))
             .unwrap();
 
         assert_eq!(plan.assignment(f32_node), Some(f32_id));
