@@ -196,13 +196,16 @@ mod tests {
 
         let mut other_graph = Graph::new();
         let input = other_graph.add_input("input", ty()).unwrap();
-        let first = other_graph
+        let relu = other_graph
             .add_node(Operation::Relu, vec![input], ty())
             .unwrap();
-        let second = other_graph
-            .add_node(Operation::Exp, vec![input], ty())
+        let exp = other_graph
+            .add_node(Operation::Exp, vec![relu], ty())
             .unwrap();
-        other_graph.set_outputs(vec![first, second]).unwrap();
+        let output = other_graph
+            .add_node(Operation::Log, vec![exp], ty())
+            .unwrap();
+        other_graph.set_outputs(vec![output]).unwrap();
         let other_execution = CanonicalCompiler::new().compile(&other_graph).unwrap();
         let other_ir = CompilerIr::from_execution_plan(&other_execution).unwrap();
         let other_memory = MemoryPlan::from_compiler_ir(&other_ir).unwrap();
