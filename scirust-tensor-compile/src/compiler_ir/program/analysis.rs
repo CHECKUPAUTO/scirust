@@ -154,11 +154,9 @@ impl CompilerAnalysis for UseCountAnalysis {
             for &operand in operation.operands()
             {
                 if let Ok(index) = usize::try_from(operand.get())
+                    && let Some(count) = counts.get_mut(index)
                 {
-                    if let Some(count) = counts.get_mut(index)
-                    {
-                        *count += 1;
-                    }
+                    *count += 1;
                 }
             }
         }
@@ -166,11 +164,9 @@ impl CompilerAnalysis for UseCountAnalysis {
         for &output in ir.outputs()
         {
             if let Ok(index) = usize::try_from(output.get())
+                && let Some(count) = counts.get_mut(index)
             {
-                if let Some(count) = counts.get_mut(index)
-                {
-                    *count += 1;
-                }
+                *count += 1;
             }
         }
 
