@@ -10,6 +10,10 @@
 //!   dtype);
 //! * accumulation orders are fixed by construction (ascending row-major flat
 //!   index), so results are bit-reproducible;
+//! * extrema (`Min`, `Max`, `Clamp`, `ReduceMin`, `ReduceMax`) use explicit
+//!   deterministic kernels (see `deterministic_min_f32` and siblings below)
+//!   whose signed zero and NaN rules are defined by this contract, never by
+//!   unspecified native-min/max platform behaviour;
 //! * under the default [`FloatPolicy::FiniteOutputs`], NaN intermediates and
 //!   non-finite observable outputs abort with precise errors while explicit
 //!   infinity identities may flow internally;
@@ -765,6 +769,165 @@ fn resolve_ref<'a>(
 // Element kernels
 // ---------------------------------------------------------------------------
 
+/// Deterministic binary32 minimum (`Min`, `ReduceMin` and `Clamp` kernels).
+///
+/// Normative rule (mirrored by [`deterministic_min_f64`] and the `*_max_*`
+/// siblings), chosen so the result depends only on the operand *values*,
+/// never on their order:
+///
+/// 1. if both operands are NaN, the canonical quiet NaN is returned;
+/// 2. if exactly one operand is NaN, the other operand is returned;
+/// 3. otherwise the numerically smaller operand is returned; when the operands
+///    are numerically equal — which includes the pair `+0`/`-0` — the
+///    negative-signed operand wins, so `min(+0,-0) = min(-0,+0) = -0`.
+///
+/// This matches IEEE-754-2019 `minimumNumber`/`maximumNumber` zero handling
+/// and coincides with current native `f32::min` on mainstream targets, but it
+/// no longer *depends* on them: Rust does not specify native-min/max signed
+/// zero or payload behaviour (rust-lang/rust#99640), so a bit-reproducibility
+/// contract must own this rule explicitly.
+pub(crate) fn deterministic_min_f32(a: f32, b: f32) -> f32 {
+    if a.is_nan() || b.is_nan()
+    {
+        if a.is_nan() && b.is_nan()
+        {
+            f32::NAN
+        }
+        else if a.is_nan()
+        {
+            b
+        }
+        else
+        {
+            a
+        }
+    }
+    else if a < b
+    {
+        a
+    }
+    else if b < a
+    {
+        b
+    }
+    else if a.is_sign_negative()
+    {
+        a
+    }
+    else
+    {
+        b
+    }
+}
+
+/// Deterministic binary64 minimum; see [`deterministic_min_f32`].
+pub(crate) fn deterministic_min_f64(a: f64, b: f64) -> f64 {
+    if a.is_nan() || b.is_nan()
+    {
+        if a.is_nan() && b.is_nan()
+        {
+            f64::NAN
+        }
+        else if a.is_nan()
+        {
+            b
+        }
+        else
+        {
+            a
+        }
+    }
+    else if a < b
+    {
+        a
+    }
+    else if b < a
+    {
+        b
+    }
+    else if a.is_sign_negative()
+    {
+        a
+    }
+    else
+    {
+        b
+    }
+}
+
+/// Deterministic binary32 maximum; see [`deterministic_min_f32`] for the
+/// normative rule. The tie-break is mirrored: among numerically equal
+/// operands the positive-signed operand wins, so
+/// `max(+0,-0) = max(-0,+0) = +0`.
+pub(crate) fn deterministic_max_f32(a: f32, b: f32) -> f32 {
+    if a.is_nan() || b.is_nan()
+    {
+        if a.is_nan() && b.is_nan()
+        {
+            f32::NAN
+        }
+        else if a.is_nan()
+        {
+            b
+        }
+        else
+        {
+            a
+        }
+    }
+    else if a > b
+    {
+        a
+    }
+    else if b > a
+    {
+        b
+    }
+    else if a.is_sign_positive()
+    {
+        a
+    }
+    else
+    {
+        b
+    }
+}
+
+/// Deterministic binary64 maximum; see [`deterministic_max_f32`].
+pub(crate) fn deterministic_max_f64(a: f64, b: f64) -> f64 {
+    if a.is_nan() || b.is_nan()
+    {
+        if a.is_nan() && b.is_nan()
+        {
+            f64::NAN
+        }
+        else if a.is_nan()
+        {
+            b
+        }
+        else
+        {
+            a
+        }
+    }
+    else if a > b
+    {
+        a
+    }
+    else if b > a
+    {
+        b
+    }
+    else if a.is_sign_positive()
+    {
+        a
+    }
+    else
+    {
+        b
+    }
+}
+
 /// Checked row-major strides of a shape (empty for rank 0).
 fn strides(shape: &[usize]) -> Vec<usize> {
     let mut result = vec![1usize; shape.len()];
@@ -1052,7 +1215,11 @@ fn reduce_op(
 
     let out_elements = shape_elements(&out_shape).unwrap_or(usize::MAX);
     // Identity elements; max/min identities are unreachable for empty
-    // reductions because the verifier rejects those statically.
+    // reductions because the verifier rejects those statically. Extrema fold
+    // through the deterministic kernels, so the accumulated result is
+    // independent of element encounter order (including opposite-signed
+    // zeros); NaN elements defer to numeric ones, so an all-NaN reduction
+    // keeps its ±Infinity identity.
     let identity = match mode
     {
         Accumulation::Sum | Accumulation::Mean => 0.0,
@@ -1103,13 +1270,13 @@ fn reduce_op(
             {
                 let a = accumulator[slot] as f32;
                 let b = value as f32;
-                (if b > a { b } else { a }) as f64
+                deterministic_max_f32(a, b) as f64
             },
             (DType::F32, Accumulation::Minimum) =>
             {
                 let a = accumulator[slot] as f32;
                 let b = value as f32;
-                (if b < a { b } else { a }) as f64
+                deterministic_min_f32(a, b) as f64
             },
             (DType::F32, Accumulation::Mean) =>
             {
@@ -1117,28 +1284,8 @@ fn reduce_op(
             },
             (_, Accumulation::Sum) => accumulator[slot] + value,
             (_, Accumulation::Product) => accumulator[slot] * value,
-            (_, Accumulation::Maximum) =>
-            {
-                if value > accumulator[slot]
-                {
-                    value
-                }
-                else
-                {
-                    accumulator[slot]
-                }
-            },
-            (_, Accumulation::Minimum) =>
-            {
-                if value < accumulator[slot]
-                {
-                    value
-                }
-                else
-                {
-                    accumulator[slot]
-                }
-            },
+            (_, Accumulation::Maximum) => deterministic_max_f64(accumulator[slot], value),
+            (_, Accumulation::Minimum) => deterministic_min_f64(accumulator[slot], value),
             (_, Accumulation::Mean) => accumulator[slot] + value,
         };
     }
@@ -1519,16 +1666,31 @@ fn eval_op(
         Op::Cos(_) => unary_float(operands[0], f32::cos, f64::cos)?,
         Op::Tanh(_) => unary_float(operands[0], f32::tanh, f64::tanh)?,
 
-        Op::Min(_) => binary_float(operands[0], operands[1], &result_type, f32::min, f64::min)?,
-        Op::Max(_) => binary_float(operands[0], operands[1], &result_type, f32::max, f64::max)?,
+        // Extrema use the documented deterministic kernels (never native
+        // min/max directly): their signed-zero tie-break must be defined by
+        // this contract, not by unspecified platform codegen.
+        Op::Min(_) => binary_float(
+            operands[0],
+            operands[1],
+            &result_type,
+            deterministic_min_f32,
+            deterministic_min_f64,
+        )?,
+        Op::Max(_) => binary_float(
+            operands[0],
+            operands[1],
+            &result_type,
+            deterministic_max_f32,
+            deterministic_max_f64,
+        )?,
 
         Op::Clamp(_) => ternary_float(
             operands[0],
             operands[1],
             operands[2],
             &result_type,
-            |x, lo, hi| x.min(hi).max(lo),
-            |x, lo, hi| x.min(hi).max(lo),
+            |x, lo, hi| deterministic_max_f32(deterministic_min_f32(x, hi), lo),
+            |x, lo, hi| deterministic_max_f64(deterministic_min_f64(x, hi), lo),
         )?,
 
         Op::Select(_) => select(operands[0], operands[1], operands[2], &result_type)?,
