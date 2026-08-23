@@ -84,7 +84,6 @@ pub struct RepresentationComponent {
     tensor_type: TensorType,
     representation: RepresentationId,
 }
-
 impl RepresentationComponent {
     /// Tensor type carried by this representation component.
     pub const fn tensor_type(&self) -> &TensorType {
@@ -95,6 +94,16 @@ impl RepresentationComponent {
     pub const fn representation(&self) -> RepresentationId {
         self.representation
     }
+}
+
+/// One node re-representation decision applied by
+/// [`RepresentationPlan::replan`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rebinding {
+    /// Node whose assignment changes.
+    pub node: NodeId,
+    /// Representation to bind the node to.
+    pub representation: RepresentationId,
 }
 
 /// Primitive physical representation of one logical tensor value.
@@ -841,14 +850,53 @@ impl RepresentationPlan {
         node: NodeId,
         id: RepresentationId,
     ) -> Result<(), RepresentationError> {
+        self.replan(
+            graph,
+            &[Rebinding {
+                node,
+                representation: id,
+            }],
+        )
+    }
+
+    /// Apply a batch of re-representation decisions atomically.
+    ///
+    /// The graph must be compatible with the plan's seeding anchor, and every
+    /// decision must be valid (node in assignment scope, representation
+    /// declared, family able to represent the node's canonical tensor type)
+    /// before anything is written; a single invalid decision rejects the whole
+    /// batch and leaves the table unchanged. Duplicate decisions for the same
+    /// node are applied in slice order, so the last one wins.
+    ///
+    /// This is a mechanical application kernel, not a policy engine: cost
+    /// inspection stays with [`RepresentationPlan::node_storage_bits`] and
+    /// [`RepresentationPlan::total_storage_bits`], so callers compare exact
+    /// totals before and after without any built-in cost model.
+    pub fn replan(
+        &mut self,
+        graph: &Graph,
+        rebinding: &[Rebinding],
+    ) -> Result<(), RepresentationError> {
         self.ensure_compatible_with(graph)?;
-        let logical = self.canonical_logical(graph, node)?;
 
-        self.representation(id)
-            .ok_or(RepresentationError::InvalidRepresentationId { id })?
-            .validate_for(logical)?;
+        let mut updates = Vec::with_capacity(rebinding.len());
+        for decision in rebinding
+        {
+            let logical = self.canonical_logical(graph, decision.node)?;
 
-        self.assignments[node.get() as usize] = id;
+            self.representation(decision.representation)
+                .ok_or(RepresentationError::InvalidRepresentationId {
+                    id: decision.representation,
+                })?
+                .validate_for(logical)?;
+
+            updates.push((decision.node.get() as usize, decision.representation));
+        }
+
+        for (index, id) in updates
+        {
+            self.assignments[index] = id;
+        }
 
         Ok(())
     }
@@ -2194,6 +2242,184 @@ mod tests {
 
         // The table is untouched by both rejections.
         assert_eq!(plan.assignment(weight), Some(dense_default));
+    }
+
+    #[test]
+    fn replan_applies_valid_batches_and_keeps_accounting_exact() {
+        let mut graph = Graph::new();
+        let weight = graph
+            .add_input(
+                "weight",
+                TensorType::new(DType::F32, Shape::new(vec![4, 2])),
+            )
+            .unwrap();
+        let bias = graph
+            .add_input("bias", TensorType::new(DType::F32, Shape::new(vec![4])))
+            .unwrap();
+        graph.set_outputs(vec![weight, bias]).unwrap();
+
+        let mut plan = RepresentationPlan::dense(&graph).unwrap();
+        assert_eq!(
+            plan.total_storage_bits(&graph),
+            Ok(StorageBits::new(256 + 128))
+        );
+
+        // Factorized weight [4,3]x[3,2] F16 and quantized bias: codes U8[4] +
+        // scales F16[2].
+        let (left, right) = factorized_components(&mut plan, DType::F16, 4, 3, 2);
+        let factored = plan
+            .declare(PrimitiveRepresentation::factorized(left, right))
+            .unwrap();
+        let dense_u8 = plan
+            .declare(PrimitiveRepresentation::dense(DType::U8))
+            .unwrap();
+        let dense_f16 = plan
+            .declare(PrimitiveRepresentation::dense(DType::F16))
+            .unwrap();
+        let codes = plan
+            .component(TensorType::new(DType::U8, Shape::new(vec![4])), dense_u8)
+            .unwrap();
+        let scales = plan
+            .component(TensorType::new(DType::F16, Shape::new(vec![2])), dense_f16)
+            .unwrap();
+        let quantized = plan
+            .declare(PrimitiveRepresentation::quantized(codes, scales))
+            .unwrap();
+
+        plan.replan(
+            &graph,
+            &[
+                Rebinding {
+                    node: weight,
+                    representation: factored,
+                },
+                Rebinding {
+                    node: bias,
+                    representation: quantized,
+                },
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(plan.assignments(), &[factored, quantized]);
+
+        // Weight: (12 + 6) halves * 16 bits; bias: 4 bytes * 8 + 2 halves * 16.
+        assert_eq!(
+            plan.total_storage_bits(&graph),
+            Ok(StorageBits::new(288 + 64))
+        );
+        // The canonical graph stays untouched.
+        assert_eq!(
+            graph.nodes()[weight.get() as usize].output.dtype,
+            DType::F32
+        );
+    }
+
+    #[test]
+    fn replan_is_atomic_when_any_decision_is_invalid() {
+        let mut graph = Graph::new();
+        let weight = graph
+            .add_input(
+                "weight",
+                TensorType::new(DType::F32, Shape::new(vec![4, 2])),
+            )
+            .unwrap();
+        let bias = graph
+            .add_input("bias", TensorType::new(DType::F32, Shape::new(vec![4])))
+            .unwrap();
+        graph.set_outputs(vec![weight, bias]).unwrap();
+
+        let mut plan = RepresentationPlan::dense(&graph).unwrap();
+        let defaults = plan.assignments().to_vec();
+
+        // The first decision would be valid on its own; each second decision
+        // is invalid for a different reason.
+        let (left, right) = factorized_components(&mut plan, DType::F16, 2, 3, 5);
+        let mismatched = plan
+            .declare(PrimitiveRepresentation::factorized(left, right))
+            .unwrap();
+        let undeclared = RepresentationId::new(99);
+
+        for bad in [
+            Rebinding {
+                node: bias,
+                representation: mismatched,
+            },
+            Rebinding {
+                node: bias,
+                representation: undeclared,
+            },
+            Rebinding {
+                node: NodeId::new(42),
+                representation: mismatched,
+            },
+        ]
+        {
+            assert!(
+                plan.replan(
+                    &graph,
+                    &[
+                        Rebinding {
+                            node: weight,
+                            representation: mismatched
+                        },
+                        bad,
+                    ],
+                )
+                .is_err()
+            );
+            // Not a single decision of any rejected batch was applied.
+            assert_eq!(plan.assignments(), &defaults[..]);
+        }
+    }
+
+    #[test]
+    fn replan_resolves_duplicate_decisions_in_slice_order() {
+        let mut graph = Graph::new();
+        let weight = graph
+            .add_input(
+                "weight",
+                TensorType::new(DType::F32, Shape::new(vec![4, 2])),
+            )
+            .unwrap();
+        graph.set_outputs(vec![weight]).unwrap();
+
+        let mut plan = RepresentationPlan::dense(&graph).unwrap();
+        let dense_default = plan.assignment(weight).unwrap();
+        let (left, right) = factorized_components(&mut plan, DType::F16, 4, 3, 2);
+        let factored = plan
+            .declare(PrimitiveRepresentation::factorized(left, right))
+            .unwrap();
+
+        plan.replan(
+            &graph,
+            &[
+                Rebinding {
+                    node: weight,
+                    representation: factored,
+                },
+                Rebinding {
+                    node: weight,
+                    representation: dense_default,
+                },
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(plan.assignment(weight), Some(dense_default));
+    }
+
+    #[test]
+    fn empty_replan_is_a_no_op() {
+        let mut graph = Graph::new();
+        let node = graph.add_input("x", tensor_type(DType::F32)).unwrap();
+        graph.set_outputs(vec![node]).unwrap();
+
+        let mut plan = RepresentationPlan::dense(&graph).unwrap();
+        let before = plan.assignments().to_vec();
+
+        plan.replan(&graph, &[]).unwrap();
+        assert_eq!(plan.assignments(), &before[..]);
     }
 
     #[cfg(target_pointer_width = "64")]
