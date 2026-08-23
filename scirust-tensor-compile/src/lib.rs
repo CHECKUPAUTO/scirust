@@ -121,6 +121,7 @@ use scirust_tensor_core::TensorND;
 mod canonical;
 mod compiler_ir;
 mod compiler_lowering;
+mod compiler_pipeline;
 mod lowering;
 mod memory;
 
@@ -134,6 +135,7 @@ pub use compiler_ir::{
 };
 pub use compiler_ir::{LinearLiveRange, LinearLiveness, LinearLivenessAnalysis};
 pub use compiler_lowering::{CompilerIrLowerer, CompilerIrLoweringError};
+pub use compiler_pipeline::{CompiledTensorProgram, CompilerPipeline, CompilerPipelineError};
 pub use lowering::{
     BinaryKernel, ExternalBinding, ExternalBindings, ExternalValueKind, IdentifierSpace,
     KernelArgument, KernelArgumentAccess, KernelArgumentSource, KernelFamily, KernelLowerer,
