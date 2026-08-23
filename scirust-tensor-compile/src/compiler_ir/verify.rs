@@ -1,5 +1,5 @@
 use super::{
-    ids::{IrBlockId, IrOperationId, IrRegionId, IrValueId},
+    ids::{IrBlockId, IrOperationId},
     program::{CompilerIr, CompilerIrError, CompilerIrIdentifierSpace},
 };
 
@@ -7,8 +7,8 @@ use super::{
 ///
 /// Verification is deliberately independent from tensor semantic validation:
 /// the canonical graph already owns tensor semantics.  This verifier owns
-/// compiler structure — identifier stability, containment, SSA use-before-def
-/// rules and operation/result consistency.
+/// compiler structure — identifier stability, containment, operation arity,
+/// SSA use-before-def rules and operation/result consistency.
 pub fn verify_compiler_ir(ir: &CompilerIr) -> Result<(), CompilerIrError> {
     let entry_index = usize::try_from(ir.entry_region().get()).ok();
     if entry_index
@@ -69,6 +69,17 @@ pub fn verify_compiler_ir(ir: &CompilerIr) -> Result<(), CompilerIrError> {
                 space: CompilerIrIdentifierSpace::Operation,
                 expected,
                 actual: operation.id().get(),
+            });
+        }
+
+        let expected_arity = operation.operation().expected_arity();
+        let actual_arity = operation.operands().len();
+        if expected_arity != actual_arity
+        {
+            return Err(CompilerIrError::OperationArityMismatch {
+                operation: operation.id(),
+                expected: expected_arity,
+                actual: actual_arity,
             });
         }
 
@@ -168,7 +179,3 @@ fn verify_block(
 fn checked_index(index: usize, space: CompilerIrIdentifierSpace) -> Result<u32, CompilerIrError> {
     u32::try_from(index).map_err(|_| CompilerIrError::IdentifierOverflow { space })
 }
-
-// Keep these types visible to rustdoc links while making the intended future
-// block/region/value identity spaces explicit in this verifier.
-const _: Option<(IrValueId, IrRegionId)> = None;
