@@ -68,12 +68,7 @@ impl CompiledTensorProgram {
     }
 
     pub fn into_parts(self) -> (CompilerIr, PassManagerStats, MemoryPlan, LoweredPlan) {
-        (
-            self.compiler_ir,
-            self.pass_stats,
-            self.memory,
-            self.lowered,
-        )
+        (self.compiler_ir, self.pass_stats, self.memory, self.lowered)
     }
 }
 
@@ -117,10 +112,9 @@ impl CompilerPipeline {
         execution: &ExecutionPlan,
     ) -> Result<CompiledTensorProgram, CompilerPipelineError> {
         let mut compiler_ir = CompilerIr::from_execution_plan(execution)?;
-        let (pass_stats, memory) =
-            compiler_ir.run_passes_and_plan_memory(&mut self.passes)?;
-        let lowered = CompilerIrLowerer::new()
-            .lower_with_derived_bindings(&compiler_ir, &memory)?;
+        let (pass_stats, memory) = compiler_ir.run_passes_and_plan_memory(&mut self.passes)?;
+        let lowered =
+            CompilerIrLowerer::new().lower_with_derived_bindings(&compiler_ir, &memory)?;
 
         Ok(CompiledTensorProgram {
             compiler_ir,
