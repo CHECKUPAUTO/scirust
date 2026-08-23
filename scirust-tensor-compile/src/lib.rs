@@ -132,6 +132,7 @@ pub use compiler_ir::{
     PassResult, RewriteStats, Rewriter, ScaleZeroCanonicalizationPass, UseCountAnalysis, UseCounts,
     verify_compiler_ir,
 };
+pub use compiler_ir::{LinearLiveRange, LinearLiveness, LinearLivenessAnalysis};
 pub use compiler_lowering::{CompilerIrLowerer, CompilerIrLoweringError};
 pub use lowering::{
     BinaryKernel, ExternalBinding, ExternalBindings, ExternalValueKind, IdentifierSpace,
