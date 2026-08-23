@@ -96,6 +96,10 @@ pub enum TensorDataError {
         element: usize,
         bits: u64,
     },
+    DTypeMismatch {
+        expected: DType,
+        found: DType,
+    },
 }
 
 impl std::fmt::Display for TensorDataError {
@@ -118,6 +122,12 @@ impl std::fmt::Display for TensorDataError {
             Self::InvalidBoolEncoding { element, bits } => write!(
                 formatter,
                 "Boolean element {element} has invalid f64 bit pattern {bits:#018x}"
+            ),
+            Self::DTypeMismatch { expected, found } => write!(
+                formatter,
+                "conversion requires dtype {}, found {}",
+                expected.name(),
+                found.name()
             ),
         }
     }
@@ -228,16 +238,20 @@ impl ValueTensor {
 
     /// Compatibility-boundary conversion to a plain `f32` tensor.
     ///
-    /// Panics on a non-F32 tensor; callers must check the dtype first.
-    pub fn to_f32_tensor(&self) -> scirust_tensor_core::TensorND {
-        assert!(
-            self.dtype == DType::F32,
-            "to_f32_tensor requires an f32 tensor"
-        );
-        scirust_tensor_core::TensorND::new(
+    /// Returns a structured error instead of panicking when this tensor is
+    /// not an `f32` tensor (external trust boundary).
+    pub fn to_f32_tensor(&self) -> Result<scirust_tensor_core::TensorND, TensorDataError> {
+        if self.dtype != DType::F32
+        {
+            return Err(TensorDataError::DTypeMismatch {
+                expected: DType::F32,
+                found: self.dtype,
+            });
+        }
+        Ok(scirust_tensor_core::TensorND::new(
             self.data.iter().map(|&value| value as f32).collect(),
             self.shape.clone(),
-        )
+        ))
     }
 
     /// Compatibility-boundary conversion from a plain `f32` tensor.
