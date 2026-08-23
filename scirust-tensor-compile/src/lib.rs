@@ -127,8 +127,8 @@ pub use canonical::{CanonicalCompiler, CompileError, CompileStats, ExecutionPlan
 pub use compiler_ir::{
     CompilerIr, CompilerIrError, CompilerIrIdentifierSpace, CompilerPass, IrBlock, IrBlockId,
     IrOperation, IrOperationId, IrRegion, IrRegionId, IrValue, IrValueId, OperationRewrite,
-    PassManager, PassManagerStats, PassResult, RewriteStats, Rewriter, ScaleZeroCanonicalizationPass,
-    verify_compiler_ir,
+    PassManager, PassManagerStats, PassResult, RewriteStats, Rewriter,
+    ScaleZeroCanonicalizationPass, verify_compiler_ir,
 };
 pub use lowering::{
     BinaryKernel, ExternalBinding, ExternalBindings, ExternalValueKind, IdentifierSpace,
