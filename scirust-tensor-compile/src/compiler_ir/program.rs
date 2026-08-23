@@ -14,8 +14,12 @@ use super::{
     verify::verify_compiler_ir,
 };
 
+mod analysis;
 mod pass;
 mod rewrite;
+pub use analysis::{
+    AnalysisManager, AnalysisManagerError, CompilerAnalysis, UseCountAnalysis, UseCounts,
+};
 pub use pass::{
     CompilerPass, PassManager, PassManagerStats, PassResult, ScaleZeroCanonicalizationPass,
 };
