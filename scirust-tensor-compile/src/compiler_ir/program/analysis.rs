@@ -20,16 +20,15 @@ pub trait CompilerAnalysis: 'static {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum AnalysisManagerError {
-    CacheTypeMismatch {
-        analysis: &'static str,
-    },
+    CacheTypeMismatch { analysis: &'static str },
 }
 
 impl fmt::Display for AnalysisManagerError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self
         {
-            Self::CacheTypeMismatch { analysis } => {
+            Self::CacheTypeMismatch { analysis } =>
+            {
                 write!(formatter, "analysis cache type mismatch for {analysis}")
             },
         }
@@ -76,7 +75,10 @@ impl<'ir> AnalysisManager<'ir> {
     {
         let analysis = TypeId::of::<A>();
 
-        if let Some(index) = self.entries.iter().position(|entry| entry.analysis == analysis)
+        if let Some(index) = self
+            .entries
+            .iter()
+            .position(|entry| entry.analysis == analysis)
         {
             return self.entries[index]
                 .output
@@ -218,15 +220,24 @@ mod tests {
         let mut analyses = AnalysisManager::new(&ir);
 
         assert!(analyses.is_empty());
-        assert_eq!(analyses.get::<UseCountAnalysis>().unwrap().as_slice(), &[2, 1]);
+        assert_eq!(
+            analyses.get::<UseCountAnalysis>().unwrap().as_slice(),
+            &[2, 1]
+        );
         assert_eq!(analyses.len(), 1);
-        assert_eq!(analyses.get::<UseCountAnalysis>().unwrap().as_slice(), &[2, 1]);
+        assert_eq!(
+            analyses.get::<UseCountAnalysis>().unwrap().as_slice(),
+            &[2, 1]
+        );
         assert_eq!(analyses.len(), 1);
 
         analyses.invalidate::<UseCountAnalysis>();
         assert!(analyses.is_empty());
 
-        assert_eq!(analyses.get::<UseCountAnalysis>().unwrap().as_slice(), &[2, 1]);
+        assert_eq!(
+            analyses.get::<UseCountAnalysis>().unwrap().as_slice(),
+            &[2, 1]
+        );
         analyses.invalidate_all();
         assert!(analyses.is_empty());
     }
