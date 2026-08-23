@@ -373,6 +373,14 @@ pub enum RepresentationError {
         /// Dtype carried by the scales component.
         scales: DType,
     },
+    /// The node is outside the plan's assignment scope.
+    ///
+    /// Assignments are indexed by canonical node identifiers; the plan only
+    /// covers the nodes of the graph it was seeded from.
+    UnknownAssignmentNode {
+        /// Node identifier outside the assignment scope.
+        node: NodeId,
+    },
 }
 
 impl fmt::Display for RepresentationError {
@@ -422,6 +430,14 @@ impl fmt::Display for RepresentationError {
                 write!(
                     formatter,
                     "quantized codes dtype {codes:?} must be integer-valued and scales dtype {scales:?} floating-point"
+                )
+            },
+            Self::UnknownAssignmentNode { node } =>
+            {
+                write!(
+                    formatter,
+                    "node {} is outside this plan's assignment scope",
+                    node.get()
                 )
             },
         }
@@ -606,6 +622,42 @@ impl RepresentationPlan {
             tensor_type,
             representation,
         })
+    }
+
+    /// Bind `node` to the declared representation `id`.
+    ///
+    /// The node must lie inside this plan's assignment scope (the node set the
+    /// plan was seeded from) and the representation must be able to represent
+    /// the node's canonical tensor type. Rejected bindings leave the table
+    /// unchanged; successful ones override any previous assignment of that
+    /// node without touching other nodes or the graph itself.
+    pub fn assign(
+        &mut self,
+        graph: &Graph,
+        node: NodeId,
+        id: RepresentationId,
+    ) -> Result<(), RepresentationError> {
+        let index = node.get() as usize;
+        if index >= self.assignments.len()
+        {
+            return Err(RepresentationError::UnknownAssignmentNode { node });
+        }
+
+        // The plan scope guarantees the index, but a mismatched or truncated
+        // graph is rejected instead of trusted.
+        let logical = &graph
+            .nodes()
+            .get(index)
+            .ok_or(RepresentationError::UnknownAssignmentNode { node })?
+            .output;
+
+        self.representation(id)
+            .ok_or(RepresentationError::InvalidRepresentationId { id })?
+            .validate_for(logical)?;
+
+        self.assignments[index] = id;
+
+        Ok(())
     }
 }
 
@@ -1402,5 +1454,141 @@ mod tests {
                 Ok(StorageBits::new(64 * 8 + 8 * 2 * 8))
             );
         }
+    }
+
+    #[test]
+    fn assign_overrides_dense_defaults_after_validation() {
+        let mut graph = Graph::new();
+        let weight = graph
+            .add_input(
+                "weight",
+                TensorType::new(DType::F32, Shape::new(vec![4, 2])),
+            )
+            .unwrap();
+        let bias = graph
+            .add_input("bias", TensorType::new(DType::F32, Shape::new(vec![4])))
+            .unwrap();
+        graph.set_outputs(vec![weight, bias]).unwrap();
+
+        let before = graph.clone();
+        let mut plan = RepresentationPlan::dense(&graph).unwrap();
+
+        let (left, right) = factorized_components(&mut plan, DType::F16, 4, 3, 2);
+        let factored = plan
+            .declare(PrimitiveRepresentation::factorized(left, right))
+            .unwrap();
+
+        plan.assign(&graph, weight, factored).unwrap();
+
+        // The bound node uses the factorized representation; the untouched
+        // node keeps its dense default and the graph is never modified.
+        assert_eq!(plan.assignment(weight), Some(factored));
+        assert_eq!(
+            plan.representation_for(weight)
+                .and_then(|physical| physical.dense_dtype()),
+            None
+        );
+        assert_eq!(
+            plan.representation_for(bias)
+                .and_then(PrimitiveRepresentation::dense_dtype),
+            Some(DType::F32)
+        );
+        assert_eq!(graph, before);
+    }
+
+    #[test]
+    fn assign_rejects_incompatible_bindings_atomically() {
+        let mut graph = Graph::new();
+        let weight = graph
+            .add_input(
+                "weight",
+                TensorType::new(DType::F32, Shape::new(vec![4, 2])),
+            )
+            .unwrap();
+        graph.set_outputs(vec![weight]).unwrap();
+
+        let mut plan = RepresentationPlan::dense(&graph).unwrap();
+        let dense_f32 = plan.assignment(weight).unwrap();
+
+        // The factors contract to [2, 5], not to the node's [4, 2].
+        let (left, right) = factorized_components(&mut plan, DType::F16, 2, 3, 5);
+        let factored = plan
+            .declare(PrimitiveRepresentation::factorized(left, right))
+            .unwrap();
+
+        assert_eq!(
+            plan.assign(&graph, weight, factored),
+            Err(RepresentationError::FactorizedIncompatibleShapes {
+                left: Shape::new(vec![2, 3]),
+                right: Shape::new(vec![3, 5]),
+                logical: Shape::new(vec![4, 2]),
+            })
+        );
+
+        // A rejected binding leaves the previous assignment in place.
+        assert_eq!(plan.assignment(weight), Some(dense_f32));
+        assert_eq!(plan.assignments.len(), 1);
+    }
+
+    #[test]
+    fn assign_rejects_undeclared_representations_and_unknown_nodes() {
+        let mut graph = Graph::new();
+        let node = graph.add_input("x", tensor_type(DType::F32)).unwrap();
+        graph.set_outputs(vec![node]).unwrap();
+
+        let mut plan = RepresentationPlan::dense(&graph).unwrap();
+        let dense_f32 = plan.assignment(node).unwrap();
+
+        let undeclared = RepresentationId::new(9);
+        assert_eq!(
+            plan.assign(&graph, node, undeclared),
+            Err(RepresentationError::InvalidRepresentationId { id: undeclared })
+        );
+
+        let stranger = NodeId::new(99);
+        assert_eq!(
+            plan.assign(&graph, stranger, dense_f32),
+            Err(RepresentationError::UnknownAssignmentNode { node: stranger })
+        );
+    }
+
+    #[test]
+    fn quantized_assignments_bind_without_structural_match() {
+        let mut graph = Graph::new();
+        let weight = graph
+            .add_input(
+                "weight",
+                TensorType::new(DType::F32, Shape::new(vec![8, 8])),
+            )
+            .unwrap();
+        graph.set_outputs(vec![weight]).unwrap();
+
+        let mut plan = RepresentationPlan::dense(&graph).unwrap();
+        let dense_u8 = plan
+            .declare(PrimitiveRepresentation::dense(DType::U8))
+            .unwrap();
+        let dense_f16 = plan
+            .declare(PrimitiveRepresentation::dense(DType::F16))
+            .unwrap();
+
+        let codes = plan
+            .component(TensorType::new(DType::U8, Shape::new(vec![8, 8])), dense_u8)
+            .unwrap();
+        let scales = plan
+            .component(TensorType::new(DType::F16, Shape::new(vec![8])), dense_f16)
+            .unwrap();
+        let quantized = plan
+            .declare(PrimitiveRepresentation::quantized(codes, scales))
+            .unwrap();
+
+        plan.assign(&graph, weight, quantized).unwrap();
+        assert_eq!(plan.assignment(weight), Some(quantized));
+        assert_eq!(
+            plan.storage_bits(
+                quantized,
+                &TensorType::new(DType::F32, Shape::new(vec![8, 8]))
+            ),
+            Ok(StorageBits::new(8 * 8 * 8 + 8 * 2 * 8))
+        );
     }
 }
