@@ -176,7 +176,10 @@ mod tests {
             .unwrap();
 
         assert!(matches!(
-            lowered.kernel(lowered.instructions()[0].kernel).unwrap().family(),
+            lowered
+                .kernel(lowered.instructions()[0].kernel)
+                .unwrap()
+                .family(),
             KernelFamily::ElementwiseUnary(UnaryKernel::Log)
         ));
 
@@ -185,7 +188,10 @@ mod tests {
             .lower(&execution, &legacy_bindings)
             .unwrap();
         assert!(matches!(
-            legacy.kernel(legacy.instructions()[0].kernel).unwrap().family(),
+            legacy
+                .kernel(legacy.instructions()[0].kernel)
+                .unwrap()
+                .family(),
             KernelFamily::ElementwiseUnary(UnaryKernel::Relu)
         ));
     }
