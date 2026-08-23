@@ -549,7 +549,10 @@ fn const_of(
 
 /// Native-dtype evaluation of fully constant operations. Returns `None` when
 /// the op is not foldable or the float result is non-finite (left symbolic so
-/// the runtime regime decides).
+/// the runtime regime decides). If reduction folding is ever introduced, it
+/// MUST reuse these same kernels and their canonical-NaN rule (see
+/// `deterministic_min_f32`) so folded and interpreted results can never
+/// diverge; extrema reductions currently stay symbolic by design.
 #[allow(clippy::too_many_lines)]
 fn try_fold(
     op: &Op,
