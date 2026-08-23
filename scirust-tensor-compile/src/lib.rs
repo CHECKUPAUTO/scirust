@@ -125,10 +125,11 @@ mod memory;
 
 pub use canonical::{CanonicalCompiler, CompileError, CompileStats, ExecutionPlan, Instruction};
 pub use compiler_ir::{
-    CompilerIr, CompilerIrError, CompilerIrIdentifierSpace, CompilerPass, IrBlock, IrBlockId,
-    IrOperation, IrOperationId, IrRegion, IrRegionId, IrValue, IrValueId, OperationRewrite,
-    PassManager, PassManagerStats, PassResult, RewriteStats, Rewriter,
-    ScaleZeroCanonicalizationPass, verify_compiler_ir,
+    AnalysisManager, AnalysisManagerError, CompilerAnalysis, CompilerIr, CompilerIrError,
+    CompilerIrIdentifierSpace, CompilerPass, IrBlock, IrBlockId, IrOperation, IrOperationId,
+    IrRegion, IrRegionId, IrValue, IrValueId, OperationRewrite, PassManager, PassManagerStats,
+    PassResult, RewriteStats, Rewriter, ScaleZeroCanonicalizationPass, UseCountAnalysis, UseCounts,
+    verify_compiler_ir,
 };
 pub use lowering::{
     BinaryKernel, ExternalBinding, ExternalBindings, ExternalValueKind, IdentifierSpace,
