@@ -109,10 +109,11 @@ fn projected_plan(
 
 #[cfg(test)]
 mod tests {
-    use scirust_tensor_ir::{DType, Graph, Operation, Shape, TensorType};
+    use scirust_tensor_ir::{ConstantId, DType, Graph, Operation, Shape, TensorType};
 
     use crate::{
-        CanonicalCompiler, ExternalBindings, KernelFamily, OperationRewrite, Rewriter, UnaryKernel,
+        CanonicalCompiler, ExternalBindings, ExternalValueKind, KernelFamily, OperationRewrite,
+        Rewriter, UnaryKernel,
     };
 
     use super::*;
@@ -187,6 +188,41 @@ mod tests {
             legacy.kernel(legacy.instructions()[0].kernel).unwrap().family(),
             KernelFamily::ElementwiseUnary(UnaryKernel::Relu)
         ));
+    }
+
+    #[test]
+    fn compiler_ir_lowering_preserves_sparse_canonical_node_ids() {
+        let mut graph = Graph::new();
+        let input = graph.add_input("input", ty()).unwrap();
+        let dead_constant = graph.add_constant(ConstantId::new(9), ty()).unwrap();
+        let _dead = graph
+            .add_node(Operation::Exp, vec![dead_constant], ty())
+            .unwrap();
+        let live = graph.add_node(Operation::Relu, vec![input], ty()).unwrap();
+        graph.set_outputs(vec![live]).unwrap();
+
+        assert_eq!(live.get(), 3);
+
+        let execution = CanonicalCompiler::new().compile(&graph).unwrap();
+        let ir = CompilerIr::from_execution_plan(&execution).unwrap();
+        let memory = MemoryPlan::from_compiler_ir(&ir).unwrap();
+        let bindings = CompilerIrLowerer::new()
+            .derive_bindings(&ir, &memory)
+            .unwrap();
+        let lowered = CompilerIrLowerer::new()
+            .lower(&ir, &memory, &bindings)
+            .unwrap();
+
+        assert_eq!(lowered.instructions().len(), 1);
+        assert_eq!(lowered.instructions()[0].node, live);
+        assert_eq!(lowered.outputs()[0].node, live);
+        assert_eq!(
+            bindings.entries(),
+            &[crate::ExternalBinding {
+                node: input,
+                kind: ExternalValueKind::Input,
+            }]
+        );
     }
 
     #[test]
