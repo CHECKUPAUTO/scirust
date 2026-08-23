@@ -127,11 +127,12 @@ impl CompilerPipeline {
 
 #[cfg(test)]
 mod tests {
-    use scirust_tensor_ir::{DType, Graph, Operation, Shape, TensorType};
+    use scirust_tensor_ir::{DType, Graph, Operation, Scalar, Shape, TensorType};
 
     use crate::{
         CanonicalCompiler, CompilerPass, ExternalBindings, IrOperation, KernelFamily,
-        KernelLowerer, OperationRewrite, PassResult, Rewriter, UnaryKernel,
+        KernelLowerer, OperationRewrite, PassResult, Rewriter, ScaleZeroCanonicalizationPass,
+        UnaryKernel,
     };
 
     use super::*;
@@ -194,6 +195,40 @@ mod tests {
                 changed: stats.changed(),
             })
         }
+    }
+
+    #[test]
+    fn scale_zero_pass_lowers_to_zeros_like_end_to_end() {
+        let mut graph = Graph::new();
+        let input = graph.add_input("input", ty()).unwrap();
+        let scaled = graph
+            .add_node(
+                Operation::Scale {
+                    factor: Scalar::f32(0.0),
+                },
+                vec![input],
+                ty(),
+            )
+            .unwrap();
+        graph.set_outputs(vec![scaled]).unwrap();
+
+        let execution = CanonicalCompiler::new().compile(&graph).unwrap();
+        let mut pipeline = CompilerPipeline::new();
+        pipeline.push_pass(ScaleZeroCanonicalizationPass);
+        let compiled = pipeline.compile_execution_plan(&execution).unwrap();
+
+        assert!(matches!(
+            compiled.compiler_ir().operations()[1].operation(),
+            Operation::ZerosLike
+        ));
+        assert!(matches!(
+            compiled
+                .lowered_plan()
+                .kernel(compiled.lowered_plan().instructions()[0].kernel)
+                .unwrap()
+                .family(),
+            KernelFamily::ElementwiseUnary(UnaryKernel::ZerosLike)
+        ));
     }
 
     #[test]
