@@ -10,15 +10,17 @@
 //! therefore impossible by construction, mirroring how the canonical
 //! [`Graph`] only permits inputs referring to previously created nodes.
 //!
-//! This first phase supports only the identity physical representation:
-//! dense storage in the tensor's declared logical dtype. Quantization,
-//! factorization, composite representations, cost models and backend-specific
-//! materialization are intentionally out of scope.
+//! Dense storage remains the identity representation. The first composite
+//! family, [`PrimitiveRepresentation::Factorized`], defines a value by two
+//! contracted matrix factors and accounts storage as the exact sum of its
+//! components. Quantization, codebooks, packed/sub-bit payloads, sparse
+//! representations, cost models and backend-specific materialization remain
+//! intentionally out of scope.
 
 use alloc::vec::Vec;
 use core::fmt;
 
-use scirust_compute::DType;
+use scirust_compute::{DType, Shape};
 
 use crate::{Graph, NodeId, TensorType};
 
@@ -96,14 +98,30 @@ impl RepresentationComponent {
 ///
 /// The enum is intentionally non-exhaustive: later phases may add block
 /// quantization, codebooks or other representation families without changing
-/// the logical tensor type.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// the logical tensor type. Composite variants own their components as named,
+/// typed fields; every referenced [`RepresentationComponent`] must point to a
+/// strictly earlier declaration in the same plan.
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PrimitiveRepresentation {
     /// Dense scalar storage.
     Dense {
         /// Scalar dtype physically stored for each logical element.
         storage_dtype: DType,
+    },
+    /// Matrix-factorized storage: the represented value is defined by two
+    /// contracted factors (`left × right`), e.g. low-rank or adapter-style
+    /// decompositions.
+    ///
+    /// Factor dtypes are unconstrained because a factorized representation is
+    /// inherently converting; only the contraction structure binds the factors
+    /// to the logical tensor type: `left [m, r]`, `right [r, n]` for a logical
+    /// `[m, n]` value.
+    Factorized {
+        /// Left factor with shape `[m, r]`.
+        left: RepresentationComponent,
+        /// Right factor with shape `[r, n]`.
+        right: RepresentationComponent,
     },
 }
 
@@ -113,11 +131,17 @@ impl PrimitiveRepresentation {
         Self::Dense { storage_dtype }
     }
 
+    /// Construct a factorized representation from two contracted factors.
+    pub const fn factorized(left: RepresentationComponent, right: RepresentationComponent) -> Self {
+        Self::Factorized { left, right }
+    }
+
     /// Return the dense storage dtype when this is a dense representation.
     pub const fn dense_dtype(&self) -> Option<DType> {
         match self
         {
             Self::Dense { storage_dtype } => Some(*storage_dtype),
+            Self::Factorized { .. } => None,
         }
     }
 
@@ -128,18 +152,24 @@ impl PrimitiveRepresentation {
     /// named components so generic passes can audit declaration ordering
     /// without matching every variant.
     pub fn components(&self) -> impl Iterator<Item = &RepresentationComponent> {
-        let dependencies: &[&RepresentationComponent] = match self
+        let (head, tail): (
+            Option<&RepresentationComponent>,
+            Option<&RepresentationComponent>,
+        ) = match self
         {
-            Self::Dense { .. } => &[],
+            Self::Dense { .. } => (None, None),
+            Self::Factorized { left, right } => (Some(left), Some(right)),
         };
 
-        dependencies.iter().copied()
+        head.into_iter().chain(tail)
     }
 
     /// Validate that this physical representation can represent `logical`.
     ///
     /// Dense storage is currently an identity representation: changing dtype
     /// would require an explicitly defined conversion/quantization family.
+    /// Factorized storage is inherently converting, so only its contraction
+    /// structure is validated against the logical tensor type.
     fn validate_for(&self, logical: &TensorType) -> Result<(), RepresentationError> {
         match self
         {
@@ -151,44 +181,70 @@ impl PrimitiveRepresentation {
                 })
             },
             Self::Dense { .. } => Ok(()),
+            Self::Factorized { left, right } =>
+            {
+                match (
+                    matrix_dims(&logical.shape),
+                    matrix_dims(&left.tensor_type().shape),
+                    matrix_dims(&right.tensor_type().shape),
+                )
+                {
+                    (
+                        Some((rows, columns)),
+                        Some((left_rows, inner)),
+                        Some((right_inner, right_columns)),
+                    ) if left_rows == rows && right_inner == inner && right_columns == columns =>
+                    {
+                        Ok(())
+                    },
+                    _ => Err(RepresentationError::FactorizedIncompatibleShapes {
+                        left: left.tensor_type().shape.clone(),
+                        right: right.tensor_type().shape.clone(),
+                        logical: logical.shape.clone(),
+                    }),
+                }
+            },
         }
-    }
-
-    /// Return the exact physical storage required for `logical`.
-    ///
-    /// Dense storage uses the logical tensor shape and this representation's
-    /// physical scalar dtype. The calculation is fully checked and never uses
-    /// floating-point arithmetic.
-    pub fn storage_bits(&self, logical: &TensorType) -> Result<StorageBits, RepresentationError> {
-        self.validate_for(logical)?;
-
-        let storage_dtype = match self
-        {
-            Self::Dense { storage_dtype } => *storage_dtype,
-        };
-
-        let elements = logical
-            .shape
-            .checked_num_elements()
-            .map_err(|_| RepresentationError::ShapeOverflow)?;
-
-        let elements =
-            u64::try_from(elements).map_err(|_| RepresentationError::StorageSizeOverflow)?;
-
-        let bytes_per_element = u64::try_from(storage_dtype.size_bytes())
-            .map_err(|_| RepresentationError::StorageSizeOverflow)?;
-
-        let bits = elements
-            .checked_mul(bytes_per_element)
-            .and_then(|bytes| bytes.checked_mul(8))
-            .ok_or(RepresentationError::StorageSizeOverflow)?;
-
-        Ok(StorageBits::new(bits))
     }
 }
 
+/// Return `(rows, columns)` when `shape` is exactly a matrix shape.
+fn matrix_dims(shape: &Shape) -> Option<(usize, usize)> {
+    match shape.dims()
+    {
+        [rows, columns] => Some((*rows, *columns)),
+        _ => None,
+    }
+}
+
+/// Exact bit count of dense scalar storage for `logical`.
+///
+/// Fully checked integer arithmetic; floating-point sizes are never used for
+/// exact physical accounting.
+fn dense_storage_bits(
+    storage_dtype: DType,
+    logical: &TensorType,
+) -> Result<StorageBits, RepresentationError> {
+    let elements = logical
+        .shape
+        .checked_num_elements()
+        .map_err(|_| RepresentationError::ShapeOverflow)?;
+
+    let elements = u64::try_from(elements).map_err(|_| RepresentationError::StorageSizeOverflow)?;
+
+    let bytes_per_element = u64::try_from(storage_dtype.size_bytes())
+        .map_err(|_| RepresentationError::StorageSizeOverflow)?;
+
+    let bits = elements
+        .checked_mul(bytes_per_element)
+        .and_then(|bytes| bytes.checked_mul(8))
+        .ok_or(RepresentationError::StorageSizeOverflow)?;
+
+    Ok(StorageBits::new(bits))
+}
+
 /// Failure while constructing a representation plan.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum RepresentationError {
     /// The representation identifier space exceeded `u32`.
@@ -212,6 +268,18 @@ pub enum RepresentationError {
     InvalidRepresentationId {
         /// Unknown representation identifier.
         id: RepresentationId,
+    },
+    /// Factorized factors do not contract into the logical tensor type.
+    ///
+    /// A factorized representation requires matrix factors `left [m, r]` and
+    /// `right [r, n]` to represent a logical `[m, n]` tensor type.
+    FactorizedIncompatibleShapes {
+        /// Left factor shape.
+        left: Shape,
+        /// Right factor shape.
+        right: Shape,
+        /// Logical tensor shape.
+        logical: Shape,
     },
 }
 
@@ -244,6 +312,17 @@ impl fmt::Display for RepresentationError {
                     formatter,
                     "representation identifier {} is not declared by this plan",
                     id.get()
+                )
+            },
+            Self::FactorizedIncompatibleShapes {
+                left,
+                right,
+                logical,
+            } =>
+            {
+                write!(
+                    formatter,
+                    "factorized shapes left {left:?} x right {right:?} do not compose into logical shape {logical:?}"
                 )
             },
         }
@@ -354,12 +433,51 @@ impl RepresentationPlan {
         self.assignment(node).and_then(|id| self.representation(id))
     }
 
+    /// Return the exact physical storage required to represent `logical` with
+    /// the declared representation `id`.
+    ///
+    /// Dense storage counts `elements × dtype size × 8` bits. Composite
+    /// families validate their structure against `logical`, then sum the exact
+    /// storage of their declared components, resolving nested references
+    /// recursively (references point strictly backwards, so recursion
+    /// terminates). All arithmetic is checked and never uses floating-point.
+    pub fn storage_bits(
+        &self,
+        id: RepresentationId,
+        logical: &TensorType,
+    ) -> Result<StorageBits, RepresentationError> {
+        let physical = self
+            .representation(id)
+            .ok_or(RepresentationError::InvalidRepresentationId { id })?;
+
+        physical.validate_for(logical)?;
+
+        match physical
+        {
+            PrimitiveRepresentation::Dense { storage_dtype } =>
+            {
+                dense_storage_bits(*storage_dtype, logical)
+            },
+            PrimitiveRepresentation::Factorized { left, right } =>
+            {
+                let left_bits = self.storage_bits(left.representation(), left.tensor_type())?;
+                let right_bits = self.storage_bits(right.representation(), right.tensor_type())?;
+
+                left_bits
+                    .get()
+                    .checked_add(right_bits.get())
+                    .map(StorageBits::new)
+                    .ok_or(RepresentationError::StorageSizeOverflow)
+            },
+        }
+    }
+
     /// Construct a typed component referencing an interned representation.
     ///
     /// This validates both identifier membership and compatibility between the
-    /// physical representation and the component's own tensor type. Valid
-    /// components are the only way future composite representations may name
-    /// their dependencies when calling [`RepresentationPlan::declare`].
+    /// physical representation and the component's own tensor type. Composite
+    /// representations name their dependencies through such validated
+    /// components when calling [`RepresentationPlan::declare`].
     pub fn component(
         &self,
         tensor_type: TensorType,
@@ -518,22 +636,28 @@ mod tests {
 
     #[test]
     fn dense_f32_matrix_has_exact_storage_bits() {
+        let mut plan = empty_plan();
+        let dense_f32 = plan
+            .declare(PrimitiveRepresentation::dense(DType::F32))
+            .unwrap();
         let logical = TensorType::new(DType::F32, Shape::new(vec![2, 2]));
-        let representation = PrimitiveRepresentation::dense(DType::F32);
 
         assert_eq!(
-            representation.storage_bits(&logical),
+            plan.storage_bits(dense_f32, &logical),
             Ok(StorageBits::new(128))
         );
     }
 
     #[test]
     fn dense_storage_rejects_implicit_dtype_conversion() {
+        let mut plan = empty_plan();
+        let dense_f16 = plan
+            .declare(PrimitiveRepresentation::dense(DType::F16))
+            .unwrap();
         let logical = TensorType::new(DType::F32, Shape::new(vec![2, 2]));
-        let representation = PrimitiveRepresentation::dense(DType::F16);
 
         assert_eq!(
-            representation.storage_bits(&logical),
+            plan.storage_bits(dense_f16, &logical),
             Err(RepresentationError::DenseDTypeMismatch {
                 logical: DType::F32,
                 storage: DType::F16,
@@ -543,22 +667,28 @@ mod tests {
 
     #[test]
     fn dense_f64_scalar_has_exact_storage_bits() {
+        let mut plan = empty_plan();
+        let dense_f64 = plan
+            .declare(PrimitiveRepresentation::dense(DType::F64))
+            .unwrap();
         let logical = TensorType::new(DType::F64, Shape::scalar());
-        let representation = PrimitiveRepresentation::dense(DType::F64);
 
         assert_eq!(
-            representation.storage_bits(&logical),
+            plan.storage_bits(dense_f64, &logical),
             Ok(StorageBits::new(64))
         );
     }
 
     #[test]
     fn storage_accounting_preserves_shape_overflow_as_a_structured_error() {
+        let mut plan = empty_plan();
+        let dense_f32 = plan
+            .declare(PrimitiveRepresentation::dense(DType::F32))
+            .unwrap();
         let logical = TensorType::new(DType::F32, Shape::new(vec![usize::MAX, 2]));
-        let representation = PrimitiveRepresentation::dense(DType::F32);
 
         assert_eq!(
-            representation.storage_bits(&logical),
+            plan.storage_bits(dense_f32, &logical),
             Err(RepresentationError::ShapeOverflow)
         );
     }
@@ -566,11 +696,14 @@ mod tests {
     #[cfg(target_pointer_width = "64")]
     #[test]
     fn storage_accounting_rejects_bit_count_overflow() {
+        let mut plan = empty_plan();
+        let dense_u8 = plan
+            .declare(PrimitiveRepresentation::dense(DType::U8))
+            .unwrap();
         let logical = TensorType::new(DType::U8, Shape::new(vec![usize::MAX]));
-        let representation = PrimitiveRepresentation::dense(DType::U8);
 
         assert_eq!(
-            representation.storage_bits(&logical),
+            plan.storage_bits(dense_u8, &logical),
             Err(RepresentationError::StorageSizeOverflow)
         );
     }
@@ -580,6 +713,35 @@ mod tests {
             representations: Vec::new(),
             assignments: Vec::new(),
         }
+    }
+
+    /// Seed a plan with one dense factor representation and build contracted
+    /// matrix components `[rows, inner]` and `[inner, columns]` over it.
+    fn factorized_components(
+        plan: &mut RepresentationPlan,
+        factor_dtype: DType,
+        rows: usize,
+        inner: usize,
+        columns: usize,
+    ) -> (RepresentationComponent, RepresentationComponent) {
+        let dense_factor = plan
+            .declare(PrimitiveRepresentation::dense(factor_dtype))
+            .unwrap();
+
+        let left = plan
+            .component(
+                TensorType::new(factor_dtype, Shape::new(vec![rows, inner])),
+                dense_factor,
+            )
+            .unwrap();
+        let right = plan
+            .component(
+                TensorType::new(factor_dtype, Shape::new(vec![inner, columns])),
+                dense_factor,
+            )
+            .unwrap();
+
+        (left, right)
     }
 
     #[test]
@@ -660,5 +822,297 @@ mod tests {
         assert_eq!(plan.assignment(f16_node), Some(f16_id));
         assert_eq!(&plan.representations()[..before.len()], &before[..]);
         assert_eq!(plan.representations().len(), before.len() + 1);
+    }
+
+    #[test]
+    fn factorized_binds_only_to_contracting_matrix_types() {
+        let mut plan = empty_plan();
+        let (left, right) = factorized_components(&mut plan, DType::F16, 4, 8, 2);
+        let factored = plan
+            .declare(PrimitiveRepresentation::factorized(
+                left.clone(),
+                right.clone(),
+            ))
+            .unwrap();
+
+        // The contracting logical type binds successfully.
+        let logical = TensorType::new(DType::F32, Shape::new(vec![4, 2]));
+        assert_eq!(
+            plan.component(logical.clone(), factored)
+                .unwrap()
+                .tensor_type(),
+            &logical
+        );
+
+        // Mismatched outer dimensions are rejected with structured shapes.
+        assert_eq!(
+            plan.component(
+                TensorType::new(DType::F32, Shape::new(vec![4, 3])),
+                factored,
+            ),
+            Err(RepresentationError::FactorizedIncompatibleShapes {
+                left: Shape::new(vec![4, 8]),
+                right: Shape::new(vec![8, 2]),
+                logical: Shape::new(vec![4, 3]),
+            })
+        );
+
+        // Non-matrix logical types are rejected as well.
+        assert_eq!(
+            plan.component(TensorType::new(DType::F32, Shape::new(vec![4])), factored,),
+            Err(RepresentationError::FactorizedIncompatibleShapes {
+                left: Shape::new(vec![4, 8]),
+                right: Shape::new(vec![8, 2]),
+                logical: Shape::new(vec![4]),
+            })
+        );
+
+        // Factor-side violations: a non-matrix left factor cannot contract.
+        let dense_f16 = plan
+            .declare(PrimitiveRepresentation::dense(DType::F16))
+            .unwrap();
+        let rank_one_left = plan
+            .component(TensorType::new(DType::F16, Shape::new(vec![4])), dense_f16)
+            .unwrap();
+        let degenerate = PrimitiveRepresentation::factorized(rank_one_left.clone(), right);
+
+        assert_eq!(
+            degenerate.validate_for(&TensorType::new(DType::F16, Shape::new(vec![4, 2]))),
+            Err(RepresentationError::FactorizedIncompatibleShapes {
+                left: Shape::new(vec![4]),
+                right: Shape::new(vec![8, 2]),
+                logical: Shape::new(vec![4, 2]),
+            })
+        );
+
+        // Inner contraction mismatch between matrix factors is rejected.
+        let wrong_inner_right = plan
+            .component(
+                TensorType::new(DType::F16, Shape::new(vec![7, 2])),
+                dense_f16,
+            )
+            .unwrap();
+        let mismatched = PrimitiveRepresentation::factorized(left, wrong_inner_right);
+
+        assert_eq!(
+            mismatched.validate_for(&TensorType::new(DType::F16, Shape::new(vec![4, 2]))),
+            Err(RepresentationError::FactorizedIncompatibleShapes {
+                left: Shape::new(vec![4, 8]),
+                right: Shape::new(vec![7, 2]),
+                logical: Shape::new(vec![4, 2]),
+            })
+        );
+    }
+
+    #[test]
+    fn factorized_storage_bits_sum_component_storage_exactly() {
+        let mut plan = empty_plan();
+        let (left, right) = factorized_components(&mut plan, DType::F16, 4, 8, 2);
+        let factored = plan
+            .declare(PrimitiveRepresentation::factorized(left, right))
+            .unwrap();
+
+        // The parent dtype is irrelevant to a converting representation.
+        let logical = TensorType::new(DType::F32, Shape::new(vec![4, 2]));
+
+        // 4*8 elements * 2 bytes * 8 bits + 8*2 elements * 2 bytes * 8 bits.
+        assert_eq!(
+            plan.storage_bits(factored, &logical),
+            Ok(StorageBits::new(512 + 256))
+        );
+    }
+
+    #[test]
+    fn factorized_declaration_identity_includes_named_components() {
+        let mut plan = empty_plan();
+        let (left, right) = factorized_components(&mut plan, DType::F16, 4, 8, 2);
+        let first = plan
+            .declare(PrimitiveRepresentation::factorized(
+                left.clone(),
+                right.clone(),
+            ))
+            .unwrap();
+
+        // Redeclaring an equal composite interns the existing identifier.
+        assert_eq!(
+            plan.declare(PrimitiveRepresentation::factorized(
+                left.clone(),
+                right.clone()
+            )),
+            Ok(first)
+        );
+        assert_eq!(first, RepresentationId::new(1));
+
+        // Changing one named component changes declaration identity.
+        let dense_f16 = plan
+            .declare(PrimitiveRepresentation::dense(DType::F16))
+            .unwrap();
+        let narrower_right = plan
+            .component(
+                TensorType::new(DType::F16, Shape::new(vec![8, 3])),
+                dense_f16,
+            )
+            .unwrap();
+        let second = plan
+            .declare(PrimitiveRepresentation::factorized(left, narrower_right))
+            .unwrap();
+
+        assert_ne!(second, first);
+        assert!(second.get() > first.get());
+
+        // Every declared dependency of every declaration points strictly
+        // backwards.
+        for (index, declared) in plan.representations().iter().enumerate()
+        {
+            for dependency in declared.components()
+            {
+                assert!(dependency.representation().get() < index as u32);
+            }
+        }
+    }
+
+    #[test]
+    fn declare_rejects_factorized_referencing_undeclared_representations() {
+        let mut source = empty_plan();
+        let (left, right) = factorized_components(&mut source, DType::F16, 4, 8, 2);
+        let foreign = PrimitiveRepresentation::factorized(left, right);
+
+        // The referenced dense representation exists only in the source plan;
+        // the empty target plan must reject the forward dependency.
+        let mut target = empty_plan();
+        assert_eq!(
+            target.declare(foreign.clone()),
+            Err(RepresentationError::InvalidRepresentationId {
+                id: RepresentationId::new(0)
+            })
+        );
+
+        // Once the target declares the same dependency state, the identical
+        // value becomes a legitimate backward reference.
+        target
+            .declare(PrimitiveRepresentation::dense(DType::F16))
+            .unwrap();
+        assert_eq!(target.declare(foreign), Ok(RepresentationId::new(1)));
+    }
+
+    #[test]
+    fn nested_factorized_compositions_resolve_storage_recursively() {
+        let mut plan = empty_plan();
+        let (inner_left, inner_right) = factorized_components(&mut plan, DType::F16, 2, 3, 4);
+        let inner = plan
+            .declare(PrimitiveRepresentation::factorized(inner_left, inner_right))
+            .unwrap();
+
+        // The inner composition represents a [2, 4] value and may itself be
+        // used as the left factor of an outer composition.
+        let outer_left = plan
+            .component(TensorType::new(DType::F16, Shape::new(vec![2, 4])), inner)
+            .unwrap();
+        let dense_f16 = plan
+            .declare(PrimitiveRepresentation::dense(DType::F16))
+            .unwrap();
+        let outer_right = plan
+            .component(
+                TensorType::new(DType::F16, Shape::new(vec![4, 5])),
+                dense_f16,
+            )
+            .unwrap();
+        let outer = plan
+            .declare(PrimitiveRepresentation::factorized(outer_left, outer_right))
+            .unwrap();
+
+        assert!(outer.get() > inner.get());
+
+        // A[2,3] + B[3,4] + C[4,5], all F16:
+        // (6 + 12 + 20) elements * 2 bytes * 8 bits.
+        let logical = TensorType::new(DType::F32, Shape::new(vec![2, 5]));
+        assert_eq!(
+            plan.storage_bits(outer, &logical),
+            Ok(StorageBits::new(608))
+        );
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn factorized_storage_rejects_checked_sum_overflow() {
+        let mut plan = empty_plan();
+        let dense_u8 = plan
+            .declare(PrimitiveRepresentation::dense(DType::U8))
+            .unwrap();
+        let two_pow_59 = 576_460_752_303_423_488_usize;
+
+        let left = plan
+            .component(
+                TensorType::new(DType::U8, Shape::new(vec![two_pow_59, 2])),
+                dense_u8,
+            )
+            .unwrap();
+        let right = plan
+            .component(
+                TensorType::new(DType::U8, Shape::new(vec![2, two_pow_59])),
+                dense_u8,
+            )
+            .unwrap();
+        let factored = plan
+            .declare(PrimitiveRepresentation::factorized(left, right))
+            .unwrap();
+
+        // Each factor accounts exactly 2^63 bits; their sum overflows u64.
+        let logical = TensorType::new(DType::U8, Shape::new(vec![two_pow_59, two_pow_59]));
+        assert_eq!(
+            plan.storage_bits(factored, &logical),
+            Err(RepresentationError::StorageSizeOverflow)
+        );
+    }
+
+    #[test]
+    fn factorized_components_keep_their_own_tensor_types_and_representations() {
+        let mut plan = empty_plan();
+        let dense_u8 = plan
+            .declare(PrimitiveRepresentation::dense(DType::U8))
+            .unwrap();
+        let dense_f32 = plan
+            .declare(PrimitiveRepresentation::dense(DType::F32))
+            .unwrap();
+
+        let left = plan
+            .component(TensorType::new(DType::U8, Shape::new(vec![2, 8])), dense_u8)
+            .unwrap();
+        let right = plan
+            .component(
+                TensorType::new(DType::F32, Shape::new(vec![8, 2])),
+                dense_f32,
+            )
+            .unwrap();
+        let factored = plan
+            .declare(PrimitiveRepresentation::factorized(
+                left.clone(),
+                right.clone(),
+            ))
+            .unwrap();
+
+        // Mixed-dtype factors over distinct representations are legitimate;
+        // each component keeps its own tensor type and reference.
+        assert!(factored.get() > dense_u8.get());
+        assert!(factored.get() > dense_f32.get());
+
+        match plan.representation(factored)
+        {
+            Some(PrimitiveRepresentation::Factorized { left, right }) =>
+            {
+                assert_eq!(left.tensor_type().dtype, DType::U8);
+                assert_eq!(
+                    left.tensor_type(),
+                    &TensorType::new(DType::U8, Shape::new(vec![2, 8]))
+                );
+                assert_eq!(left.representation(), dense_u8);
+                assert_eq!(
+                    right.tensor_type(),
+                    &TensorType::new(DType::F32, Shape::new(vec![8, 2]))
+                );
+                assert_eq!(right.representation(), dense_f32);
+            },
+            other => panic!("unexpected stored representation: {other:?}"),
+        }
     }
 }
