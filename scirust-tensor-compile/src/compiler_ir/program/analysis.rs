@@ -43,18 +43,23 @@ struct AnalysisCacheEntry {
     output: Box<dyn Any>,
 }
 
-/// Deterministic, type-indexed cache for immutable compiler analyses.
+/// Deterministic, type-indexed cache bound to one immutable compiler IR.
 ///
-/// A vector is used deliberately instead of a hash map: analysis registration
-/// and lookup order cannot introduce randomized iteration into compiler state.
-#[derive(Default)]
-pub struct AnalysisManager {
+/// Holding the IR borrow for the manager's entire lifetime prevents a cached
+/// result from being reused accidentally with another or concurrently-mutated
+/// program. A vector is used deliberately instead of a hash map so analysis
+/// registration and lookup cannot introduce randomized iteration order.
+pub struct AnalysisManager<'ir> {
+    ir: &'ir CompilerIr,
     entries: Vec<AnalysisCacheEntry>,
 }
 
-impl AnalysisManager {
-    pub fn new() -> Self {
-        Self::default()
+impl<'ir> AnalysisManager<'ir> {
+    pub fn new(ir: &'ir CompilerIr) -> Self {
+        Self {
+            ir,
+            entries: Vec::new(),
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -65,7 +70,7 @@ impl AnalysisManager {
         self.entries.is_empty()
     }
 
-    pub fn get<A>(&mut self, ir: &CompilerIr) -> Result<&A::Output, AnalysisManagerError>
+    pub fn get<A>(&mut self) -> Result<&A::Output, AnalysisManagerError>
     where
         A: CompilerAnalysis,
     {
@@ -83,7 +88,7 @@ impl AnalysisManager {
 
         self.entries.push(AnalysisCacheEntry {
             analysis,
-            output: Box::new(A::run(ir)),
+            output: Box::new(A::run(self.ir)),
         });
 
         self.entries
@@ -200,9 +205,9 @@ mod tests {
     #[test]
     fn use_count_analysis_counts_repeated_operands_and_outputs() {
         let ir = repeated_operand_ir();
-        let mut analyses = AnalysisManager::new();
+        let mut analyses = AnalysisManager::new(&ir);
 
-        let counts = analyses.get::<UseCountAnalysis>(&ir).unwrap();
+        let counts = analyses.get::<UseCountAnalysis>().unwrap();
 
         assert_eq!(counts.as_slice(), &[2, 1]);
         assert_eq!(counts.get(IrValueId::new(0)), Some(2));
@@ -212,18 +217,18 @@ mod tests {
     #[test]
     fn analysis_manager_caches_and_invalidates_by_analysis_type() {
         let ir = repeated_operand_ir();
-        let mut analyses = AnalysisManager::new();
+        let mut analyses = AnalysisManager::new(&ir);
 
         assert!(analyses.is_empty());
-        assert_eq!(analyses.get::<UseCountAnalysis>(&ir).unwrap().as_slice(), &[2, 1]);
+        assert_eq!(analyses.get::<UseCountAnalysis>().unwrap().as_slice(), &[2, 1]);
         assert_eq!(analyses.len(), 1);
-        assert_eq!(analyses.get::<UseCountAnalysis>(&ir).unwrap().as_slice(), &[2, 1]);
+        assert_eq!(analyses.get::<UseCountAnalysis>().unwrap().as_slice(), &[2, 1]);
         assert_eq!(analyses.len(), 1);
 
         analyses.invalidate::<UseCountAnalysis>();
         assert!(analyses.is_empty());
 
-        assert_eq!(analyses.get::<UseCountAnalysis>(&ir).unwrap().as_slice(), &[2, 1]);
+        assert_eq!(analyses.get::<UseCountAnalysis>().unwrap().as_slice(), &[2, 1]);
         analyses.invalidate_all();
         assert!(analyses.is_empty());
     }
