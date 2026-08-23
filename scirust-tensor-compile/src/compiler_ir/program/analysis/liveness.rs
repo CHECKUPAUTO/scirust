@@ -136,10 +136,7 @@ mod tests {
 
         let relu_range = liveness.get(IrValueId::new(1)).unwrap();
         assert_eq!(relu_range.definition(), IrOperationId::new(1));
-        assert_eq!(
-            relu_range.last_operation_use(),
-            Some(IrOperationId::new(2))
-        );
+        assert_eq!(relu_range.last_operation_use(), Some(IrOperationId::new(2)));
         assert!(!relu_range.is_live_out());
 
         let output_range = liveness.get(IrValueId::new(2)).unwrap();

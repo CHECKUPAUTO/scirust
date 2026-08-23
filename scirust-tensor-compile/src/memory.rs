@@ -13,11 +13,11 @@ use std::collections::BTreeMap;
 use scirust_tensor_ir::{NodeId, Operation, TensorType};
 
 use crate::{
-    compiler_ir::{
-        verify_compiler_ir, CompilerAnalysis, CompilerIr, CompilerIrError, IrValueId,
-        LinearLivenessAnalysis,
-    },
     Instruction,
+    compiler_ir::{
+        CompilerAnalysis, CompilerIr, CompilerIrError, IrValueId, LinearLivenessAnalysis,
+        verify_compiler_ir,
+    },
 };
 
 /// Stable identifier of one logical internal buffer.
@@ -152,13 +152,12 @@ impl MemoryPlan {
                         slot
                     };
 
-                    let range =
-                        liveness
-                            .get(result_id)
-                            .ok_or(CompilerIrError::InvalidValue {
-                                operation: operation.id(),
-                                value: result_id,
-                            })?;
+                    let range = liveness
+                        .get(result_id)
+                        .ok_or(CompilerIrError::InvalidValue {
+                            operation: operation.id(),
+                            value: result_id,
+                        })?;
                     let last_use = range
                         .last_operation_use()
                         .unwrap_or(range.definition())
@@ -352,12 +351,8 @@ mod tests {
         let temporary = graph
             .add_node(Operation::Exp, vec![input], ty.clone())
             .unwrap();
-        let final_output = graph
-            .add_node(Operation::Log, vec![temporary], ty)
-            .unwrap();
-        graph
-            .set_outputs(vec![held_output, final_output])
-            .unwrap();
+        let final_output = graph.add_node(Operation::Log, vec![temporary], ty).unwrap();
+        graph.set_outputs(vec![held_output, final_output]).unwrap();
 
         let execution = CanonicalCompiler::new().compile(&graph).unwrap();
         let ir = CompilerIr::from_execution_plan(&execution).unwrap();
