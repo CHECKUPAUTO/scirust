@@ -27,8 +27,10 @@ pub const CANONICAL_FORMAT_VERSION: u32 = 2;
 
 /// Version of the deterministic canonicalization/rewrite contract. Bump when
 /// rule meaning, ordering, or applicability changes, even if byte layout does
-/// not.
-pub const CANONICALIZATION_VERSION: u32 = 1;
+/// not. Version 2: `Min`/`Max` commutative normalization became admissible in
+/// every regime once the extrema kernels were defined by contract (deterministic
+/// signed-zero tie-break) instead of by unspecified native behaviour.
+pub const CANONICALIZATION_VERSION: u32 = 2;
 
 /// Domain-separation magic prefix.
 pub const CANONICAL_MAGIC: &[u8] = b"SCIRUST-RIR2\0";

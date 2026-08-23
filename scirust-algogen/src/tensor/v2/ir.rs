@@ -130,8 +130,10 @@ pub struct Narrow {
 /// `docs/SCIRUST_ALGOGEN_IR_V2_NUMERICAL_SEMANTICS.md`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Op {
-    /// Typed compile-time constant. Non-finite float constants are rejected by
-    /// the verifier.
+    /// Typed compile-time constant. NaN constants are rejected by the
+    /// verifier; `±Infinity` constants are admissible stable identities
+    /// (running-max initialisers) and are forbidden only under
+    /// [`NumericalSemantics::FiniteOnly`].
     Const(ScalarValue),
 
     // ---- broadcast arithmetic (float dtypes) --------------------------------

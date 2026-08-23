@@ -19,26 +19,27 @@
 //! # Validity domains (normative)
 //!
 //! Rule applicability is determined by the program's explicit
-//! [`NumericalSemantics`](super::semantics::NumericalSemantics). Strict IEEE
-//! programs receive structural rules only. Finite-only programs admit the
-//! documented finite-domain identities while preserving signed zero. The
-//! real-algebraic experimental regime may additionally ignore signed-zero
-//! distinctions. No regime permits reassociation or silent FMA contraction.
+//! [`NumericalSemantics`] regime. Strict IEEE programs receive structural
+//! rules plus rewrites that are bit-exact by construction in every regime
+//! (Boolean identities, extrema operand normalization). Finite-only programs
+//! additionally admit the documented finite-domain identities while preserving
+//! signed zero. The real-algebraic experimental regime may additionally ignore
+//! signed-zero distinctions. No regime permits reassociation or silent FMA
+//! contraction.
 //!
 //! Applied:
 //! * `Add(x, 0) -> x` — real-algebraic only because `-0 + +0 = +0`.
 //! * `Sub(x, +0) -> x` — finite-domain; subtracting `-0` is real-algebraic
 //!   only because it changes signed zero.
 //! * `Mul(x, 1) -> x`, `Div(x, 1) -> x` — bit-exact for all finite `x`.
-//! * `Min(x, x) -> x`, `Max(x, x) -> x`, `Dot(x, x)` kept (not an identity),
-//!   `Eq(x, x)`/`Ne(x, x)` kept (observable Boolean) — only genuinely
-//!   value-preserving identities alias.
-//! * `Neg(Neg(x)) -> x`, `Not(Not(b)) -> b` — double negation.
+//! * `Min(x, x) -> x`, `Max(x, x) -> x` — finite-domain: NaN payloads are not
+//!   preserved by the canonical-NaN rule of the extrema kernels.
 //! * `Select(_, v, v) -> v`; `And(b, true) -> b`; `Or(b, false) -> b` —
 //!   structural/Boolean and Strict-IEEE safe.
-//! * Commutative normalization for `Add, Mul, Min, Max, And, Or, Dot, Eq, Ne`
-//!   — IEEE addition/multiplication/comparison/min-max and dot products are
-//!   commutative bit-for-bit on the defined domain.
+//! * `Neg(Neg(x)) -> x`, `Not(Not(b)) -> b` — double negation.
+//! * Commutative normalization for `Min, Max, And, Or, Eq, Ne` in every
+//!   regime (the extrema kernels are swap-symmetric by contract; the Boolean
+//!   operators are exact), and for `Add, Mul, Dot` on the finite domain only.
 //!
 //! **Deliberately rejected** (unsound under IEEE):
 //! * `Mul(x, 0) -> 0` — fails for `x = ±Infinity`/NaN.
@@ -592,8 +593,8 @@ fn try_fold(
                 Op::Mul(_) => f32_bin!(x, y, |a, b| a * b),
                 Op::Div(_) => f32_bin!(x, y, |a, b| a / b),
                 Op::Pow(_) => f32_bin!(x, y, f32::powf),
-                Op::Min(_) => Some(F32(x.min(y))),
-                Op::Max(_) => Some(F32(x.max(y))),
+                Op::Min(_) => Some(F32(super::interpret::deterministic_min_f32(x, y))),
+                Op::Max(_) => Some(F32(super::interpret::deterministic_max_f32(x, y))),
                 _ => None,
             },
             (F64(x), F64(y)) => match op
@@ -603,8 +604,8 @@ fn try_fold(
                 Op::Mul(_) => f64_bin!(x, y, |a, b| a * b),
                 Op::Div(_) => f64_bin!(x, y, |a, b| a / b),
                 Op::Pow(_) => f64_bin!(x, y, f64::powf),
-                Op::Min(_) => Some(F64(x.min(y))),
-                Op::Max(_) => Some(F64(x.max(y))),
+                Op::Min(_) => Some(F64(super::interpret::deterministic_min_f64(x, y))),
+                Op::Max(_) => Some(F64(super::interpret::deterministic_max_f64(x, y))),
                 _ => None,
             },
             _ => None,
@@ -746,14 +747,22 @@ fn try_fold(
 
         Op::Clamp(_) => match (values[0], values[1], values[2])
         {
+            // Same composition as the interpreter kernel, so folded and
+            // interpreted clamps agree bit-for-bit (including ±0 bounds).
             (F32(a), F32(b), F32(c)) =>
             {
-                let r = a.min(c).max(b);
+                let r = super::interpret::deterministic_max_f32(
+                    super::interpret::deterministic_min_f32(a, c),
+                    b,
+                );
                 if r.is_finite() { Some(F32(r)) } else { None }
             },
             (F64(a), F64(b), F64(c)) =>
             {
-                let r = a.min(c).max(b);
+                let r = super::interpret::deterministic_max_f64(
+                    super::interpret::deterministic_min_f64(a, c),
+                    b,
+                );
                 if r.is_finite() { Some(F64(r)) } else { None }
             },
             _ => None,
@@ -910,6 +919,21 @@ fn direct_is_bool_false(reference: Ref, consts: &[Option<ScalarValue>]) -> bool 
 }
 
 /// Reorder operands of provably commutative operators under [`ref_order`].
+///
+/// Validity domains:
+///
+/// * `Eq`/`Ne`/`And`/`Or` are Boolean-commutative in every regime (exact).
+/// * `Min`/`Max` are bit-for-bit commutative in every regime **because the
+///   interpreter kernels are** ([`super::interpret::deterministic_min_f32`]
+///   family): the kernels are defined by contract to be swap-symmetric —
+///   opposite-signed zeros tie-break toward `-0` for min and `+0` for max,
+///   a lone NaN defers to the numeric operand, and two NaNs collapse onto the
+///   canonical quiet NaN. Native `f32::min/max` would NOT support this claim
+///   (their signed-zero behaviour is unspecified; rust-lang/rust#99640),
+///   which is why the kernels are ours.
+/// * `Add`/`Mul`/`Dot` are bit-for-bit commutative only on the finite domain:
+///   NaN payloads and `(+Inf) + (-Inf)`-style productions are not guaranteed
+///   symmetric, so they remain gated behind `admits_finite_rewrites()`.
 fn normalize_commutative(op: &mut Op, semantics: NumericalSemantics) -> bool {
     fn swap_pair(bin: &mut Bin) -> bool {
         if ref_order(bin.rhs) < ref_order(bin.lhs)
@@ -926,8 +950,8 @@ fn normalize_commutative(op: &mut Op, semantics: NumericalSemantics) -> bool {
     match op
     {
         Op::And(bin) | Op::Or(bin) | Op::Eq(bin) | Op::Ne(bin) => swap_pair(bin),
-        Op::Add(bin) | Op::Mul(bin) | Op::Min(bin) | Op::Max(bin) | Op::Dot(bin)
-            if semantics.admits_finite_rewrites() =>
+        Op::Min(bin) | Op::Max(bin) => swap_pair(bin),
+        Op::Add(bin) | Op::Mul(bin) | Op::Dot(bin) if semantics.admits_finite_rewrites() =>
         {
             swap_pair(bin)
         },

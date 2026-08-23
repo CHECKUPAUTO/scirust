@@ -170,7 +170,9 @@ the exact contract is in `SCIRUST_ALGOGEN_IR_V2_NUMERICAL_SEMANTICS.md`.
 
 The bounded rewrite pipeline uses a fixed order and at most 16 passes. It
 performs finite-result constant folding, explicitly classified identities,
-regime-gated commutative operand normalization, exact CSE, root rebinding,
+regime-gated commutative operand normalization (`Min`/`Max` normalize in every
+regime because their kernels are swap-symmetric by contract; `Add`/`Mul`/`Dot`
+only on the finite domain), exact CSE, root rebinding,
 stable compaction/value renumbering, and DCE. Every application records pass
 number and stable rule id. It never reassociates arithmetic, distributes,
 contracts to FMA, or applies `x*0`, `x-x`, or `x/x` rules.
