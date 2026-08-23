@@ -4,14 +4,20 @@
 //! bounded recurrences — see `docs/SCIRUST_ALGOGEN_IR_V2_ARCHITECTURE.md`.
 //! V1 (`super`) remains frozen and byte-stable; this module is additive.
 
+pub mod adversarial;
+pub mod arena;
 pub mod canonical;
+pub mod cegis;
 pub mod compat;
 pub mod cost;
+pub mod equivalence;
 pub mod evolve;
 pub mod generate;
 pub mod interpret;
 pub mod ir;
+pub mod minimize;
 pub mod range;
+pub mod recognize;
 pub mod reference;
 pub mod search;
 pub mod semantics;
