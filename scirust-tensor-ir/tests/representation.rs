@@ -6,8 +6,8 @@
 
 use scirust_compute::{DType, Shape};
 use scirust_tensor_ir::{
-    Graph, PrimitiveRepresentation, RepresentationError, RepresentationId, RepresentationPlan,
-    StorageBits, TensorType,
+    Graph, NodeId, PrimitiveRepresentation, Rebinding, RepresentationError, RepresentationId,
+    RepresentationPlan, StorageBits, TensorType,
 };
 
 fn tensor_type(dtype: DType, dims: &[usize]) -> TensorType {
@@ -149,4 +149,152 @@ fn incompatible_bindings_rejected_atomically_through_the_public_surface() {
         })
     );
     assert_eq!(plan.assignment(weight), Some(dense_default));
+}
+
+#[test]
+fn plans_reject_graphs_they_were_not_seeded_from() {
+    let mut graph = Graph::new();
+    let weight = graph
+        .add_input(
+            "weight",
+            TensorType::new(DType::F32, Shape::new(vec![8, 8])),
+        )
+        .unwrap();
+    graph.set_outputs(vec![weight]).unwrap();
+
+    let mut plan = RepresentationPlan::dense(&graph).unwrap();
+
+    // A rewritten graph that retypes the value must be rejected instead of
+    // being silently planned against stale assumptions.
+    let mut retyped = Graph::new();
+    let f16_weight = retyped
+        .add_input(
+            "weight",
+            TensorType::new(DType::F16, Shape::new(vec![8, 8])),
+        )
+        .unwrap();
+    retyped.set_outputs(vec![f16_weight]).unwrap();
+
+    assert!(plan.ensure_compatible_with(&retyped).is_err());
+    assert!(plan.node_storage_bits(&retyped, NodeId::new(0)).is_err());
+    assert!(plan.total_storage_bits(&retyped).is_err());
+
+    assert_eq!(
+        plan.total_storage_bits(&retyped),
+        Err(RepresentationError::GraphNodeTypeMismatch {
+            node: NodeId::new(0),
+            expected: TensorType::new(DType::F32, Shape::new(vec![8, 8])),
+            actual: TensorType::new(DType::F16, Shape::new(vec![8, 8])),
+        })
+    );
+
+    // An identically rebuilt graph remains fully usable.
+    let mut rebuilt = Graph::new();
+    let same = rebuilt
+        .add_input(
+            "weight",
+            TensorType::new(DType::F32, Shape::new(vec![8, 8])),
+        )
+        .unwrap();
+    rebuilt.set_outputs(vec![same]).unwrap();
+
+    let dense_f32 = plan.assignment(NodeId::new(0)).unwrap();
+    plan.assign(&rebuilt, NodeId::new(0), dense_f32).unwrap();
+    assert_eq!(plan.assignment(NodeId::new(0)), Some(dense_f32));
+}
+
+#[test]
+fn replan_batches_apply_atomically_from_the_public_surface() {
+    let mut graph = Graph::new();
+    let weight = graph
+        .add_input(
+            "weight",
+            TensorType::new(DType::F32, Shape::new(vec![4, 2])),
+        )
+        .unwrap();
+    let bias = graph
+        .add_input("bias", TensorType::new(DType::F32, Shape::new(vec![4])))
+        .unwrap();
+    graph.set_outputs(vec![weight, bias]).unwrap();
+
+    let mut plan = RepresentationPlan::dense(&graph).unwrap();
+    let before_total = plan.total_storage_bits(&graph).unwrap();
+
+    // Build two composite declarations and swap both nodes in one batch.
+    let dense_f16 = plan
+        .declare(PrimitiveRepresentation::dense(DType::F16))
+        .unwrap();
+    let left = plan
+        .component(
+            TensorType::new(DType::F16, Shape::new(vec![4, 3])),
+            dense_f16,
+        )
+        .unwrap();
+    let right = plan
+        .component(
+            TensorType::new(DType::F16, Shape::new(vec![3, 2])),
+            dense_f16,
+        )
+        .unwrap();
+    let factored = plan
+        .declare(PrimitiveRepresentation::factorized(
+            left.clone(),
+            right.clone(),
+        ))
+        .unwrap();
+
+    plan.replan(
+        &graph,
+        &[
+            Rebinding {
+                node: weight,
+                representation: factored,
+            },
+            Rebinding {
+                node: bias,
+                representation: factored,
+            },
+        ],
+    )
+    .expect_err("factorized cannot represent a vector bias");
+
+    // The whole batch was rejected: neither node moved.
+    for index in 0..2
+    {
+        assert_ne!(plan.assignment(NodeId::new(index)), Some(factored));
+    }
+
+    // A corrected batch applies and the exact totals move accordingly.
+    let dense_u8 = plan
+        .declare(PrimitiveRepresentation::dense(DType::U8))
+        .unwrap();
+    let scales = plan
+        .component(TensorType::new(DType::F16, Shape::new(vec![2])), dense_f16)
+        .unwrap();
+    let codes = plan
+        .component(TensorType::new(DType::U8, Shape::new(vec![4])), dense_u8)
+        .unwrap();
+    let quantized = plan
+        .declare(PrimitiveRepresentation::quantized(codes, scales))
+        .unwrap();
+
+    plan.replan(
+        &graph,
+        &[
+            Rebinding {
+                node: weight,
+                representation: factored,
+            },
+            Rebinding {
+                node: bias,
+                representation: quantized,
+            },
+        ],
+    )
+    .unwrap();
+
+    assert_eq!(plan.assignments(), &[factored, quantized]);
+
+    let after_total = plan.total_storage_bits(&graph).unwrap();
+    assert!(after_total.get() < before_total.get());
 }

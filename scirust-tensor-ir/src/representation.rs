@@ -84,7 +84,6 @@ pub struct RepresentationComponent {
     tensor_type: TensorType,
     representation: RepresentationId,
 }
-
 impl RepresentationComponent {
     /// Tensor type carried by this representation component.
     pub const fn tensor_type(&self) -> &TensorType {
@@ -95,6 +94,16 @@ impl RepresentationComponent {
     pub const fn representation(&self) -> RepresentationId {
         self.representation
     }
+}
+
+/// One node re-representation decision applied by
+/// [`RepresentationPlan::replan`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rebinding {
+    /// Node whose assignment changes.
+    pub node: NodeId,
+    /// Representation to bind the node to.
+    pub representation: RepresentationId,
 }
 
 /// Primitive physical representation of one logical tensor value.
@@ -459,6 +468,30 @@ pub enum RepresentationError {
         /// Node identifier without an assignment.
         node: NodeId,
     },
+    /// The presented graph does not match the node count of the graph the
+    /// plan was seeded from.
+    ///
+    /// Plans are indexed by canonical node identifiers and anchored to the
+    /// logical types recorded at seeding time.
+    GraphNodeCountMismatch {
+        /// Node count of the seeding graph.
+        expected: usize,
+        /// Node count of the presented graph.
+        actual: usize,
+    },
+    /// A node no longer declares the logical tensor type it carried when the
+    /// plan was seeded.
+    ///
+    /// Rewriting dtype or shape invalidates every representation decision
+    /// made for that value; rebuild or reseed the plan instead.
+    GraphNodeTypeMismatch {
+        /// Identifier of the drifted node.
+        node: NodeId,
+        /// Canonical tensor type recorded at seeding time.
+        expected: TensorType,
+        /// Canonical tensor type declared by the presented graph.
+        actual: TensorType,
+    },
 }
 
 impl fmt::Display for RepresentationError {
@@ -533,6 +566,26 @@ impl fmt::Display for RepresentationError {
                     node.get()
                 )
             },
+            Self::GraphNodeCountMismatch { expected, actual } =>
+            {
+                write!(
+                    formatter,
+                    "graph has {} nodes but the plan was seeded from {}",
+                    actual, expected
+                )
+            },
+            Self::GraphNodeTypeMismatch {
+                node,
+                expected,
+                actual,
+            } =>
+            {
+                write!(
+                    formatter,
+                    "node {} now declares {actual:?} but was seeded as {expected:?}",
+                    node.get()
+                )
+            },
         }
     }
 }
@@ -549,6 +602,11 @@ impl std::error::Error for RepresentationError {}
 pub struct RepresentationPlan {
     representations: Vec<PrimitiveRepresentation>,
     assignments: Vec<RepresentationId>,
+    /// Canonical tensor type each node carried when the plan was seeded. This
+    /// anchors graph compatibility: a plan only describes graphs whose nodes
+    /// still declare the same logical values, so rewritten or retyped graphs
+    /// are rejected instead of silently mis-planned.
+    seeded_types: Vec<TensorType>,
 }
 
 impl RepresentationPlan {
@@ -557,10 +615,15 @@ impl RepresentationPlan {
     /// Every node is assigned dense storage in its declared logical dtype.
     /// Equal dense representations are interned deterministically, so nodes with
     /// the same dtype share one [`RepresentationId`].
+    ///
+    /// The graph's canonical node types anchor compatibility: every later call
+    /// pairing this plan with a graph verifies that nodes still declare the
+    /// same logical values (see [`RepresentationPlan::ensure_compatible_with`]).
     pub fn dense(graph: &Graph) -> Result<Self, RepresentationError> {
         let mut plan = Self {
             representations: Vec::new(),
             assignments: Vec::with_capacity(graph.nodes().len()),
+            seeded_types: Vec::with_capacity(graph.nodes().len()),
         };
 
         for node in graph.nodes()
@@ -568,6 +631,7 @@ impl RepresentationPlan {
             let representation = PrimitiveRepresentation::dense(node.output.dtype);
             let id = plan.declare(representation)?;
             plan.assignments.push(id);
+            plan.seeded_types.push(node.output.clone());
         }
 
         Ok(plan)
@@ -722,11 +786,14 @@ impl RepresentationPlan {
     /// Return the exact aggregate physical storage implied by the plan for the
     /// whole canonical graph.
     ///
-    /// Every canonical node must carry an assignment; the exact per-node
-    /// storage is summed in canonical node order with checked arithmetic. This
-    /// gives cost-aware lowering a single backend-neutral figure without any
+    /// The graph must be compatible with the plan's seeding anchor. Every
+    /// canonical node must carry an assignment; the exact per-node storage is
+    /// summed in canonical node order with checked arithmetic. This gives
+    /// cost-aware lowering a single backend-neutral figure without any
     /// floating-point accounting.
     pub fn total_storage_bits(&self, graph: &Graph) -> Result<StorageBits, RepresentationError> {
+        self.ensure_compatible_with(graph)?;
+
         let mut total = 0u64;
 
         for (index, node) in graph.nodes().iter().enumerate()
@@ -771,24 +838,65 @@ impl RepresentationPlan {
 
     /// Bind `node` to the declared representation `id`.
     ///
-    /// The node must lie inside this plan's assignment scope (the node set the
-    /// plan was seeded from) and the representation must be able to represent
-    /// the node's canonical tensor type. Rejected bindings leave the table
-    /// unchanged; successful ones override any previous assignment of that
-    /// node without touching other nodes or the graph itself.
+    /// The graph must be compatible with the plan's seeding anchor, the node
+    /// must lie inside this plan's assignment scope and the representation
+    /// must be able to represent the node's canonical tensor type. Rejected
+    /// bindings leave the table unchanged; successful ones override any
+    /// previous assignment of that node without touching other nodes or the
+    /// graph itself.
     pub fn assign(
         &mut self,
         graph: &Graph,
         node: NodeId,
         id: RepresentationId,
     ) -> Result<(), RepresentationError> {
-        let logical = self.canonical_logical(graph, node)?;
+        self.replan(
+            graph,
+            &[Rebinding {
+                node,
+                representation: id,
+            }],
+        )
+    }
 
-        self.representation(id)
-            .ok_or(RepresentationError::InvalidRepresentationId { id })?
-            .validate_for(logical)?;
+    /// Apply a batch of re-representation decisions atomically.
+    ///
+    /// The graph must be compatible with the plan's seeding anchor, and every
+    /// decision must be valid (node in assignment scope, representation
+    /// declared, family able to represent the node's canonical tensor type)
+    /// before anything is written; a single invalid decision rejects the whole
+    /// batch and leaves the table unchanged. Duplicate decisions for the same
+    /// node are applied in slice order, so the last one wins.
+    ///
+    /// This is a mechanical application kernel, not a policy engine: cost
+    /// inspection stays with [`RepresentationPlan::node_storage_bits`] and
+    /// [`RepresentationPlan::total_storage_bits`], so callers compare exact
+    /// totals before and after without any built-in cost model.
+    pub fn replan(
+        &mut self,
+        graph: &Graph,
+        rebinding: &[Rebinding],
+    ) -> Result<(), RepresentationError> {
+        self.ensure_compatible_with(graph)?;
 
-        self.assignments[node.get() as usize] = id;
+        let mut updates = Vec::with_capacity(rebinding.len());
+        for decision in rebinding
+        {
+            let logical = self.canonical_logical(graph, decision.node)?;
+
+            self.representation(decision.representation)
+                .ok_or(RepresentationError::InvalidRepresentationId {
+                    id: decision.representation,
+                })?
+                .validate_for(logical)?;
+
+            updates.push((decision.node.get() as usize, decision.representation));
+        }
+
+        for (index, id) in updates
+        {
+            self.assignments[index] = id;
+        }
 
         Ok(())
     }
@@ -796,7 +904,8 @@ impl RepresentationPlan {
     /// Return the exact physical storage required for `node` under its
     /// assigned representation.
     ///
-    /// The node must lie inside the plan's assignment scope; validation and
+    /// The graph must be compatible with the plan's seeding anchor and the
+    /// node must lie inside the plan's assignment scope; validation and
     /// checked accounting are shared with [`RepresentationPlan::assign`] and
     /// [`RepresentationPlan::storage_bits`].
     pub fn node_storage_bits(
@@ -804,6 +913,7 @@ impl RepresentationPlan {
         graph: &Graph,
         node: NodeId,
     ) -> Result<StorageBits, RepresentationError> {
+        self.ensure_compatible_with(graph)?;
         let id = self
             .assignment(node)
             .ok_or(RepresentationError::UnknownAssignmentNode { node })?;
@@ -832,6 +942,38 @@ impl RepresentationPlan {
             .get(index)
             .map(|node| &node.output)
             .ok_or(RepresentationError::UnknownAssignmentNode { node })
+    }
+
+    /// Verify that `graph` still declares the canonical node types this plan
+    /// was seeded from.
+    ///
+    /// Plans are keyed by canonical node identifiers: reusing one against a
+    /// rewritten, truncated or retyped graph would silently mis-plan values.
+    /// Node names and topology are irrelevant; only the count and the logical
+    /// type declared per position matter, so an identically rebuilt graph
+    /// remains compatible.
+    pub fn ensure_compatible_with(&self, graph: &Graph) -> Result<(), RepresentationError> {
+        if graph.nodes().len() != self.seeded_types.len()
+        {
+            return Err(RepresentationError::GraphNodeCountMismatch {
+                expected: self.seeded_types.len(),
+                actual: graph.nodes().len(),
+            });
+        }
+
+        for (index, (seeded, node)) in self.seeded_types.iter().zip(graph.nodes()).enumerate()
+        {
+            if *seeded != node.output
+            {
+                return Err(RepresentationError::GraphNodeTypeMismatch {
+                    node: NodeId::new(index as u32),
+                    expected: seeded.clone(),
+                    actual: node.output.clone(),
+                });
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -1051,6 +1193,7 @@ mod tests {
         RepresentationPlan {
             representations: Vec::new(),
             assignments: Vec::new(),
+            seeded_types: Vec::new(),
         }
     }
 
@@ -1968,7 +2111,11 @@ mod tests {
         let node = graph.add_input("x", tensor_type(DType::F32)).unwrap();
         graph.set_outputs(vec![node]).unwrap();
 
-        let plan = empty_plan();
+        // A plan seeded for a different node set is rejected before any
+        // assignment lookup.
+        let mut plan = empty_plan();
+        plan.seeded_types = vec![tensor_type(DType::F32)];
+        plan.assignments.clear();
 
         assert_eq!(
             plan.total_storage_bits(&graph),
@@ -1976,6 +2123,303 @@ mod tests {
                 node: NodeId::new(0)
             })
         );
+    }
+
+    #[test]
+    fn plans_reject_desynchronized_graphs_precisely() {
+        let mut graph = Graph::new();
+        let weight = graph
+            .add_input(
+                "weight",
+                TensorType::new(DType::F32, Shape::new(vec![4, 2])),
+            )
+            .unwrap();
+        graph.set_outputs(vec![weight]).unwrap();
+
+        let plan = RepresentationPlan::dense(&graph).unwrap();
+
+        // The identical graph passes.
+        assert!(plan.ensure_compatible_with(&graph).is_ok());
+
+        // A rebuilt graph declaring the same canonical values stays
+        // compatible: names and topology are not part of the anchor.
+        let mut rebuilt = Graph::new();
+        let clone = rebuilt
+            .add_input(
+                "renamed",
+                TensorType::new(DType::F32, Shape::new(vec![4, 2])),
+            )
+            .unwrap();
+        rebuilt.set_outputs(vec![clone]).unwrap();
+        assert!(plan.ensure_compatible_with(&rebuilt).is_ok());
+
+        // Retyping a node invalidates the plan with the drifted position.
+        let mut retyped = Graph::new();
+        let f16 = retyped
+            .add_input(
+                "weight",
+                TensorType::new(DType::F16, Shape::new(vec![4, 2])),
+            )
+            .unwrap();
+        retyped.set_outputs(vec![f16]).unwrap();
+        assert_eq!(
+            plan.ensure_compatible_with(&retyped),
+            Err(RepresentationError::GraphNodeTypeMismatch {
+                node: NodeId::new(0),
+                expected: TensorType::new(DType::F32, Shape::new(vec![4, 2])),
+                actual: TensorType::new(DType::F16, Shape::new(vec![4, 2])),
+            })
+        );
+
+        // Reshaping a node invalidates the plan as well.
+        let mut reshaped = Graph::new();
+        let wide = reshaped
+            .add_input(
+                "weight",
+                TensorType::new(DType::F32, Shape::new(vec![8, 1])),
+            )
+            .unwrap();
+        reshaped.set_outputs(vec![wide]).unwrap();
+        assert_eq!(
+            plan.ensure_compatible_with(&reshaped),
+            Err(RepresentationError::GraphNodeTypeMismatch {
+                node: NodeId::new(0),
+                expected: TensorType::new(DType::F32, Shape::new(vec![4, 2])),
+                actual: TensorType::new(DType::F32, Shape::new(vec![8, 1])),
+            })
+        );
+
+        // A different node count is rejected before any per-node comparison.
+        let mut longer = Graph::new();
+        let first = longer
+            .add_input("first", TensorType::new(DType::F32, Shape::new(vec![4, 2])))
+            .unwrap();
+        let second = longer.add_input("second", tensor_type(DType::F32)).unwrap();
+        longer.set_outputs(vec![first, second]).unwrap();
+        assert_eq!(
+            plan.ensure_compatible_with(&longer),
+            Err(RepresentationError::GraphNodeCountMismatch {
+                expected: 1,
+                actual: 2,
+            })
+        );
+    }
+
+    #[test]
+    fn assign_rejects_desynchronized_graphs_atomically() {
+        let mut graph = Graph::new();
+        let weight = graph
+            .add_input(
+                "weight",
+                TensorType::new(DType::F32, Shape::new(vec![4, 2])),
+            )
+            .unwrap();
+        graph.set_outputs(vec![weight]).unwrap();
+
+        let mut plan = RepresentationPlan::dense(&graph).unwrap();
+        let dense_default = plan.assignment(weight).unwrap();
+
+        let dense_u8 = plan
+            .declare(PrimitiveRepresentation::dense(DType::U8))
+            .unwrap();
+
+        // Presenting a retyped graph must not allow binding through it.
+        let mut retyped = Graph::new();
+        let u8_weight = retyped
+            .add_input("weight", TensorType::new(DType::U8, Shape::new(vec![4, 2])))
+            .unwrap();
+        retyped.set_outputs(vec![u8_weight]).unwrap();
+
+        assert!(plan.assign(&graph, weight, dense_u8).is_err());
+        assert_eq!(
+            plan.assign(&retyped, weight, dense_u8),
+            Err(RepresentationError::GraphNodeTypeMismatch {
+                node: NodeId::new(0),
+                expected: TensorType::new(DType::F32, Shape::new(vec![4, 2])),
+                actual: TensorType::new(DType::U8, Shape::new(vec![4, 2])),
+            })
+        );
+
+        // The table is untouched by both rejections.
+        assert_eq!(plan.assignment(weight), Some(dense_default));
+    }
+
+    #[test]
+    fn replan_applies_valid_batches_and_keeps_accounting_exact() {
+        let mut graph = Graph::new();
+        let weight = graph
+            .add_input(
+                "weight",
+                TensorType::new(DType::F32, Shape::new(vec![4, 2])),
+            )
+            .unwrap();
+        let bias = graph
+            .add_input("bias", TensorType::new(DType::F32, Shape::new(vec![4])))
+            .unwrap();
+        graph.set_outputs(vec![weight, bias]).unwrap();
+
+        let mut plan = RepresentationPlan::dense(&graph).unwrap();
+        assert_eq!(
+            plan.total_storage_bits(&graph),
+            Ok(StorageBits::new(256 + 128))
+        );
+
+        // Factorized weight [4,3]x[3,2] F16 and quantized bias: codes U8[4] +
+        // scales F16[2].
+        let (left, right) = factorized_components(&mut plan, DType::F16, 4, 3, 2);
+        let factored = plan
+            .declare(PrimitiveRepresentation::factorized(left, right))
+            .unwrap();
+        let dense_u8 = plan
+            .declare(PrimitiveRepresentation::dense(DType::U8))
+            .unwrap();
+        let dense_f16 = plan
+            .declare(PrimitiveRepresentation::dense(DType::F16))
+            .unwrap();
+        let codes = plan
+            .component(TensorType::new(DType::U8, Shape::new(vec![4])), dense_u8)
+            .unwrap();
+        let scales = plan
+            .component(TensorType::new(DType::F16, Shape::new(vec![2])), dense_f16)
+            .unwrap();
+        let quantized = plan
+            .declare(PrimitiveRepresentation::quantized(codes, scales))
+            .unwrap();
+
+        plan.replan(
+            &graph,
+            &[
+                Rebinding {
+                    node: weight,
+                    representation: factored,
+                },
+                Rebinding {
+                    node: bias,
+                    representation: quantized,
+                },
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(plan.assignments(), &[factored, quantized]);
+
+        // Weight: (12 + 6) halves * 16 bits; bias: 4 bytes * 8 + 2 halves * 16.
+        assert_eq!(
+            plan.total_storage_bits(&graph),
+            Ok(StorageBits::new(288 + 64))
+        );
+        // The canonical graph stays untouched.
+        assert_eq!(
+            graph.nodes()[weight.get() as usize].output.dtype,
+            DType::F32
+        );
+    }
+
+    #[test]
+    fn replan_is_atomic_when_any_decision_is_invalid() {
+        let mut graph = Graph::new();
+        let weight = graph
+            .add_input(
+                "weight",
+                TensorType::new(DType::F32, Shape::new(vec![4, 2])),
+            )
+            .unwrap();
+        let bias = graph
+            .add_input("bias", TensorType::new(DType::F32, Shape::new(vec![4])))
+            .unwrap();
+        graph.set_outputs(vec![weight, bias]).unwrap();
+
+        let mut plan = RepresentationPlan::dense(&graph).unwrap();
+        let defaults = plan.assignments().to_vec();
+
+        // The first decision would be valid on its own; each second decision
+        // is invalid for a different reason.
+        let (left, right) = factorized_components(&mut plan, DType::F16, 2, 3, 5);
+        let mismatched = plan
+            .declare(PrimitiveRepresentation::factorized(left, right))
+            .unwrap();
+        let undeclared = RepresentationId::new(99);
+
+        for bad in [
+            Rebinding {
+                node: bias,
+                representation: mismatched,
+            },
+            Rebinding {
+                node: bias,
+                representation: undeclared,
+            },
+            Rebinding {
+                node: NodeId::new(42),
+                representation: mismatched,
+            },
+        ]
+        {
+            assert!(
+                plan.replan(
+                    &graph,
+                    &[
+                        Rebinding {
+                            node: weight,
+                            representation: mismatched
+                        },
+                        bad,
+                    ],
+                )
+                .is_err()
+            );
+            // Not a single decision of any rejected batch was applied.
+            assert_eq!(plan.assignments(), &defaults[..]);
+        }
+    }
+
+    #[test]
+    fn replan_resolves_duplicate_decisions_in_slice_order() {
+        let mut graph = Graph::new();
+        let weight = graph
+            .add_input(
+                "weight",
+                TensorType::new(DType::F32, Shape::new(vec![4, 2])),
+            )
+            .unwrap();
+        graph.set_outputs(vec![weight]).unwrap();
+
+        let mut plan = RepresentationPlan::dense(&graph).unwrap();
+        let dense_default = plan.assignment(weight).unwrap();
+        let (left, right) = factorized_components(&mut plan, DType::F16, 4, 3, 2);
+        let factored = plan
+            .declare(PrimitiveRepresentation::factorized(left, right))
+            .unwrap();
+
+        plan.replan(
+            &graph,
+            &[
+                Rebinding {
+                    node: weight,
+                    representation: factored,
+                },
+                Rebinding {
+                    node: weight,
+                    representation: dense_default,
+                },
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(plan.assignment(weight), Some(dense_default));
+    }
+
+    #[test]
+    fn empty_replan_is_a_no_op() {
+        let mut graph = Graph::new();
+        let node = graph.add_input("x", tensor_type(DType::F32)).unwrap();
+        graph.set_outputs(vec![node]).unwrap();
+
+        let mut plan = RepresentationPlan::dense(&graph).unwrap();
+        let before = plan.assignments().to_vec();
+
+        plan.replan(&graph, &[]).unwrap();
+        assert_eq!(plan.assignments(), &before[..]);
     }
 
     #[cfg(target_pointer_width = "64")]
