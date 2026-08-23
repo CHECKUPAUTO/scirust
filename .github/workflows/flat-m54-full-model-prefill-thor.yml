@@ -29,7 +29,7 @@ jobs:
     env:
       CARGO_INCREMENTAL: 0
       RUSTFLAGS: "-D warnings"
-      FLAT_M54_PIN: 43b4c0ba08e109ac7025a01a01837da6927d05d0
+      FLAT_M54_PIN: fd0f748b9a5285858ffbf4867e405a3729c4b70b
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
@@ -72,7 +72,7 @@ jobs:
       RUSTFLAGS: "-D warnings"
       SCIRUST_THOR_GPU_LOCK: /dev/nvidia0
       SCIRUST_SOURCE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
-      FLAT_M54_PIN: 43b4c0ba08e109ac7025a01a01837da6927d05d0
+      FLAT_M54_PIN: fd0f748b9a5285858ffbf4867e405a3729c4b70b
       SCIAGENT_M54_WARMUPS: "1"
       SCIAGENT_M54_REPEATS: "5"
       SCIRUST_THOR_IDLE_SETTLE_SECONDS: "300"
