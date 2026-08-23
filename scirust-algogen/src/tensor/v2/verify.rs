@@ -14,12 +14,17 @@ use serde::{Deserialize, Serialize};
 
 use super::ir::{Op, Ref, ResearchProgram, Section, ValueId};
 use super::types::{
-    DType, ShapeError, ValueType, broadcast_shapes, can_broadcast_to, shape_elements,
+    DType, ShapeError, ValueType, broadcast_shapes, can_broadcast_to, row_major_strides,
+    shape_elements,
 };
 
 /// Resource limits enforced before a program may be executed or archived.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VerificationLimits {
+    /// Maximum number of outer inputs.
+    pub max_inputs: usize,
+    /// Maximum number of item values supplied at each scan step.
+    pub max_items_per_step: usize,
     /// Maximum nodes in any one section.
     pub max_nodes_per_section: usize,
     /// Maximum total defined values across all sections.
@@ -31,6 +36,13 @@ pub struct VerificationLimits {
     /// Maximum summed element count over every defined value (each value
     /// counted once; scan temporaries are per-step transients).
     pub max_total_register_elements: usize,
+    /// Maximum summed element count across input/item/state signatures.
+    pub max_signature_elements: usize,
+    /// Maximum materialized step-item elements (`steps × items-per-step`).
+    pub max_stream_input_elements: usize,
+    /// Conservative host-allocation budget. The reference interpreter stores
+    /// every element in an eight-byte carrier, irrespective of logical dtype.
+    pub max_temporary_bytes: u64,
     /// Maximum static trip count of the scan.
     pub max_steps: u32,
     /// Maximum number of state components.
@@ -42,11 +54,16 @@ pub struct VerificationLimits {
 impl Default for VerificationLimits {
     fn default() -> Self {
         Self {
+            max_inputs: 32,
+            max_items_per_step: 16,
             max_nodes_per_section: 256,
             max_nodes_total: 1024,
             max_rank: 8,
             max_elements_per_tensor: 16 * 1024 * 1024,
             max_total_register_elements: 64 * 1024 * 1024,
+            max_signature_elements: 64 * 1024 * 1024,
+            max_stream_input_elements: 64 * 1024 * 1024,
+            max_temporary_bytes: 512 * 1024 * 1024,
             max_steps: 4096,
             max_state_components: 8,
             max_outputs: 8,
@@ -55,11 +72,30 @@ impl Default for VerificationLimits {
 }
 
 /// Which program section an error refers to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SectionKind {
     Init,
     Step,
     Finalize,
+}
+
+/// Which declared signature contains an invalid value type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SignatureKind {
+    Input,
+    Item,
+    State,
+}
+
+impl std::fmt::Display for SignatureKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self
+        {
+            Self::Input => "input",
+            Self::Item => "item",
+            Self::State => "state",
+        })
+    }
 }
 
 impl SectionKind {
@@ -104,6 +140,14 @@ impl std::fmt::Display for SectionKind {
 /// offending section/node so diagnostics stay actionable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProgramError {
+    TooManyInputs {
+        inputs: usize,
+        maximum: usize,
+    },
+    TooManyItemsPerStep {
+        items: usize,
+        maximum: usize,
+    },
     TooManyNodesInSection {
         section: SectionKind,
         nodes: usize,
@@ -281,10 +325,53 @@ pub enum ProgramError {
         elements: usize,
         maximum: usize,
     },
+    SignatureRankLimitExceeded {
+        kind: SignatureKind,
+        index: usize,
+        rank: usize,
+        maximum: usize,
+    },
+    SignatureTensorTooLarge {
+        kind: SignatureKind,
+        index: usize,
+        elements: usize,
+        maximum: usize,
+    },
+    SignatureElementsExceeded {
+        elements: usize,
+        maximum: usize,
+    },
+    StreamInputElementsExceeded {
+        elements: usize,
+        maximum: usize,
+    },
+    SignatureStrideOverflow {
+        kind: SignatureKind,
+        index: usize,
+        shape: Vec<usize>,
+    },
+    StrideOverflow {
+        section: SectionKind,
+        node: ValueId,
+        shape: Vec<usize>,
+    },
+    TemporaryBytesExceeded {
+        bytes: u64,
+        maximum: u64,
+    },
+    DimensionOverflow {
+        section: SectionKind,
+        node: ValueId,
+        op: &'static str,
+    },
 
     /// A constant is NaN. `±Infinity` constants are admissible (stable
     /// identities); NaN constants are not.
     NonNanConstant {
+        section: SectionKind,
+        node: ValueId,
+    },
+    NonFiniteConstantInFiniteOnly {
         section: SectionKind,
         node: ValueId,
     },
@@ -295,6 +382,14 @@ impl std::fmt::Display for ProgramError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self
         {
+            Self::TooManyInputs { inputs, maximum } => write!(
+                formatter,
+                "program declares {inputs} inputs, exceeding limit {maximum}"
+            ),
+            Self::TooManyItemsPerStep { items, maximum } => write!(
+                formatter,
+                "program declares {items} items per step, exceeding limit {maximum}"
+            ),
             Self::TooManyNodesInSection {
                 section,
                 nodes,
@@ -541,10 +636,60 @@ impl std::fmt::Display for ProgramError {
                 formatter,
                 "total register elements reach {elements}, exceeding limit {maximum}"
             ),
+            Self::SignatureRankLimitExceeded {
+                kind,
+                index,
+                rank,
+                maximum,
+            } => write!(
+                formatter,
+                "{kind} signature value {index} has rank {rank}, exceeding limit {maximum}"
+            ),
+            Self::SignatureTensorTooLarge {
+                kind,
+                index,
+                elements,
+                maximum,
+            } => write!(
+                formatter,
+                "{kind} signature value {index} has {elements} elements, exceeding limit {maximum}"
+            ),
+            Self::SignatureElementsExceeded { elements, maximum } => write!(
+                formatter,
+                "signature values contain {elements} elements in total, exceeding limit {maximum}"
+            ),
+            Self::StreamInputElementsExceeded { elements, maximum } => write!(
+                formatter,
+                "materialized stream input has {elements} elements, exceeding limit {maximum}"
+            ),
+            Self::SignatureStrideOverflow { kind, index, shape } => write!(
+                formatter,
+                "{kind} signature value {index} shape {shape:?} has overflowing row-major strides"
+            ),
+            Self::StrideOverflow {
+                section,
+                node,
+                shape,
+            } => write!(
+                formatter,
+                "{section} node {node} shape {shape:?} has overflowing row-major strides"
+            ),
+            Self::TemporaryBytesExceeded { bytes, maximum } => write!(
+                formatter,
+                "conservative interpreter residency is {bytes} bytes, exceeding limit {maximum}"
+            ),
+            Self::DimensionOverflow { section, node, op } => write!(
+                formatter,
+                "{section} node {node} ({op}) overflows a static dimension"
+            ),
             Self::NonNanConstant { section, node } =>
             {
                 write!(formatter, "{section} node {node} uses a NaN constant")
             },
+            Self::NonFiniteConstantInFiniteOnly { section, node } => write!(
+                formatter,
+                "{section} node {node} uses an infinite constant under FiniteOnly semantics"
+            ),
         }
     }
 }
@@ -570,6 +715,18 @@ pub struct VerifiedProgram {
     pub output_types: Vec<ValueType>,
     /// Summed element count over all defined values (each value once).
     pub total_register_elements: usize,
+    /// Conservative bytes occupied by all defined values in the reference
+    /// interpreter's uniform carrier.
+    pub total_register_bytes: u64,
+    /// Conservative residency of signatures plus all defined values in the
+    /// reference interpreter's uniform carrier.
+    pub conservative_resident_bytes: u64,
+    /// Summed elements across declared input/item/state signatures.
+    pub signature_elements: usize,
+    /// Total externally materialized item elements across all scan steps.
+    pub stream_input_elements: usize,
+    /// Uniform-carrier bytes required by the complete item sequence.
+    pub stream_input_bytes: u64,
 }
 
 impl VerifiedProgram {
@@ -586,6 +743,9 @@ pub fn verify_program(
     limits: VerificationLimits,
 ) -> Result<VerifiedProgram, ProgramError> {
     verify_signature(program, limits)?;
+    let declared_signature_elements = signature_elements(program, limits)?;
+    let stream_input_elements = stream_input_elements(program, limits)?;
+    let signature_bytes = (declared_signature_elements as u64).saturating_mul(8);
 
     let mut context = Context {
         inputs: &program.inputs,
@@ -593,6 +753,9 @@ pub fn verify_program(
         state: &program.state,
         limits,
         total_register_elements: 0usize,
+        total_register_bytes: 0,
+        resident_bytes: signature_bytes,
+        semantics: program.semantics,
     };
 
     let init_types = infer_section(
@@ -602,6 +765,7 @@ pub fn verify_program(
         |reference| match *reference
         {
             Ref::Input(index) => Some(SignatureRef::Input(index)),
+            Ref::Local(id) => Some(SignatureRef::Local(id)),
             _ => None,
         },
     )?;
@@ -635,11 +799,30 @@ pub fn verify_program(
     check_state_bindings(program, &init_types, &step_types)?;
     check_outputs(program, &finalize_types, limits)?;
 
-    let output_types = program
+    let output_types: Vec<ValueType> = program
         .outputs
         .iter()
         .map(|&id| finalize_types[id].clone())
         .collect();
+
+    // Root extraction clones state/output values while section registers are
+    // still resident. Account explicitly for the larger root tuple.
+    let state_copy_elements = program.state.iter().fold(0u64, |sum, value_type| {
+        sum.saturating_add(value_type.elements())
+    });
+    let output_copy_elements = output_types.iter().fold(0u64, |sum, value_type| {
+        sum.saturating_add(value_type.elements())
+    });
+    let root_copy_bytes = state_copy_elements
+        .max(output_copy_elements)
+        .saturating_mul(8);
+    let conservative_resident_bytes = context.resident_bytes.saturating_add(root_copy_bytes);
+    if conservative_resident_bytes > limits.max_temporary_bytes {
+        return Err(ProgramError::TemporaryBytesExceeded {
+            bytes: conservative_resident_bytes,
+            maximum: limits.max_temporary_bytes,
+        });
+    }
 
     Ok(VerifiedProgram {
         init_active: analyze_section_active(&program.init.ops, &program.init_state),
@@ -650,6 +833,11 @@ pub fn verify_program(
         finalize_types,
         output_types,
         total_register_elements: context.total_register_elements,
+        total_register_bytes: context.total_register_bytes,
+        conservative_resident_bytes,
+        signature_elements: declared_signature_elements,
+        stream_input_elements,
+        stream_input_bytes: (stream_input_elements as u64).saturating_mul(8),
     })
 }
 
@@ -657,6 +845,30 @@ fn verify_signature(
     program: &ResearchProgram,
     limits: VerificationLimits,
 ) -> Result<(), ProgramError> {
+    if program.inputs.len() > limits.max_inputs
+    {
+        return Err(ProgramError::TooManyInputs {
+            inputs: program.inputs.len(),
+            maximum: limits.max_inputs,
+        });
+    }
+    if program.items.len() > limits.max_items_per_step
+    {
+        return Err(ProgramError::TooManyItemsPerStep {
+            items: program.items.len(),
+            maximum: limits.max_items_per_step,
+        });
+    }
+    let signature = signature_elements(program, limits)?;
+    stream_input_elements(program, limits)?;
+    let signature_bytes = (signature as u64).saturating_mul(8);
+    if signature_bytes > limits.max_temporary_bytes
+    {
+        return Err(ProgramError::TemporaryBytesExceeded {
+            bytes: signature_bytes,
+            maximum: limits.max_temporary_bytes,
+        });
+    }
     if program.node_count() > limits.max_nodes_total
     {
         return Err(ProgramError::TooManyNodesTotal {
@@ -746,6 +958,9 @@ struct Context<'a> {
     state: &'a [ValueType],
     limits: VerificationLimits,
     total_register_elements: usize,
+    total_register_bytes: u64,
+    resident_bytes: u64,
+    semantics: super::semantics::NumericalSemantics,
 }
 
 /// Infer types for one section given its legal-reference decoder.
@@ -759,6 +974,22 @@ fn infer_section(
 
     for (node, op) in section.ops.iter().enumerate()
     {
+        if context.semantics == super::semantics::NumericalSemantics::FiniteOnly
+        {
+            let finite = match op
+            {
+                Op::Const(super::types::ScalarValue::F32(value)) => value.is_finite(),
+                Op::Const(super::types::ScalarValue::F64(value)) => value.is_finite(),
+                _ => true,
+            };
+            if !finite
+            {
+                return Err(ProgramError::NonFiniteConstantInFiniteOnly {
+                    section: kind,
+                    node,
+                });
+            }
+        }
         // Resolve every operand reference to its type, enforcing section
         // legality, bounds and causality in reference order (deterministic).
         let mut operand_types: Vec<ValueType> = Vec::with_capacity(4);
@@ -795,6 +1026,13 @@ fn infer_section(
                 maximum: context.limits.max_rank,
             });
         }
+        if row_major_strides(&result_type.shape).is_none() {
+            return Err(ProgramError::StrideOverflow {
+                section: kind,
+                node,
+                shape: result_type.shape,
+            });
+        }
         let elements = shape_elements(&result_type.shape).ok_or(ProgramError::TensorTooLarge {
             section: kind,
             node,
@@ -822,6 +1060,20 @@ fn infer_section(
             return Err(ProgramError::TotalRegisterElementsExceeded {
                 elements: context.total_register_elements,
                 maximum: context.limits.max_total_register_elements,
+            });
+        }
+
+        context.total_register_bytes = context
+            .total_register_bytes
+            .saturating_add((elements as u64).saturating_mul(8));
+        context.resident_bytes = context
+            .resident_bytes
+            .saturating_add((elements as u64).saturating_mul(8));
+        if context.resident_bytes > context.limits.max_temporary_bytes
+        {
+            return Err(ProgramError::TemporaryBytesExceeded {
+                bytes: context.resident_bytes,
+                maximum: context.limits.max_temporary_bytes,
             });
         }
 
@@ -934,7 +1186,7 @@ fn broadcast_error(kind: SectionKind, node: ValueId, error: ShapeError) -> Progr
 }
 
 #[allow(clippy::too_many_lines)]
-fn infer_op(
+pub(crate) fn infer_op(
     op: &Op,
     kind: SectionKind,
     node: ValueId,
@@ -1464,7 +1716,13 @@ fn infer_op(
                 }
             }
             let mut shape = left.shape;
-            shape[*axis] += right.shape[*axis];
+            shape[*axis] = shape[*axis].checked_add(right.shape[*axis]).ok_or(
+                ProgramError::DimensionOverflow {
+                    section: kind,
+                    node,
+                    op: "concat",
+                },
+            )?;
             Ok(ValueType::new(left.dtype, shape))
         },
         Op::Narrow(narrow) =>
@@ -1488,6 +1746,95 @@ fn infer_op(
             Ok(ValueType::new(src.dtype, shape))
         },
     }
+}
+
+/// Validate all declared signature shapes and return their summed elements.
+fn signature_elements(
+    program: &ResearchProgram,
+    limits: VerificationLimits,
+) -> Result<usize, ProgramError> {
+    let mut total = 0usize;
+    for (kind, values) in [
+        (SignatureKind::Input, program.inputs.as_slice()),
+        (SignatureKind::Item, program.items.as_slice()),
+        (SignatureKind::State, program.state.as_slice()),
+    ]
+    {
+        for (index, value_type) in values.iter().enumerate()
+        {
+            if value_type.shape.len() > limits.max_rank
+            {
+                return Err(ProgramError::SignatureRankLimitExceeded {
+                    kind,
+                    index,
+                    rank: value_type.shape.len(),
+                    maximum: limits.max_rank,
+                });
+            }
+            if row_major_strides(&value_type.shape).is_none()
+            {
+                return Err(ProgramError::SignatureStrideOverflow {
+                    kind,
+                    index,
+                    shape: value_type.shape.clone(),
+                });
+            }
+            let elements =
+                shape_elements(&value_type.shape).ok_or(ProgramError::SignatureTensorTooLarge {
+                    kind,
+                    index,
+                    elements: usize::MAX,
+                    maximum: limits.max_elements_per_tensor,
+                })?;
+            if elements > limits.max_elements_per_tensor
+            {
+                return Err(ProgramError::SignatureTensorTooLarge {
+                    kind,
+                    index,
+                    elements,
+                    maximum: limits.max_elements_per_tensor,
+                });
+            }
+            total = total
+                .checked_add(elements)
+                .ok_or(ProgramError::SignatureElementsExceeded {
+                    elements: usize::MAX,
+                    maximum: limits.max_signature_elements,
+                })?;
+            if total > limits.max_signature_elements
+            {
+                return Err(ProgramError::SignatureElementsExceeded {
+                    elements: total,
+                    maximum: limits.max_signature_elements,
+                });
+            }
+        }
+    }
+    Ok(total)
+}
+
+/// Checked size of the complete external step-item sequence.
+fn stream_input_elements(
+    program: &ResearchProgram,
+    limits: VerificationLimits,
+) -> Result<usize, ProgramError> {
+    let per_step = program.items.iter().try_fold(0usize, |sum, value_type| {
+        sum.checked_add(value_type.checked_elements()?)
+    });
+    let elements = per_step
+        .and_then(|per_step| per_step.checked_mul(program.steps as usize))
+        .ok_or(ProgramError::StreamInputElementsExceeded {
+            elements: usize::MAX,
+            maximum: limits.max_stream_input_elements,
+        })?;
+    if elements > limits.max_stream_input_elements
+    {
+        return Err(ProgramError::StreamInputElementsExceeded {
+            elements,
+            maximum: limits.max_stream_input_elements,
+        });
+    }
+    Ok(elements)
 }
 
 fn check_state_bindings(

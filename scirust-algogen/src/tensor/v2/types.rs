@@ -67,6 +67,19 @@ impl DType {
             Self::Bool => "bool",
         }
     }
+
+    /// Logical storage width used by backend-independent cost accounting.
+    /// The reference interpreter currently uses an `f64` carrier internally;
+    /// that implementation detail is accounted for separately by verifier
+    /// host-allocation budgets.
+    pub const fn logical_bytes(self) -> u64 {
+        match self
+        {
+            Self::F32 => 4,
+            Self::F64 => 8,
+            Self::Bool => 1,
+        }
+    }
 }
 
 /// A compile-time tensor type: element dtype plus concrete shape.
@@ -112,6 +125,11 @@ impl ValueType {
         self.shape
             .iter()
             .try_fold(1usize, |product, &dimension| product.checked_mul(dimension))
+    }
+
+    /// Backend-independent logical byte footprint, saturating on overflow.
+    pub fn logical_bytes(&self) -> u64 {
+        self.elements().saturating_mul(self.dtype.logical_bytes())
     }
 }
 

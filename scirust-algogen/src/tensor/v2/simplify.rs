@@ -18,20 +18,24 @@
 //!
 //! # Validity domains (normative)
 //!
-//! All rules hold under the **canonical numeric regime**: IEEE-754 arithmetic,
-//! a finite-valued defined domain, *signed-zero insensitivity* (rewrites may
-//! merge value flows that differ only in ±0 propagation), NaN excluded by the
-//! runtime gate.
+//! Rule applicability is determined by the program's explicit
+//! [`NumericalSemantics`](super::semantics::NumericalSemantics). Strict IEEE
+//! programs receive structural rules only. Finite-only programs admit the
+//! documented finite-domain identities while preserving signed zero. The
+//! real-algebraic experimental regime may additionally ignore signed-zero
+//! distinctions. No regime permits reassociation or silent FMA contraction.
 //!
 //! Applied:
-//! * `Add(x, 0) -> x`, `Sub(x, 0) -> x` — exact except `-0 + 0 = +0`;
-//!   signed-zero flows are merged by contract.
+//! * `Add(x, 0) -> x` — real-algebraic only because `-0 + +0 = +0`.
+//! * `Sub(x, +0) -> x` — finite-domain; subtracting `-0` is real-algebraic
+//!   only because it changes signed zero.
 //! * `Mul(x, 1) -> x`, `Div(x, 1) -> x` — bit-exact for all finite `x`.
 //! * `Min(x, x) -> x`, `Max(x, x) -> x`, `Dot(x, x)` kept (not an identity),
 //!   `Eq(x, x)`/`Ne(x, x)` kept (observable Boolean) — only genuinely
 //!   value-preserving identities alias.
 //! * `Neg(Neg(x)) -> x`, `Not(Not(b)) -> b` — double negation.
-//! * `Select(_, v, v) -> v`; `And(b, true) -> b`; `Or(b, false) -> b`.
+//! * `Select(_, v, v) -> v`; `And(b, true) -> b`; `Or(b, false) -> b` —
+//!   structural/Boolean and Strict-IEEE safe.
 //! * Commutative normalization for `Add, Mul, Min, Max, And, Or, Dot, Eq, Ne`
 //!   — IEEE addition/multiplication/comparison/min-max and dot products are
 //!   commutative bit-for-bit on the defined domain.
@@ -47,6 +51,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use super::ir::{Bin, Op, Ref, ResearchProgram, Section, ShapeTo, ValueId};
+use super::semantics::NumericalSemantics;
 use super::types::ScalarValue;
 use super::verify::{
     ProgramError, VerificationLimits, VerifiedProgram, analyze_section_active, verify_program,
@@ -77,6 +82,54 @@ pub struct SimplifyStats {
 pub struct Canonicalized {
     pub program: ResearchProgram,
     pub stats: SimplifyStats,
+    /// Deterministic audit trail in application order.
+    pub applications: Vec<RewriteApplication>,
+}
+
+/// Stable identity of a rewrite rule. Variants are append-only because
+/// experiment records may retain them as audit evidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum RewriteRuleId {
+    ConstantFold,
+    AddZero,
+    SubZero,
+    MulOne,
+    DivOne,
+    MinMaxSelf,
+    BooleanIdentity,
+    SelectSameBranches,
+    DoubleNegation,
+    CommutativeNormalize,
+    CommonSubexpression,
+    DeadCode,
+}
+
+impl RewriteRuleId {
+    /// Whether the rule is admissible in `semantics`. Dynamic shape/type
+    /// preconditions are checked by the rule matcher itself.
+    pub const fn permitted(self, semantics: NumericalSemantics) -> bool {
+        match self
+        {
+            Self::ConstantFold
+            | Self::BooleanIdentity
+            | Self::CommonSubexpression
+            | Self::DeadCode => true,
+            Self::DoubleNegation => true, // Boolean is strict; float matcher gates below.
+            Self::SelectSameBranches | Self::CommutativeNormalize => true,
+            Self::AddZero => semantics.admits_real_algebra(),
+            Self::SubZero | Self::MulOne | Self::DivOne | Self::MinMaxSelf =>
+            {
+                semantics.admits_finite_rewrites()
+            },
+        }
+    }
+}
+
+/// One rule application in a bounded pass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RewriteApplication {
+    pub pass: usize,
+    pub rule: RewriteRuleId,
 }
 
 /// Reduce `program` to its canonical form.
@@ -90,8 +143,9 @@ pub fn canonicalize(
     let mut verified = verify_program(program, limits)?;
     let mut current = program.clone();
     let mut stats = SimplifyStats::default();
+    let mut applications = Vec::new();
 
-    for _ in 0..MAX_SIMPLIFY_PASSES
+    for pass in 0..MAX_SIMPLIFY_PASSES
     {
         let (next, delta) = simplify_once(&current, &verified)?;
         stats.passes += 1;
@@ -99,6 +153,13 @@ pub fn canonicalize(
         stats.constants_folded += delta.constants_folded;
         stats.identities_applied += delta.identities_applied;
         stats.duplicates_removed += delta.duplicates_removed;
+        applications.extend(
+            delta
+                .rules
+                .iter()
+                .copied()
+                .map(|rule| RewriteApplication { pass, rule }),
+        );
 
         if !delta.changed()
         {
@@ -111,6 +172,7 @@ pub fn canonicalize(
     Ok(Canonicalized {
         program: current,
         stats,
+        applications,
     })
 }
 
@@ -121,6 +183,7 @@ struct Delta {
     identities_applied: usize,
     duplicates_removed: usize,
     normalized: usize,
+    rules: Vec<RewriteRuleId>,
 }
 
 impl Delta {
@@ -140,10 +203,12 @@ fn simplify_once(
 ) -> Result<(ResearchProgram, Delta), ProgramError> {
     let mut delta = Delta::default();
 
-    let (init_ops, init_aliases, init_remap) = simplify_section(&program.init, &mut delta);
-    let (step_ops, step_aliases, step_remap) = simplify_section(&program.step, &mut delta);
+    let (init_ops, init_aliases, init_remap) =
+        simplify_section(&program.init, program.semantics, &mut delta);
+    let (step_ops, step_aliases, step_remap) =
+        simplify_section(&program.step, program.semantics, &mut delta);
     let (finalize_ops, finalize_aliases, finalize_remap) =
-        simplify_section(&program.finalize, &mut delta);
+        simplify_section(&program.finalize, program.semantics, &mut delta);
 
     // Rebind section roots through alias chains / compaction; rooted aliases
     // become explicit passthrough reshapes appended to their section.
@@ -170,6 +235,7 @@ fn simplify_once(
     );
 
     let mut next = ResearchProgram {
+        semantics: program.semantics,
         inputs: program.inputs.clone(),
         items: program.items.clone(),
         state: program.state.clone(),
@@ -195,6 +261,10 @@ fn simplify_once(
     next.outputs = outputs;
     let removed = before.saturating_sub(next.node_count());
     delta.dead_nodes_removed += removed;
+    if removed > 0
+    {
+        delta.rules.push(RewriteRuleId::DeadCode);
+    }
 
     Ok((next, delta))
 }
@@ -263,6 +333,11 @@ fn is_zero(value: Option<ScalarValue>) -> bool {
         || matches!(value, Some(ScalarValue::F64(v)) if v == 0.0)
 }
 
+fn is_positive_zero(value: Option<ScalarValue>) -> bool {
+    matches!(value, Some(ScalarValue::F32(v)) if v.to_bits() == 0.0f32.to_bits())
+        || matches!(value, Some(ScalarValue::F64(v)) if v.to_bits() == 0.0f64.to_bits())
+}
+
 fn is_one(value: Option<ScalarValue>) -> bool {
     matches!(value, Some(ScalarValue::F32(v)) if v == 1.0)
         || matches!(value, Some(ScalarValue::F64(v)) if v == 1.0)
@@ -278,6 +353,7 @@ fn is_true(value: Option<ScalarValue>) -> bool {
 #[allow(clippy::type_complexity)]
 fn simplify_section(
     section: &Section,
+    semantics: NumericalSemantics,
     delta: &mut Delta,
 ) -> (Vec<Op>, Vec<Option<Ref>>, Vec<usize>) {
     let ops = &section.ops;
@@ -297,22 +373,25 @@ fn simplify_section(
             working[node] = Op::Const(folded);
             consts[node] = Some(folded);
             delta.constants_folded += 1;
+            delta.rules.push(RewriteRuleId::ConstantFold);
             continue;
         }
 
         // Identity rewrites.
-        if let Some(target) = identity_target(&working[node], &consts)
-            .or_else(|| double_negation_target(&working, node))
+        if let Some((target, rule)) = identity_target(&working[node], &consts, semantics)
+            .or_else(|| double_negation_target(&working, node, semantics))
         {
             aliases[node] = Some(target);
             delta.identities_applied += 1;
+            delta.rules.push(rule);
             continue;
         }
 
         // Commutative normalization.
-        if normalize_commutative(&mut working[node])
+        if normalize_commutative(&mut working[node], semantics)
         {
             delta.normalized += 1;
+            delta.rules.push(RewriteRuleId::CommutativeNormalize);
         }
     }
 
@@ -331,6 +410,7 @@ fn simplify_section(
             {
                 aliases[node] = Some(Ref::Local(first));
                 delta.duplicates_removed += 1;
+                delta.rules.push(RewriteRuleId::CommonSubexpression);
             },
             None =>
             {
@@ -685,59 +765,70 @@ fn try_fold(
 
 /// Identity-rewrite table. `consts` views the *original* section (aliases
 /// never point at constants directly because folding runs first).
-fn identity_target(op: &Op, consts: &[Option<ScalarValue>]) -> Option<Ref> {
+fn identity_target(
+    op: &Op,
+    consts: &[Option<ScalarValue>],
+    semantics: NumericalSemantics,
+) -> Option<(Ref, RewriteRuleId)> {
     match op
     {
         Op::Add(bin) =>
         {
-            if is_zero(direct_const(bin.lhs, consts))
+            if RewriteRuleId::AddZero.permitted(semantics) && is_zero(direct_const(bin.lhs, consts))
             {
-                return Some(bin.rhs);
+                return Some((bin.rhs, RewriteRuleId::AddZero));
             }
-            if is_zero(direct_const(bin.rhs, consts))
+            if RewriteRuleId::AddZero.permitted(semantics) && is_zero(direct_const(bin.rhs, consts))
             {
-                return Some(bin.lhs);
+                return Some((bin.lhs, RewriteRuleId::AddZero));
             }
             None
         },
         Op::Sub(bin) =>
         {
-            if is_zero(direct_const(bin.rhs, consts))
+            let rhs = direct_const(bin.rhs, consts);
+            let permitted = RewriteRuleId::SubZero.permitted(semantics)
+                && (is_positive_zero(rhs) || semantics.admits_real_algebra());
+            if permitted
             {
-                return Some(bin.lhs);
+                return Some((bin.lhs, RewriteRuleId::SubZero));
             }
             None
         },
         Op::Mul(bin) =>
         {
-            if is_one(direct_const(bin.lhs, consts))
+            if RewriteRuleId::MulOne.permitted(semantics) && is_one(direct_const(bin.lhs, consts))
             {
-                return Some(bin.rhs);
+                return Some((bin.rhs, RewriteRuleId::MulOne));
             }
-            if is_one(direct_const(bin.rhs, consts))
+            if RewriteRuleId::MulOne.permitted(semantics) && is_one(direct_const(bin.rhs, consts))
             {
-                return Some(bin.lhs);
+                return Some((bin.lhs, RewriteRuleId::MulOne));
             }
             None
         },
         Op::Div(bin) =>
         {
-            if is_one(direct_const(bin.rhs, consts))
+            if RewriteRuleId::DivOne.permitted(semantics) && is_one(direct_const(bin.rhs, consts))
             {
-                return Some(bin.lhs);
+                return Some((bin.lhs, RewriteRuleId::DivOne));
             }
             None
         },
-        Op::Min(bin) | Op::Max(bin) if bin.lhs == bin.rhs => Some(bin.lhs),
+        Op::Min(bin) | Op::Max(bin)
+            if RewriteRuleId::MinMaxSelf.permitted(semantics) && bin.lhs == bin.rhs =>
+        {
+            Some((bin.lhs, RewriteRuleId::MinMaxSelf))
+        },
         Op::And(bin) =>
         {
             if is_true(direct_const(bin.lhs, consts))
             {
-                return Some(bin.rhs);
+                return Some((bin.rhs, RewriteRuleId::BooleanIdentity));
             }
             if is_true(direct_const(bin.rhs, consts))
             {
-                return Some(bin.lhs);
+                return Some((bin.lhs, RewriteRuleId::BooleanIdentity));
             }
             None
         },
@@ -745,19 +836,19 @@ fn identity_target(op: &Op, consts: &[Option<ScalarValue>]) -> Option<Ref> {
         {
             if !is_true(direct_const(bin.lhs, consts)) && direct_is_bool_false(bin.lhs, consts)
             {
-                return Some(bin.rhs);
+                return Some((bin.rhs, RewriteRuleId::BooleanIdentity));
             }
             if direct_is_bool_false(bin.rhs, consts)
             {
-                return Some(bin.lhs);
+                return Some((bin.lhs, RewriteRuleId::BooleanIdentity));
             }
             None
         },
         Op::Select(ter) =>
         {
-            if ter.b == ter.c
+            if RewriteRuleId::SelectSameBranches.permitted(semantics) && ter.b == ter.c
             {
-                return Some(ter.b);
+                return Some((ter.b, RewriteRuleId::SelectSameBranches));
             }
             None
         },
@@ -769,14 +860,21 @@ fn identity_target(op: &Op, consts: &[Option<ScalarValue>]) -> Option<Ref> {
 ///
 /// Validity: exact for finite values (signaling-NaN quieting is unreachable
 /// under the runtime gate).
-fn double_negation_target(working: &[Op], node: usize) -> Option<Ref> {
+fn double_negation_target(
+    working: &[Op],
+    node: usize,
+    semantics: NumericalSemantics,
+) -> Option<(Ref, RewriteRuleId)> {
     match &working[node]
     {
         Op::Neg(un) => match un.src
         {
             Ref::Local(inner_id) => match working.get(inner_id)?
             {
-                Op::Neg(inner) => Some(inner.src),
+                Op::Neg(inner) if semantics.admits_finite_rewrites() =>
+                {
+                    Some((inner.src, RewriteRuleId::DoubleNegation))
+                },
                 _ => None,
             },
             _ => None,
@@ -785,7 +883,7 @@ fn double_negation_target(working: &[Op], node: usize) -> Option<Ref> {
         {
             Ref::Local(inner_id) => match working.get(inner_id)?
             {
-                Op::Not(inner) => Some(inner.src),
+                Op::Not(inner) => Some((inner.src, RewriteRuleId::DoubleNegation)),
                 _ => None,
             },
             _ => None,
@@ -812,7 +910,7 @@ fn direct_is_bool_false(reference: Ref, consts: &[Option<ScalarValue>]) -> bool 
 }
 
 /// Reorder operands of provably commutative operators under [`ref_order`].
-fn normalize_commutative(op: &mut Op) -> bool {
+fn normalize_commutative(op: &mut Op, semantics: NumericalSemantics) -> bool {
     fn swap_pair(bin: &mut Bin) -> bool {
         if ref_order(bin.rhs) < ref_order(bin.lhs)
         {
@@ -827,15 +925,12 @@ fn normalize_commutative(op: &mut Op) -> bool {
 
     match op
     {
-        Op::Add(bin)
-        | Op::Mul(bin)
-        | Op::Min(bin)
-        | Op::Max(bin)
-        | Op::And(bin)
-        | Op::Or(bin)
-        | Op::Eq(bin)
-        | Op::Ne(bin)
-        | Op::Dot(bin) => swap_pair(bin),
+        Op::And(bin) | Op::Or(bin) | Op::Eq(bin) | Op::Ne(bin) => swap_pair(bin),
+        Op::Add(bin) | Op::Mul(bin) | Op::Min(bin) | Op::Max(bin) | Op::Dot(bin)
+            if semantics.admits_finite_rewrites() =>
+        {
+            swap_pair(bin)
+        },
         _ => false,
     }
 }
@@ -950,6 +1045,14 @@ mod tests {
         .outputs
     }
 
+    fn finite(program: ResearchProgram) -> ResearchProgram {
+        program.with_semantics(NumericalSemantics::FiniteOnly)
+    }
+
+    fn real(program: ResearchProgram) -> ResearchProgram {
+        program.with_semantics(NumericalSemantics::RealAlgebraicExperimental)
+    }
+
     /// Differential helper: canonicalization must preserve execution
     /// bit-for-bit and verify afterwards.
     fn assert_semantics_preserved(program: &ResearchProgram) -> Canonicalized {
@@ -972,7 +1075,7 @@ mod tests {
 
     #[test]
     fn add_zero_sub_zero_mul_one_div_one_are_eliminated() {
-        let program = ResearchProgram::expression(
+        let program = real(ResearchProgram::expression(
             vec![f32_type(&[4])],
             Section::new(vec![
                 Op::Const(ScalarValue::F32(0.0)),                // 0
@@ -984,7 +1087,7 @@ mod tests {
                 Op::Div(Bin::new(Ref::Local(4), Ref::Local(5))), // 6: /1
             ]),
             vec![6],
-        );
+        ));
         let canonical = assert_semantics_preserved(&program);
         // x survives as one passthrough reshape.
         assert_eq!(canonical.program.finalize.len(), 1);
@@ -993,7 +1096,7 @@ mod tests {
 
     #[test]
     fn min_max_self_and_select_same_branches_collapse() {
-        let program = ResearchProgram::expression(
+        let program = finite(ResearchProgram::expression(
             vec![f32_type(&[4])],
             Section::new(vec![
                 Op::Const(ScalarValue::F32(0.0)),                // 0
@@ -1004,7 +1107,7 @@ mod tests {
                 Op::Abs(Un::new(Ref::Local(4))),                 // 5
             ]),
             vec![5],
-        );
+        ));
         let canonical = assert_semantics_preserved(&program);
         // Once Select collapses onto x its mask loses every consumer and is
         // removed by DCE; only abs(x) remains.
@@ -1017,7 +1120,7 @@ mod tests {
 
     #[test]
     fn double_negation_and_double_not_collapse() {
-        let program = ResearchProgram::expression(
+        let program = finite(ResearchProgram::expression(
             vec![f32_type(&[4])],
             Section::new(vec![
                 Op::Neg(Un::new(Ref::Input(0))),
@@ -1028,7 +1131,7 @@ mod tests {
                 Op::Select(Ter::new(Ref::Local(4), Ref::Input(0), Ref::Local(1))),
             ]),
             vec![5],
-        );
+        ));
         let canonical = assert_semantics_preserved(&program);
         assert!(canonical.stats.identities_applied >= 2);
     }
@@ -1149,7 +1252,7 @@ mod tests {
     #[test]
     fn commutative_operands_normalize_to_identical_digests() {
         let build = |swap: bool| {
-            ResearchProgram::expression(
+            finite(ResearchProgram::expression(
                 vec![f32_type(&[4]), f32_type(&[4])],
                 Section::new(vec![
                     Op::Tanh(Un::new(Ref::Input(0))),
@@ -1166,7 +1269,7 @@ mod tests {
                     ),
                 ]),
                 vec![2],
-            )
+            ))
         };
         let left = canonicalize(&build(false), VerificationLimits::default()).unwrap();
         let right = canonicalize(&build(true), VerificationLimits::default()).unwrap();
@@ -1219,6 +1322,7 @@ mod tests {
     #[test]
     fn recurrence_programs_survive_canonicalization_with_state_intact() {
         let program = ResearchProgram {
+            semantics: super::super::semantics::NumericalSemantics::StrictIeee,
             inputs: vec![],
             items: vec![ValueType::scalar(DType::F64)],
             state: vec![ValueType::scalar(DType::F64); 2],
@@ -1328,11 +1432,111 @@ mod tests {
             ops.push(Op::Add(Bin::new(Ref::Local(prev), Ref::Local(0))));
         }
         let output = ops.len() - 1;
-        let program =
-            ResearchProgram::expression(vec![f32_type(&[4])], Section::new(ops), vec![output]);
+        let program = real(ResearchProgram::expression(
+            vec![f32_type(&[4])],
+            Section::new(ops),
+            vec![output],
+        ));
         let canonical = canonicalize(&program, VerificationLimits::default()).unwrap();
         assert!(canonical.program.finalize.len() <= 2);
         assert!(canonical.stats.passes <= MAX_SIMPLIFY_PASSES);
         assert_semantics_preserved(&program);
+    }
+
+    #[test]
+    fn strict_ieee_preserves_signed_zero_sensitive_float_identities() {
+        let program = ResearchProgram::expression(
+            vec![ValueType::scalar(DType::F64)],
+            Section::new(vec![
+                Op::Const(ScalarValue::F64(0.0)),
+                Op::Add(Bin::new(Ref::Input(0), Ref::Local(0))),
+            ]),
+            vec![1],
+        );
+        let before = execute_program(
+            &program,
+            &[ValueTensor::scalar_f64(-0.0)],
+            &[],
+            ExecutionPolicy::default(),
+            VerificationLimits::default(),
+        )
+        .unwrap();
+        assert_eq!(before.outputs[0].data[0].to_bits(), 0.0f64.to_bits());
+
+        let canonical = canonicalize(&program, VerificationLimits::default()).unwrap();
+        assert!(
+            canonical
+                .program
+                .finalize
+                .ops
+                .iter()
+                .any(|op| matches!(op, Op::Add(_)))
+        );
+        assert!(
+            !canonical
+                .applications
+                .iter()
+                .any(|application| application.rule == RewriteRuleId::AddZero)
+        );
+    }
+
+    #[test]
+    fn strict_ieee_does_not_reorder_floating_add_but_does_normalize_boolean_ops() {
+        let program = ResearchProgram::expression(
+            vec![
+                ValueType::scalar(DType::F64),
+                ValueType::scalar(DType::F64),
+                ValueType::scalar(DType::Bool),
+                ValueType::scalar(DType::Bool),
+            ],
+            Section::new(vec![
+                Op::Add(Bin::new(Ref::Input(1), Ref::Input(0))),
+                Op::And(Bin::new(Ref::Input(3), Ref::Input(2))),
+            ]),
+            vec![0, 1],
+        );
+        let canonical = canonicalize(&program, VerificationLimits::default()).unwrap();
+        assert!(matches!(
+            canonical.program.finalize.ops[0],
+            Op::Add(Bin {
+                lhs: Ref::Input(1),
+                rhs: Ref::Input(0)
+            })
+        ));
+        assert!(matches!(
+            canonical.program.finalize.ops[1],
+            Op::And(Bin {
+                lhs: Ref::Input(2),
+                rhs: Ref::Input(3)
+            })
+        ));
+    }
+
+    #[test]
+    fn rewrite_audit_trail_is_ordered_and_each_rule_has_a_declared_domain() {
+        let program = finite(ResearchProgram::expression(
+            vec![f32_type(&[4])],
+            Section::new(vec![
+                Op::Const(ScalarValue::F32(1.0)),
+                Op::Mul(Bin::new(Ref::Input(0), Ref::Local(0))),
+                Op::Abs(Un::new(Ref::Local(1))),
+                Op::Abs(Un::new(Ref::Local(1))),
+            ]),
+            vec![2],
+        ));
+        let canonical = canonicalize(&program, VerificationLimits::default()).unwrap();
+        assert!(!canonical.applications.is_empty());
+        assert!(
+            canonical
+                .applications
+                .windows(2)
+                .all(|pair| pair[0].pass <= pair[1].pass)
+        );
+        assert!(
+            canonical
+                .applications
+                .iter()
+                .all(|application| application.rule.permitted(program.semantics))
+        );
     }
 }

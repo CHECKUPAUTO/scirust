@@ -1,272 +1,260 @@
-# SciRust algogen IR-V2 — architecture specification
+# SciRust algogen IR V2 architecture
 
-Status: normative for `scirust_algogen::tensor::v2`.
-Baseline audited: `docs/SCIRUST_ALGOGEN_IR_V2_AUDIT.md`.
-V1 (`scirust_algogen::tensor`) is frozen byte-stable; V2 is additive.
+Status: implemented contract for `scirust_algogen::tensor::v2`.
 
-## 1. Goals
+Baseline: master commit `d3e435d690e1a2a95e5b4379c681bdb8954cfbb0`.
+V1 remains available and byte-stable under `scirust_algogen::tensor`; V2 is an
+additive namespace with a V1-to-V2 adapter.
 
-A deterministic, verifiable, auditable IR for **automated scientific algorithm
-discovery**: able to represent elementwise arithmetic, reductions, broadcasting
-shape algebra, linear algebra, Boolean masks, multi-output programs, and
-statically bounded recurrences (streaming/online algorithms), while remaining
-constrained enough for generation, mutation, canonicalization, cost modeling,
-archival and exact replay.
+## 1. Scope
 
-Non-goals: arbitrary control flow, unbounded loops, pointer semantics, unsafe
-code, vendor kernels, autodiff (see §13), GPU lowering (see §14).
+IR V2 is a bounded semantic IR for scientific algorithm discovery. It can
+represent typed scalar/tensor expressions, reductions, masks, shape algebra,
+linear algebra, multiple outputs, and fixed-trip streaming recurrences. It is
+not a general-purpose language:
 
-## 2. Module layout
+- no arbitrary branches, calls, recursion, pointers, mutation, aliases,
+  exceptions, I/O, host callbacks, or dynamic code;
+- no loop except the single statically counted recurrence section;
+- no symbolic or data-dependent shapes;
+- no backend, device, vendor, or scheduling annotations;
+- every resource-bearing dimension is checked before execution.
 
+The key design principle is closed semantics plus an explicit trust boundary,
+not a large opcode count.
+
+## 2. Implemented module boundary
+
+| Module | Responsibility |
+|---|---|
+| `types.rs` | `DType`, `ValueType`, `ScalarValue`, static broadcast helpers |
+| `ir.rs` | section-scoped refs, operations, `ResearchProgram` |
+| `semantics.rs` | rewrite-equivalence regimes |
+| `verify.rs` | type/shape/state/resource verification and active maps |
+| `interpret.rs` | safe reference execution and runtime float policy |
+| `canonical.rs` | versioned canonical bytes, FNV hint, SHA-256 label |
+| `simplify.rs` | bounded, ordered, regime-gated rewrite framework |
+| `serialization.rs` | explicit versioned JSON envelope and rejection boundary |
+| `range.rs` | conservative constant/sign/finiteness/interval facts |
+| `cost.rs` | deterministic structural cost and phase liveness |
+| `generate.rs` | typed grammar, profiles, seeded generation and rejection stats |
+| `evolve.rs` | verified mutation and recurrence-context-aware crossover |
+| `search.rs` | counterexamples, multiobjective fitness, Pareto archive, replay |
+| `reference.rs` | executable representation fixtures and ADA A1–A10 evidence |
+| `compat.rs` | frozen V1 to V2 lift |
+
+Search code does not call `reference.rs`; examples cannot become hidden
+generator templates.
+
+## 3. Value and shape model
+
+`ValueType` is a pair of `DType` and a concrete row-major `Vec<usize>` shape.
+An empty shape is a rank-zero scalar. Implemented dtypes are true IEEE binary32,
+true IEEE binary64, and Boolean. The interpreter uses an `f64` payload carrier,
+but casts every binary32 operation to `f32` before computation and back after
+rounding; the carrier is storage, not fake f64 evaluation. Boolean payloads
+must be exact `+0.0` or `+1.0` bit patterns.
+
+`f16`, `bf16`, integer, and index dtypes are deliberately absent. Adding a
+name without implementing its rounding and storage semantics would be false
+precision. Integer/index types are the prerequisite for dynamic gather/argmax.
+
+Shapes are static. All element products use checked arithmetic. Broadcasting
+uses NumPy-style trailing-axis alignment: equal dimensions or one dimension
+equal to one; an absent leading dimension broadcasts. A zero dimension only
+broadcasts with zero or one. Implicit broadcast is part of the inferred type
+and can be disabled in the generation grammar. `BroadcastTo` is the explicit
+form and participates in canonical identity.
+
+Implemented shape/index operations are `Reshape`, `Squeeze`, `Unsqueeze`,
+`Transpose` with an explicit permutation, `BroadcastTo`, `Concat`, and
+statically bounded `Narrow`. Dynamic gather/scatter is not emulated with float
+indices.
+
+## 4. Program and recurrence structure
+
+`ResearchProgram` has three straight-line SSA-flavoured sections:
+
+```text
+init once
+  state[0..S] := init_state bindings
+
+repeat exactly steps times
+  next_state[0..S] := step(previous state, current items)
+
+finalize once
+  return outputs in declared order
 ```
-tensor/v2/
-  mod.rs         public surface + version constants
-  types.rs       DType, ValueType, ScalarValue, shape algebra helpers
-  ir.rs          Op, Node, Section, ResearchProgram (the semantic IR)
-  verify.rs      VerificationLimits, ProgramError, VerifiedProgram
-  interpret.rs   ExecutionPolicy, ExecutionError, execute_program
-  canonical.rs   canonical bytes, FNV fingerprint, SHA-256 program digest
-  simplify.rs    rewrite framework: DCE, CSE, folding, identities, fixpoint
-  cost.rs        structural CostReport + liveness/peak-live analysis
-  range.rs       conservative constant/sign/range analysis
-  generate.rs    Grammar, GrammarProfile, valid-by-construction generator
-  mutate.rs      typed mutation families
-  crossover.rs   type-aware crossover
-  fitness.rs     FitnessReport, counterexamples, Pareto objectives
-  population.rs  deterministic evolution over V2 programs
-  dataset.rs     cases with inputs + per-step items + multi-output expected
-  problem.rs     serialisable problems, benchmarks, discovery smoke problem
-  archive.rs     versioned ExperimentArchive + verification + replay
-  compat.rs      V1 -> V2 adapter
-  reference_tests.rs   hand-built known-algorithm representations
-  ada_tests.rs   ADA A1..A10 capability tests
-```
 
-## 3. Value model
+The program declares outer input types, per-step item types, state-component
+types, and the static trip count. References are scoped:
 
-- `DType`: `F32`, `F64`, `Bool`. Extension points documented for `F16`, `Bf16`,
-  integer/index dtypes; **not** implemented (no fake low-precision arithmetic:
-  labelling f32 data bf16 is forbidden). Programs mixing incompatible dtypes
-  fail verification.
-- Shape: `Vec<usize>` (rank ≤ `max_rank`, default 8). Rank-0 = scalar.
-- `ValueType { dtype, shape }`.
-- `ScalarValue { F32(f32) | F64(f64) | Bool(bool) }`; non-finite float
-  constants are **rejected by the verifier** (illegal-constant rule).
-- Symbolic dimensions: deliberately deferred. Concrete shapes keep static
-  inference total and deterministic; see §12 (remaining gaps).
+| Reference | Legal section |
+|---|---|
+| `Input(i)` | init, finalize |
+| `Item(i)` | step |
+| `StatePrev(i)` | step |
+| `StateFinal(i)` | finalize |
+| `Local(i)` | same section, strictly earlier definition |
 
-### Broadcasting
+State is a typed tuple, not one accumulator. This supports `(m,l)` online
+softmax, `(count,mean,M2)` Welford, `(sum,compensation)` Kahan-like updates, and
+`(m,l,o)` attention-style folds using ordinary ops. Each next-state binding
+must exactly equal its declared component type. The scan is a fold: V2 does
+not materialize per-step results and has no optional scan-output sequence.
+This prevents an implicit `steps × tensor` allocation. Zero-length recurrence
+is rejected; straight-line programs use no state and `steps == 0`.
 
-NumPy-style right-aligned broadcasting, restricted: dimensions pair equal, or
-one side is `1`, or absent. Zero-sized dims broadcast only against `0`/`1`.
-Used by: arithmetic, comparisons, min/max/clamp/pow, `Select` mask.
-`allow_broadcast` can be disabled per grammar profile.
+## 5. Operation inventory
 
-### Shape ops (all statically checked)
+- Constants: typed scalar `Const` nodes.
+- Arithmetic: `Add`, `Sub`, `Mul`, `Div`, `Neg`, `MulAdd`, `Pow`.
+- Unary scientific: `Abs`, `Exp`, `Exp2`, `Expm1`, `Log`, `Log2`, `Log1p`,
+  `Sqrt`, `Rsqrt`, `Sin`, `Cos`, `Tanh`.
+- Extrema and selection: `Min`, `Max`, `Clamp`, `Select`.
+- Comparisons: `Eq`, `Ne`, `Lt`, `Le`, `Gt`, `Ge`, producing Boolean values.
+- Boolean: `And`, `Or`, `Not`.
+- Reductions: sum, product, minimum, maximum, mean; an explicit optional axis,
+  with `None` meaning all axes and `keep_dim = false`.
+- Linear algebra: dot, matrix-vector, vector-matrix, matrix-matrix, one-leading-
+  batch matrix multiplication, and outer product.
+- Shape/static indexing: the operations listed in §3.
 
-`Reshape(target)` (element-count preserving), `Squeeze(axis)` (axis must be 1),
-`Unsqueeze(axis)`, `Transpose(perm)` (validated permutation),
-`BroadcastTo(target)`, `Concat(lhs, rhs, axis)`,
-`Narrow { axis, start, len }` (bounds-checked statically).
+There is no `Softmax`, `OnlineSoftmax`, `Attention`, Entmax, or ADA opcode.
+There is no implicit FMA contraction: `MulAdd` is explicitly fused and
+`Mul` followed by `Add` remains two roundings.
 
-## 4. Program structure: three sections and a bounded scan
+`Erf` is deferred because Rust `std` provides no native contract and shipping
+an approximation would silently choose research semantics. General `Pow` is
+implemented; ArgMin/ArgMax await an index dtype.
 
-```rust
-pub struct ResearchProgram {
-    pub inputs: Vec<ValueType>,   // outer inputs
-    pub items: Vec<ValueType>,    // per-step incoming values (stream signature)
-    pub state: Vec<ValueType>,    // declared recurrence state components
-    pub steps: u32,               // static trip count
-    pub init: Section,  pub init_state: Vec<ValueId>,
-    pub step: Section,  pub next_state: Vec<ValueId>,
-    pub finalize: Section, pub outputs: Vec<ValueId>,
-}
-```
+## 6. Verifier as the trust boundary
 
-Execution: `init` once → `state := init_state`;
-repeat exactly `steps` times with item vector `items[k]`:
-`state := next_state(step(state, items[k]))`; then `finalize` once and read
-`outputs`. A program with `state.is_empty()` must have `steps == 0` and an
-empty `init` section — i.e. plain straight-line expressions are the degenerate
-case. `steps >= 1` requires a non-empty state. There are **no** loops besides
-this statically counted scan; the step body cannot recurse, branch, or escape
-its declared state signature.
+`verify_program` is required before interpretation, cost, range analysis,
+serialization, mutation/crossover output, and archival. Structured errors
+cover:
 
-References are section-scoped:
+- section legality, operand existence, causality, and operator arity;
+- dtype/operator compatibility and exact/broadcast shape rules;
+- reduction axes and forbidden empty max/min/mean domains;
+- reshape element count, squeeze axes, permutations, concat and narrow ranges;
+- state/step co-occurrence, state binding counts/types, output bounds/uniqueness;
+- input/item/state signature rank and element counts;
+- maximum inputs, items/step, nodes/section, total nodes, rank, elements/value,
+  total register elements, signature elements, conservative host bytes, steps,
+  state components, and outputs;
+- NaN constants and, under `FiniteOnly`, all non-finite constants.
 
-| Ref | Allowed in | Meaning |
-|---|---|---|
-| `Input(i)` | init, finalize | outer input |
-| `Local(j)` | all | earlier node of the same section |
-| `Const` | all | `Op::Const(ScalarValue)` node |
-| `Item(k)` | step only | k-th incoming value of the current step |
-| `StatePrev(s)` | step only | previous value of state slot `s` |
-| `StateFinal(s)` | finalize only | final value of state slot `s` |
+The result contains inferred types, active-node maps, output types, total
+register elements/bytes, signature elements, and conservative resident bytes.
+Malformed programs fail before allocation-heavy kernels. Interpreter root
+lookups still return structured defensive errors rather than relying on panic.
 
-Every value is defined exactly once (SSA-flavoured); use-before-definition and
-cross-section leaks are verifier errors. Multiple outputs and multiple updated
-state components are first-class. Dead values unreachable from
-`init_state`/`next_state`/`outputs` are removable by DCE.
+## 7. Interpreter and effects
 
-## 5. Operator inventory (categories)
+The interpreter is a pure function of program, input tensors, item tensors,
+execution policy, and limits. It contains no unsafe code, FFI, threads, files,
+network, shell, dynamic compilation, callbacks, or host object handles.
 
-- Arithmetic (broadcast, float): `Add Sub Mul Div Neg MulAdd` (fused `a*b+c`),
-  `Pow`.
-- Constants: `Const(ScalarValue)` (zero/one are ordinary constants; CSE makes
-  duplicates free).
-- Elementary (unary float): `Abs Exp Exp2 Expm1 Log Log2 Log1p Sqrt Rsqrt Sin
-  Cos Tanh`.
-- Extrema: `Min Max` (broadcast binary), `Clamp(x, lo, hi)`.
-- Comparisons (broadcast, float → bool): `Eq Ne Lt Le Gt Ge`.
-- Boolean logic: `And Or Not`.
-- Selection: `Select(mask, if_true, if_false)` — mask broadcast over branches.
-- Reductions (axis-explicit): `ReduceSum ReduceProd ReduceMax ReduceMin
-  ReduceMean`, `axis: None` (full → rank 0) or `Some(axis)` (axis removed,
-  keep-dim = false). Empty-axis rules: sum/prod defined (0/1);
-  max/min/mean over an empty axis are statically rejected (non-finite by
-  construction).
-- Linear algebra: `Dot`, `MatVec`, `VecMat`, `MatMul`, `BatchedMatMul`
-  (leading batch axis), `Outer`.
-- No high-level `Softmax`, no `OnlineSoftmax`, no argmax/argmin (needs index
-  dtypes — deferred), no gather/scatter (deferred with index dtypes; see
-  NUMERICAL_SEMANTICS §7 and ARCHITECTURE §12).
+It evaluates only verified active nodes. Tensor public fields are revalidated
+at entry so serde or struct literals cannot bypass length, binary32 carrier, or
+Boolean encoding rules. Accumulation order is ascending row-major flat index;
+matrix products use ascending inner index. All execution is deterministic for
+a fixed Rust target/toolchain numerical library. Transcendental bit patterns
+are not claimed portable across every libm implementation.
 
-Interpreter semantics are defined directly in safe Rust (checked iteration,
-no einsum-backend delegation, no panics on zero-sized dims).
+The rewrite semantic regime and runtime float policy are related but distinct;
+the exact contract is in `SCIRUST_ALGOGEN_IR_V2_NUMERICAL_SEMANTICS.md`.
 
-## 6. Verifier (trust boundary)
+## 8. Canonicalization, identity, and serialization
 
-Statically validates, in one pass per section, then cross-section:
+The bounded rewrite pipeline uses a fixed order and at most 16 passes. It
+performs finite-result constant folding, explicitly classified identities,
+regime-gated commutative operand normalization, exact CSE, root rebinding,
+stable compaction/value renumbering, and DCE. Every application records pass
+number and stable rule id. It never reassociates arithmetic, distributes,
+contracts to FMA, or applies `x*0`, `x-x`, or `x/x` rules.
 
-arity/causality/section-legality of every ref; input/item/state-slot bounds;
-dtype and shape compatibility (with declared broadcasting rules); reduction
-axes; reshape/squeeze/transpose/concat/narrow legality; resource limits
-(`max_nodes_per_section`, `max_nodes_total`, `max_rank`,
-`max_elements_per_tensor`, `max_total_register_elements`, `max_steps`,
-`max_state_components`, `max_outputs`); illegal non-finite constants;
-recurrence signature consistency (`init_state`/`next_state` counts and types,
-`steps`/state co-occurrence); output existence and uniqueness.
+Canonical bytes are authoritative structural identity and begin with:
 
-Output: `VerifiedProgram` with per-section inferred types, active maps, output
-types, totals. Structured error enum (`ProgramError`, one variant per rule,
-each with a negative test).
+1. domain-separation magic;
+2. canonical format version;
+3. IR version;
+4. canonicalization version;
+5. numerical semantic regime.
 
-## 7. Interpreter
+They then encode signatures, sections, refs, shapes, and raw float bits using
+fixed-width little-endian fields. FNV-128 is only a lookup hint. SHA-256 is a
+compact archival label. Neither hash proves equality; exact bytes are retained
+and compared by the Pareto archive.
 
-`execute_program(program, inputs, items, policy, limits)`. Safe, deterministic,
-allocation-checked, no FFI/shell/threads. `ExecutionPolicy { float_policy:
-RejectNonFinite (default) | AllowNonFinite }`. Under the default, the first
-non-finite intermediate aborts evaluation with a precise error; datasets and
-constants are finite by construction. `AllowNonFinite` exists for research
-regimes and never participates in default discovery. Dead sections/steps are
-skipped exactly as in V1 (liveness is part of the numerical contract).
+JSON is transport, never identity. The serialization envelope records
+serialization, IR, canonicalization, and semantic-regime versions. A bare V2
+program or any mismatch is rejected; V1 artifacts are not silently reinterpreted.
 
-## 8. Numerical semantics and regimes
+## 9. Analyses and search
 
-Authoritative contract lives in `SCIRUST_ALGOGEN_IR_V2_NUMERICAL_SEMANTICS.md`.
-Summary:
+The structural cost report separates operator classes, logical FLOPs, data
+reads/writes, logical bytes, state/output/intermediate footprints, step and
+finalize depth, and phase-resolved peak live values/elements/bytes. Step cost is
+reported per iteration and scaled exactly once for total cost. No wall-clock
+measurement affects fitness.
 
-- Operator semantics = IEEE-754 as implemented by the corresponding Rust `std`
-  operator/function for the operand dtype; the interpreter adds the
-  policy-level non-finite gate. Transcendentals inherit toolchain libm ULP
-  behaviour; identity/canonicalization never depends on evaluated values.
-- Canonicalization operates under the **canonical numeric regime**: IEEE-754
-  values restricted to the finite domain, with **signed-zero insensitivity**
-  (rewrites may merge value flows that differ only in ±0 propagation). Every
-  rewrite states its validity domain; nothing assumes associativity of `+`/`*`;
-  `Sub(x,x)→0`, `Mul(x,0)→0` are **rejected** (NaN/±Inf hazards).
+Range analysis is deliberately lightweight: constant, sign, finiteness, and
+simple interval facts. Recurrence propagation reaches a bounded abstract fixed
+point (at most eight passes), not a theorem proof.
 
-## 9. Canonicalization and identity
+Generation enumerates verifier-typed proposals from a scoped value pool, then
+uses the stable SplitMix64 stream. Its serializable grammar controls operator
+classes/dtypes, rank, values, operations, depth, reductions, transcendentals,
+expensive ops, linalg, shape ops, comparisons, broadcasting, indexing,
+recurrence, state count/trip count, and total proposal enumeration. It records
+deterministic rejection statistics. Profiles constrain curricula; none
+contains an algorithm AST.
 
-Deterministic pass pipeline (fixed order, fixed-point with hard step budget):
-DCE → CSE (value numbering) → constant folding (only when the folded result is
-exactly representable and finite) → identity rewrites → commutative operand
-normalisation (Add, Mul, Min, Max, And, Or — sound under IEEE commutativity;
-never associative reassociation) → compaction/renumbering → duplicate-output
-removal. Idempotent; every rule unit-tested for semantic preservation
-(bit-for-bit under the default policy on the rewrite's declared domain).
+Mutation enumerates bounded same-type operand replacements, same-signature
+operator replacements, constant changes, reduction-axis changes, and compatible
+state/output rebinding, then returns only a verified child. Crossover requires
+identical regime/input/item/state/trip/output contexts and exchanges a complete
+section together with its binding vector; it never splices references across
+state scopes.
 
-Identity: `canonical_bytes` (versioned magic `SCIRUST-RIR2`, format version,
-stable opcode tags, fixed-width LE integers, raw float bits) is authoritative;
-`program_fingerprint` (FNV-1a 128) is a collidable hint; `program_digest`
-(SHA-256 hex) is the archival/research identifier. Collisions never imply
-equality anywhere in the stack.
+Fitness keeps counterexample error separate from cost. The archive maintains a
+deterministic nondominated set across error, logical work, memory, state,
+depth, reductions, and expensive operations. Exact canonical bytes protect
+against digest collisions. Experiments record source revision, all versions,
+grammar/profile, seed, limits, dataset id/digest, candidate seed/bytes/program,
+fitness, generation rejection, archive decision/final position, and diagnostics.
+Replay reruns the logical pipeline and requires complete archive equality.
 
-Archive records `ir_version`, `canonical_format_version`, and the numerical
-policy tag; a change in any of them cannot silently preserve experiment
+## 10. Compatibility and boundaries
+
+V1 public types, canonical bytes, archives, and experiments are unchanged.
+`compat::from_v1` lifts a verified V1 expression into a V2 straight-line
+program; execution equality is tested. There is intentionally no V2-to-V1
+downcast for constructs V1 cannot express.
+
+`scirust-symbolic` remains separate. Its real-algebra expression rules are not
+automatically valid for IEEE programs. A future import/export adapter must tag
+assumptions and restrict symbolic rewrites to the experimental real-algebraic
+regime or independently prove stronger preconditions.
+
+Autodiff is not part of V2. A future differentiability analysis/pass can
+consume verified pure sections, but derivative semantics—especially at
+min/max/select/masks—must be explicit. CPU/SIMD/GPU/WGSL/SPIR-V/CUDA lowerings
+are also separate consumers of verified semantic IR and cannot alter canonical
 identity.
 
-## 10. Cost model, liveness, ranges
+## 11. Deliberate limitations
 
-`CostReport` (structural/logical, saturating, wall-clock-free): per-class op
-counts (add/sub, mul, fma, div, pow, exp-family, log-family, sqrt-family,
-trig, minmax, compare, select, reductions, linear-algebra), logical scalar
-FLOPs with documented weights, elements read/written, temporary elements,
-peak live elements (phase-resolved; state counted during the scan),
-state elements, steps, per-step logical FLOPs, dependency depth per section
-(critical-path proxy). Nothing here claims hardware time.
+- static dense tensors only; no symbolic dimensions or ragged values;
+- no dynamic gather, scatter, segment reduction, or index dtype;
+- no scan-output materialization, early exit, or convergence termination;
+- no f16/bf16, casts, mixed-precision accumulation, complex values, or `Erf`;
+- no formal equivalence proof: bounded differential/metamorphic tests are
+  evidence only;
+- the generator is a controlled foundation, not an optimizer guaranteed to
+  discover large attention algorithms in this phase.
 
-`range.rs`: conservative, intentionally incomplete analysis of known
-constants, sign classes (non-negative / positive / non-positive / negative /
-unknown), and finiteness possibilities, propagated through a documented
-operator subset. It enables earlier rejection and safer generation; it is
-labelled heuristic and never presented as proof.
-
-## 11. Search: grammar, mutation, crossover, selection
-
-- `Grammar` (serialisable): enabled op classes, per-class budgets
-  ("max 2 Exp"), node-count bounds per section, depth cap, state/item
-  signatures, steps, broadcast toggle. `GrammarProfile` presets:
-  `ScalarArithmetic`, `StableReduction`, `OnlineRecurrence`, `LinearAlgebra`,
-  `AttentionResearch`, `GeneralScientific`. Profiles configure the generator;
-  they never bypass the verifier.
-- Generation is valid-by-construction: typed value pools, budget accounting,
-  deterministic candidate enumeration, seeded SplitMix64 draws, defensive
-  re-verification.
-- Mutation families (verified, kind-tagged): replace-operator
-  (type-compatible), rewire-source (type-compatible), perturb-constant,
-  insert-unary, insert-binary, delete-node, mutate-outputs,
-  mutate-reduction-axis.
-- Crossover: canonical prune both parents; splice type-compatible subgraphs
-  into the finalize section; join matching outputs via a deterministic
-  type-compatible elementwise choice; fallback keeps a parent unchanged.
-  Offspring always re-verified.
-- Selection: Pareto fronts over explicit objective vector (loss, failed cases,
-  flops, expensive-op counts, nodes, peak-live, state elements, depth), then
-  lexicographic, then canonical bytes, then index — mirroring the proven V1
-  total order. Counterexamples: bounded per-report storage (first failing
-  cases with ids, absolute/relative errors, first differing elements).
-
-## 12. Deliberately deferred (with reasons)
-
-- Symbolic dims, argmax/argmin, gather/scatter/segment ops, integer/index
-  dtypes: require a principled index dtype story first; fake encodings would
-  undermine the verifier.
-- `Erf`: no std implementation; a custom approximation would bake hidden
-  numerics into the IR. Deferred with a documented plan.
-- Autodiff: designed-for (pure SSA, typed, closed sections) but not implemented
-  in this phase; see §13.
-- Lowering backends: boundary defined (semantic IR → passes → execution plan);
-  no backend shipped.
-- E-graphs: the rewrite set is small and confluent-by-budget; a fixed-point
-  pipeline suffices. Revisit if rewrite count grows past ~30 rules.
-
-## 13. Differentiation outlook
-
-Forward-mode AD is straightforward over this IR (every op needs a derivative
-rule + broadcasting alignment); reverse-mode needs a tape = the step/init/
-finalize sections already are tapes. Planned as a `differentiate()` pass
-producing a new `ResearchProgram`, keeping semantic identity untouched.
-
-## 14. Lowering boundary
-
-Semantic IR (this crate) → optimization IR (post-canonicalization view) →
-execution/lowering plan (future: scalar Rust, SIMD, GPU, WASM). Backends must
-consume verified programs and must never feed back into canonical identity.
-No vendor-specific code is part of IR semantics.
-
-## 15. Compatibility strategy
-
-V1 untouched and byte-stable. `compat::from_v1` lifts a V1 `TensorProgram`
-into a V2 straight-line program (Scale → Mul·Const); round-trip execution
-equality is tested. New experiments target V2 exclusively.
+These constraints keep V2 a research IR rather than an unrestricted compiler
+or programming language.

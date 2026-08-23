@@ -8,6 +8,7 @@ use super::interpret::{
 use super::ir::{
     AxisOp, Bin, Narrow, Op, Permute, Reduce, Ref, ResearchProgram, Section, ShapeTo, Ter, Un,
 };
+use super::semantics::NumericalSemantics;
 use super::types::{DType, ScalarValue, ValueType};
 use super::verify::{ProgramError, SectionKind, VerificationLimits, verify_program};
 
@@ -75,6 +76,7 @@ fn online_softmax_step() -> (Section, Vec<usize>) {
 fn verifies_scalar_recurrence_with_two_state_components() {
     let (step, next_state) = online_softmax_step();
     let program = ResearchProgram {
+        semantics: NumericalSemantics::StrictIeee,
         inputs: vec![],
         items: vec![ValueType::scalar(DType::F64)],
         state: vec![ValueType::scalar(DType::F64); 2],
@@ -144,6 +146,7 @@ fn rejects_item_reference_outside_step_section() {
 #[test]
 fn rejects_input_reference_in_step_section() {
     let program = ResearchProgram {
+        semantics: NumericalSemantics::StrictIeee,
         inputs: vec![ValueType::scalar(DType::F64)],
         items: vec![ValueType::scalar(DType::F64)],
         state: vec![ValueType::scalar(DType::F64)],
@@ -167,6 +170,7 @@ fn rejects_input_reference_in_step_section() {
 #[test]
 fn rejects_state_final_reference_in_init_section() {
     let program = ResearchProgram {
+        semantics: NumericalSemantics::StrictIeee,
         inputs: vec![],
         items: vec![ValueType::scalar(DType::F32)],
         state: vec![ValueType::scalar(DType::F32)],
@@ -208,6 +212,7 @@ fn rejects_input_out_of_bounds() {
 #[test]
 fn rejects_item_out_of_bounds() {
     let program = ResearchProgram {
+        semantics: NumericalSemantics::StrictIeee,
         inputs: vec![],
         items: vec![ValueType::scalar(DType::F64)],
         state: vec![ValueType::scalar(DType::F64)],
@@ -517,6 +522,7 @@ fn rejects_steps_without_state_and_state_without_steps() {
 #[test]
 fn rejects_init_or_next_state_count_mismatch() {
     let build = || ResearchProgram {
+        semantics: NumericalSemantics::StrictIeee,
         inputs: vec![],
         items: vec![ValueType::scalar(DType::F64)],
         state: vec![ValueType::scalar(DType::F64); 2],
@@ -551,6 +557,7 @@ fn rejects_init_or_next_state_count_mismatch() {
 #[test]
 fn rejects_state_binding_type_mismatch() {
     let program = ResearchProgram {
+        semantics: NumericalSemantics::StrictIeee,
         inputs: vec![],
         items: vec![ValueType::scalar(DType::F64)],
         state: vec![ValueType::scalar(DType::F64)],
@@ -695,6 +702,23 @@ fn enforces_tensor_and_total_element_budgets() {
     );
     assert!(matches!(
         expect_error(&single, big),
+        ProgramError::SignatureTensorTooLarge {
+            elements: 100,
+            maximum: 50,
+            ..
+        }
+    ));
+
+    let produced = ResearchProgram::expression(
+        vec![ValueType::scalar(DType::F32)],
+        Section::new(vec![Op::BroadcastTo(ShapeTo {
+            src: Ref::Input(0),
+            shape: vec![100],
+        })]),
+        vec![0],
+    );
+    assert!(matches!(
+        expect_error(&produced, big),
         ProgramError::TensorTooLarge {
             elements: 100,
             maximum: 50,
@@ -803,6 +827,7 @@ fn interprets_masked_select_with_boolean_logic() {
 fn executes_online_softmax_scan_with_exact_oracle() {
     let (step, next_state) = online_softmax_step();
     let program = ResearchProgram {
+        semantics: NumericalSemantics::StrictIeee,
         inputs: vec![],
         items: vec![ValueType::scalar(DType::F64)],
         state: vec![ValueType::scalar(DType::F64); 2],
@@ -862,6 +887,7 @@ fn executes_online_softmax_scan_with_exact_oracle() {
 fn dead_sections_are_not_executed() {
     // A dead Exp that would overflow must never run under liveness.
     let program = ResearchProgram {
+        semantics: NumericalSemantics::StrictIeee,
         inputs: vec![],
         items: vec![ValueType::scalar(DType::F64)],
         state: vec![ValueType::scalar(DType::F64)],
@@ -1222,6 +1248,7 @@ fn rejects_wrong_arity_and_types() {
 
     // Item arity: two steps, one item slot each => exactly 2 item tensors.
     let scan = ResearchProgram {
+        semantics: NumericalSemantics::StrictIeee,
         inputs: vec![],
         items: vec![ValueType::scalar(DType::F64)],
         state: vec![ValueType::scalar(DType::F64)],
@@ -1332,4 +1359,350 @@ fn v1_programs_lift_to_bit_identical_v2_execution() {
     {
         assert_eq!(a.to_bits(), (*b as f32).to_bits());
     }
+}
+
+// ---------------------------------------------------------------------------
+// Hardened trust-boundary and resource-budget regressions
+// ---------------------------------------------------------------------------
+
+#[test]
+fn init_section_locals_are_legal_and_type_checked() {
+    let scalar = ValueType::scalar(DType::F64);
+    let program = ResearchProgram {
+        semantics: NumericalSemantics::StrictIeee,
+        inputs: vec![],
+        items: vec![],
+        state: vec![scalar],
+        steps: 1,
+        init: Section::new(vec![
+            Op::Const(ScalarValue::F64(-2.0)),
+            Op::Abs(Un::new(Ref::Local(0))),
+        ]),
+        init_state: vec![1],
+        step: Section::new(vec![Op::Abs(Un::new(Ref::StatePrev(0)))]),
+        next_state: vec![0],
+        finalize: Section::new(vec![Op::Abs(Un::new(Ref::StateFinal(0)))]),
+        outputs: vec![0],
+    };
+    let verified = verify_program(&program, default_limits()).unwrap();
+    assert_eq!(verified.init_types[1], ValueType::scalar(DType::F64));
+}
+
+#[test]
+fn signature_count_rank_and_resident_byte_budgets_are_enforced() {
+    let two_inputs = ResearchProgram::expression(
+        vec![f64_type(&[]), f64_type(&[])],
+        Section::new(vec![Op::Add(Bin::new(Ref::Input(0), Ref::Input(1)))]),
+        vec![0],
+    );
+    let limits = VerificationLimits {
+        max_inputs: 1,
+        ..default_limits()
+    };
+    assert!(matches!(
+        verify_program(&two_inputs, limits),
+        Err(ProgramError::TooManyInputs { .. })
+    ));
+
+    let excessive_rank = ResearchProgram::expression(
+        vec![f64_type(&[1; 9])],
+        Section::new(vec![Op::Abs(Un::new(Ref::Input(0)))]),
+        vec![0],
+    );
+    assert!(matches!(
+        verify_program(&excessive_rank, default_limits()),
+        Err(ProgramError::SignatureRankLimitExceeded { .. })
+    ));
+
+    let resident = ResearchProgram::expression(
+        vec![f64_type(&[4])],
+        Section::new(vec![Op::Abs(Un::new(Ref::Input(0)))]),
+        vec![0],
+    );
+    let limits = VerificationLimits {
+        max_temporary_bytes: 95,
+        ..default_limits()
+    };
+    assert_eq!(
+        verify_program(&resident, limits),
+        Err(ProgramError::TemporaryBytesExceeded {
+            bytes: 96,
+            maximum: 95,
+        })
+    );
+}
+
+#[test]
+fn zero_element_shapes_cannot_hide_stride_overflow() {
+    let shape = vec![0, usize::MAX, usize::MAX];
+    let program = ResearchProgram::expression(
+        vec![ValueType::new(DType::F64, shape.clone())],
+        Section::new(vec![Op::Abs(Un::new(Ref::Input(0)))]),
+        vec![0],
+    );
+    assert_eq!(
+        verify_program(&program, default_limits()),
+        Err(ProgramError::SignatureStrideOverflow {
+            kind: super::verify::SignatureKind::Input,
+            index: 0,
+            shape,
+        })
+    );
+}
+
+#[test]
+fn complete_materialized_item_sequence_is_bounded() {
+    let program = super::reference::online_softmax_recurrence(3);
+    let limits = VerificationLimits {
+        max_stream_input_elements: 2,
+        ..default_limits()
+    };
+    assert_eq!(
+        verify_program(&program, limits),
+        Err(ProgramError::StreamInputElementsExceeded {
+            elements: 3,
+            maximum: 2,
+        })
+    );
+}
+
+#[test]
+fn finite_only_rejects_infinite_constants_at_verification() {
+    let program = ResearchProgram::expression(
+        vec![],
+        Section::new(vec![Op::Const(ScalarValue::F64(f64::NEG_INFINITY))]),
+        vec![0],
+    )
+    .with_semantics(NumericalSemantics::FiniteOnly);
+    assert_eq!(
+        verify_program(&program, default_limits()),
+        Err(ProgramError::NonFiniteConstantInFiniteOnly {
+            section: SectionKind::Finalize,
+            node: 0,
+        })
+    );
+}
+
+#[test]
+fn externally_constructed_tensor_payloads_cannot_bypass_layout_validation() {
+    let bool_program = ResearchProgram::expression(
+        vec![ValueType::scalar(DType::Bool)],
+        Section::new(vec![Op::Not(Un::new(Ref::Input(0)))]),
+        vec![0],
+    );
+    let invalid_bool = ValueTensor {
+        dtype: DType::Bool,
+        shape: vec![],
+        data: vec![2.0],
+    };
+    assert!(matches!(
+        execute_program(
+            &bool_program,
+            &[invalid_bool],
+            &[],
+            ExecutionPolicy::default(),
+            default_limits(),
+        ),
+        Err(ExecutionError::InvalidInputLayout { input: 0, .. })
+    ));
+
+    let vector_program = ResearchProgram::expression(
+        vec![f64_type(&[2])],
+        Section::new(vec![Op::Abs(Un::new(Ref::Input(0)))]),
+        vec![0],
+    );
+    let wrong_length = ValueTensor {
+        dtype: DType::F64,
+        shape: vec![2],
+        data: vec![1.0],
+    };
+    assert!(matches!(
+        execute_program(
+            &vector_program,
+            &[wrong_length],
+            &[],
+            ExecutionPolicy::default(),
+            default_limits(),
+        ),
+        Err(ExecutionError::InvalidInputLayout { input: 0, .. })
+    ));
+
+    let f32_program = ResearchProgram::expression(
+        vec![f32_type(&[])],
+        Section::new(vec![Op::Abs(Un::new(Ref::Input(0)))]),
+        vec![0],
+    );
+    let not_binary32 = ValueTensor {
+        dtype: DType::F32,
+        shape: vec![],
+        data: vec![0.1f64],
+    };
+    assert!(matches!(
+        execute_program(
+            &f32_program,
+            &[not_binary32],
+            &[],
+            ExecutionPolicy::default(),
+            default_limits(),
+        ),
+        Err(ExecutionError::InvalidInputLayout { input: 0, .. })
+    ));
+}
+
+#[test]
+fn reject_non_finite_policy_stops_at_the_first_overflowing_intermediate() {
+    let program = ResearchProgram::expression(
+        vec![f64_type(&[])],
+        Section::new(vec![
+            Op::Exp(Un::new(Ref::Input(0))),
+            Op::Abs(Un::new(Ref::Local(0))),
+        ]),
+        vec![1],
+    );
+    assert_eq!(
+        execute_program(
+            &program,
+            &[ValueTensor::scalar_f64(1000.0)],
+            &[],
+            ExecutionPolicy {
+                floats: FloatPolicy::RejectNonFinite,
+            },
+            default_limits(),
+        ),
+        Err(ExecutionError::NonFiniteResult {
+            section: SectionKind::Finalize,
+            node: 0,
+            element: 0,
+        })
+    );
+}
+
+#[test]
+fn fused_multiply_add_is_observably_distinct_from_mul_then_add() {
+    let a = 1.000_000_000_000_000_2f64;
+    let b = 1.000_000_000_000_000_2f64;
+    let c = -1.000_000_000_000_000_4f64;
+    let program = ResearchProgram::expression(
+        vec![],
+        Section::new(vec![
+            Op::Const(ScalarValue::F64(a)),
+            Op::Const(ScalarValue::F64(b)),
+            Op::Const(ScalarValue::F64(c)),
+            Op::MulAdd(Ter::new(Ref::Local(0), Ref::Local(1), Ref::Local(2))),
+            Op::Mul(Bin::new(Ref::Local(0), Ref::Local(1))),
+            Op::Add(Bin::new(Ref::Local(4), Ref::Local(2))),
+        ]),
+        vec![3, 5],
+    );
+    let result = execute_program(
+        &program,
+        &[],
+        &[],
+        ExecutionPolicy::default(),
+        default_limits(),
+    )
+    .unwrap();
+    assert_eq!(
+        result.outputs[0].data[0].to_bits(),
+        a.mul_add(b, c).to_bits()
+    );
+    assert_eq!(result.outputs[1].data[0].to_bits(), (a * b + c).to_bits());
+    assert_ne!(
+        result.outputs[0].data[0].to_bits(),
+        result.outputs[1].data[0].to_bits()
+    );
+}
+
+#[test]
+fn nan_infinity_and_signed_zero_minmax_comparisons_match_native_rust() {
+    let program = ResearchProgram::expression(
+        vec![f64_type(&[]), f64_type(&[])],
+        Section::new(vec![
+            Op::Min(Bin::new(Ref::Input(0), Ref::Input(1))),
+            Op::Max(Bin::new(Ref::Input(0), Ref::Input(1))),
+            Op::Eq(Bin::new(Ref::Input(0), Ref::Input(1))),
+            Op::Ne(Bin::new(Ref::Input(0), Ref::Input(1))),
+            Op::Lt(Bin::new(Ref::Input(0), Ref::Input(1))),
+        ]),
+        vec![0, 1, 2, 3, 4],
+    );
+    for (left, right) in [
+        (f64::NAN, 1.0),
+        (0.0, -0.0),
+        (f64::INFINITY, f64::NEG_INFINITY),
+    ]
+    {
+        let result = execute_program(
+            &program,
+            &[
+                ValueTensor::scalar_f64(left),
+                ValueTensor::scalar_f64(right),
+            ],
+            &[],
+            ExecutionPolicy {
+                floats: FloatPolicy::AllowNonFinite,
+            },
+            default_limits(),
+        )
+        .unwrap();
+        assert_eq!(
+            result.outputs[0].data[0].to_bits(),
+            left.min(right).to_bits()
+        );
+        assert_eq!(
+            result.outputs[1].data[0].to_bits(),
+            left.max(right).to_bits()
+        );
+        assert_eq!(result.outputs[2].data[0] != 0.0, left == right);
+        assert_eq!(result.outputs[3].data[0] != 0.0, left != right);
+        assert_eq!(result.outputs[4].data[0] != 0.0, left < right);
+    }
+}
+
+#[test]
+fn empty_sum_and_product_use_explicit_identities() {
+    let program = ResearchProgram::expression(
+        vec![f64_type(&[0])],
+        Section::new(vec![
+            Op::ReduceSum(Reduce {
+                src: Ref::Input(0),
+                axis: None,
+            }),
+            Op::ReduceProd(Reduce {
+                src: Ref::Input(0),
+                axis: None,
+            }),
+        ]),
+        vec![0, 1],
+    );
+    let result = execute_program(
+        &program,
+        &[tensor_f64(&[], &[0])],
+        &[],
+        ExecutionPolicy::default(),
+        default_limits(),
+    )
+    .unwrap();
+    assert_eq!(result.outputs[0].data[0].to_bits(), 0.0f64.to_bits());
+    assert_eq!(result.outputs[1].data, vec![1.0]);
+}
+
+#[test]
+fn subnormal_values_are_not_normalized_by_the_ir() {
+    let subnormal = f64::MIN_POSITIVE / 2.0;
+    assert!(subnormal.is_subnormal());
+    let program = ResearchProgram::expression(
+        vec![f64_type(&[])],
+        Section::new(vec![Op::Abs(Un::new(Ref::Input(0)))]),
+        vec![0],
+    );
+    let result = execute_program(
+        &program,
+        &[ValueTensor::scalar_f64(-subnormal)],
+        &[],
+        ExecutionPolicy::default(),
+        default_limits(),
+    )
+    .unwrap();
+    assert_eq!(result.outputs[0].data[0].to_bits(), subnormal.to_bits());
 }

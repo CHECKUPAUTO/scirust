@@ -18,12 +18,17 @@
 use sha2::{Digest, Sha256};
 
 use super::ir::{
-    Bin, Narrow, Op, Permute, Reduce, Ref, ResearchProgram, Section, ShapeTo, Ter, Un,
+    Bin, IR_VERSION, Narrow, Op, Permute, Reduce, Ref, ResearchProgram, Section, ShapeTo, Ter, Un,
 };
 use super::types::ScalarValue;
 
 /// Version of the canonical program encoding. Bump on any encoding change.
-pub const CANONICAL_FORMAT_VERSION: u32 = 1;
+pub const CANONICAL_FORMAT_VERSION: u32 = 2;
+
+/// Version of the deterministic canonicalization/rewrite contract. Bump when
+/// rule meaning, ordering, or applicability changes, even if byte layout does
+/// not.
+pub const CANONICALIZATION_VERSION: u32 = 1;
 
 /// Domain-separation magic prefix.
 pub const CANONICAL_MAGIC: &[u8] = b"SCIRUST-RIR2\0";
@@ -33,6 +38,9 @@ pub fn canonical_bytes(program: &ResearchProgram) -> Vec<u8> {
     let mut encoder = Encoder::new();
     encoder.magic(CANONICAL_MAGIC);
     encoder.u32(CANONICAL_FORMAT_VERSION);
+    encoder.u32(IR_VERSION);
+    encoder.u32(CANONICALIZATION_VERSION);
+    encoder.u8(program.semantics.tag());
 
     encode_value_types(&mut encoder, &program.inputs);
     encode_value_types(&mut encoder, &program.items);
@@ -333,6 +341,7 @@ fn fnv1a_128(data: &[u8]) -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tensor::v2::NumericalSemantics;
     use crate::tensor::v2::ir::{Bin, Section};
     use crate::tensor::v2::types::{DType, ValueType};
 
@@ -386,12 +395,16 @@ mod tests {
     fn canonical_encoding_is_versioned_and_magic_prefixed() {
         let bytes = canonical_bytes(&sample_program());
         assert!(bytes.starts_with(CANONICAL_MAGIC));
-        let version = u32::from_le_bytes(
-            bytes[CANONICAL_MAGIC.len()..CANONICAL_MAGIC.len() + 4]
-                .try_into()
-                .unwrap(),
-        );
-        assert_eq!(version, CANONICAL_FORMAT_VERSION);
+        let offset = CANONICAL_MAGIC.len();
+        let read_u32 =
+            |start: usize| u32::from_le_bytes(bytes[start..start + 4].try_into().unwrap());
+        assert_eq!(read_u32(offset), CANONICAL_FORMAT_VERSION);
+        assert_eq!(read_u32(offset + 4), IR_VERSION);
+        assert_eq!(read_u32(offset + 8), CANONICALIZATION_VERSION);
+        assert_eq!(bytes[offset + 12], NumericalSemantics::StrictIeee.tag());
+
+        let finite = sample_program().with_semantics(NumericalSemantics::FiniteOnly);
+        assert_ne!(canonical_bytes(&sample_program()), canonical_bytes(&finite));
     }
 
     #[test]
