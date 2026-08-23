@@ -18,7 +18,8 @@ mod analysis;
 mod pass;
 mod rewrite;
 pub use analysis::{
-    AnalysisManager, AnalysisManagerError, CompilerAnalysis, UseCountAnalysis, UseCounts,
+    AnalysisManager, AnalysisManagerError, CompilerAnalysis, LinearLiveRange, LinearLiveness,
+    LinearLivenessAnalysis, UseCountAnalysis, UseCounts,
 };
 pub use pass::{
     CompilerPass, PassManager, PassManagerStats, PassResult, ScaleZeroCanonicalizationPass,
