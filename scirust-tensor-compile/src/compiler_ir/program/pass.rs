@@ -1,6 +1,7 @@
 use scirust_tensor_ir::Operation;
 
 use super::super::{operation::IrOperation, verify::verify_compiler_ir};
+use super::rewrite::{OperationRewrite, Rewriter};
 use super::{CompilerIr, CompilerIrError};
 
 /// Result of one compiler pass invocation.
@@ -74,6 +75,23 @@ impl PassManager {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct ScaleZeroRewrite;
+
+impl OperationRewrite for ScaleZeroRewrite {
+    fn name(&self) -> &'static str {
+        "scale-zero"
+    }
+
+    fn rewrite(&mut self, operation: &IrOperation) -> Option<Operation> {
+        matches!(
+            operation.operation(),
+            Operation::Scale { factor } if factor.as_f32() == Some(0.0)
+        )
+        .then_some(Operation::ZerosLike)
+    }
+}
+
 /// First compiler-IR canonicalization pass.
 ///
 /// `Scale(0)` and `ZerosLike` have the same unary structural contract. Rewriting
@@ -92,36 +110,11 @@ impl CompilerPass for ScaleZeroCanonicalizationPass {
     }
 
     fn run(&mut self, ir: &mut CompilerIr) -> Result<PassResult, CompilerIrError> {
-        let mut changed = false;
-
-        for index in 0..ir.operations.len()
-        {
-            let replacement = {
-                let operation = &ir.operations[index];
-                let should_rewrite = matches!(
-                    operation.operation(),
-                    Operation::Scale { factor } if factor.as_f32() == Some(0.0)
-                );
-
-                if !should_rewrite
-                {
-                    continue;
-                }
-
-                IrOperation::new(
-                    operation.id(),
-                    operation.canonical_node(),
-                    Operation::ZerosLike,
-                    operation.operands().to_vec(),
-                    operation.result(),
-                )
-            };
-
-            ir.operations[index] = replacement;
-            changed = true;
-        }
-
-        Ok(PassResult { changed })
+        let mut rewrite = ScaleZeroRewrite;
+        let stats = Rewriter::new(ir)?.apply(&mut rewrite)?;
+        Ok(PassResult {
+            changed: stats.changed(),
+        })
     }
 }
 
