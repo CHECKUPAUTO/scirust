@@ -15,6 +15,7 @@ mod graph;
 mod ids;
 mod operation;
 mod optimize;
+mod representation;
 mod shard;
 mod verify;
 mod vmap;
@@ -30,6 +31,9 @@ pub use ids::{ConstantId, NodeId};
 pub use operation::{Operation, Scalar};
 pub use optimize::{
     OptimizationConfig, OptimizationError, OptimizationStats, OptimizedGraph, optimize_graph,
+};
+pub use representation::{
+    PrimitiveRepresentation, RepresentationError, RepresentationId, RepresentationPlan,
 };
 pub use shard::{
     AxisShard, DeviceMesh, MeshAxis, PartitionSpec, RankShard, ShardError, ShardMapGraph,
