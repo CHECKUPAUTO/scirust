@@ -24,8 +24,7 @@ mod tests {
     use scirust_tensor_ir::{DType, Graph, Operation, Scalar, Shape, TensorType};
 
     use crate::{
-        CanonicalCompiler, CompilerIr, PassManager, PassManagerStats,
-        ScaleZeroCanonicalizationPass,
+        CanonicalCompiler, CompilerIr, PassManager, PassManagerStats, ScaleZeroCanonicalizationPass,
     };
 
     fn ty() -> TensorType {
