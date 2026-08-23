@@ -71,19 +71,20 @@ whole tensor to a scalar. `axis=Some(a)` removes axis `a`; keep-dim is false.
 
 - sum starts at positive zero;
 - product starts at positive one;
-- maximum starts at negative infinity and folds `max(acc, x)` through the
-  deterministic extrema kernels of section 2;
-- minimum starts at positive infinity and folds `min(acc, x)` likewise;
+- maximum and minimum seed their accumulator with the canonical quiet NaN
+  (never a synthetic ±Infinity) and fold `max(acc, x)` / `min(acc, x)` through
+  the deterministic extrema kernels of section 2;
 - mean performs the same ordered sum, then one native division by the reduced
   count.
 
 Because the extrema kernels are associative, commutative, and idempotent on
 their value domain, reduce-max/min results are independent of element
 encounter order: opposite-signed zeros resolve canonically (`+0` wins max,
-`-0` wins min) instead of depending on which came first. NaN elements defer to
-numeric operands; a reduction over only NaN values therefore keeps its
-±Infinity identity. Empty sum/product are defined by their identities. Empty
-max/min/mean are verifier errors.
+`-0` wins min), NaN elements defer to numeric ones, and an all-NaN domain —
+which is statically non-empty for extrema reductions — evaluates to the
+canonical quiet NaN rather than leaking a synthetic identity. Empty
+sum/product are defined by their identities. Empty max/min/mean are verifier
+errors.
 
 Dot and every matrix-like product iterate the shared dimension in ascending
 order. Each term is an unfused multiply followed by add at the declared dtype.
