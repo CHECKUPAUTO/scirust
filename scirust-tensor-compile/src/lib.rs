@@ -78,7 +78,7 @@
 //! * `Add`, `Sub`, `Mul`, `Div` — [`KernelFamily::ElementwiseBinary`];
 //! * `Relu`, `Exp`, `Log`, `Scale` — [`KernelFamily::ElementwiseUnary`];
 //! * `Reshape` — [`KernelFamily::ShapeCopy`];
-//! * `Transpose` — [`KernelFamily::Permute`] all operations preserve the lowered plan.
+//! * `Transpose` — [`KernelFamily::Permute`].
 //!
 //! `Input` and `Constant` never become kernels; they feed the external binding
 //! table ([`ExternalBindings`]) instead.
