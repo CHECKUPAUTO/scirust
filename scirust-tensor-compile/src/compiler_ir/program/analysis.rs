@@ -4,6 +4,9 @@ use core::fmt;
 use super::super::ids::IrValueId;
 use super::CompilerIr;
 
+mod liveness;
+pub use liveness::{LinearLiveRange, LinearLiveness, LinearLivenessAnalysis};
+
 /// One stateless analysis over immutable [`CompilerIr`].
 ///
 /// Analyses are keyed by their Rust type. Configured analyses with runtime
