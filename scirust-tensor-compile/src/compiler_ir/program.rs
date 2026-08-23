@@ -14,6 +14,11 @@ use super::{
     verify::verify_compiler_ir,
 };
 
+mod pass;
+pub use pass::{
+    CompilerPass, PassManager, PassManagerStats, PassResult, ScaleZeroCanonicalizationPass,
+};
+
 /// Identifier namespace whose deterministic `u32` space overflowed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
