@@ -12,28 +12,91 @@
 
 use sha2::{Digest, Sha256};
 
-use super::interpret::{ExecutionPolicy, ExecutionResult, ValueTensor, execute_program};
+use super::interpret::{
+    ExecutionPolicy, ExecutionResult, TensorDataError, ValueTensor, execute_program,
+};
 use super::ir::ResearchProgram;
-use super::types::ValueType;
+use super::types::{DType, ValueType};
 use super::verify::VerificationLimits;
 
 /// Maximum scan steps probed for recurrent programs (bounded evidence).
 pub const MAX_PROBED_STEPS: u32 = 4;
 
-/// Deterministic probe values cycled into generated tensors. They exercise
-/// sign, magnitude and fraction behaviour while staying finite so the default
-/// execution policy accepts them.
+/// Deterministic probe values cycled into generated float tensors. They
+/// exercise sign, magnitude and fraction behaviour while staying finite so
+/// the default execution policy accepts them. Every value is exactly
+/// representable in `binary32` too, so the same set serves `F32` probes.
 pub const PROBE_VALUES: &[f64] = &[1.0, -2.0, 0.5, 3.0, -0.25, 4.0];
 
-/// Build one deterministic probe tensor matching `value_type`.
+/// Deterministic, dtype-aware probe element selection.
+///
+/// Probes stay **finite**: behavioral signatures run under the default
+/// execution policy, so non-finite probe elements would reject almost every
+/// program and make signatures unobservable. Float probes therefore interleave
+/// the tame [`PROBE_VALUES`] with the *finite* adversarial set (signed zeros
+/// and extreme magnitudes); NaN/±∞ coverage belongs to the bounded
+/// equivalence grid and the adversarial sweeps, which run under explicit
+/// caller-chosen policies.
+///
+/// - `F64`: [`PROBE_VALUES`] interleaved with finite binary64 adversarials;
+/// - `F32`: same classes restricted to exactly-representable `binary32`
+///   values;
+/// - `Bool`: only exact `false`/`true` encodings (`0.0`/`1.0`), phase-shifted
+///   by the salt — arbitrary float probe values are illegal Boolean payloads.
+///
+/// Future dtype extensions (e.g. an index type) must add their own arm here
+/// with bounded valid/adversarial probes rather than reusing float values.
 #[must_use]
-pub fn probe_tensor(value_type: &ValueType, salt: usize) -> ValueTensor {
-    let elements = value_type.checked_elements().unwrap_or(0);
+fn probe_element(dtype: DType, index: usize, salt: usize) -> f64 {
+    match dtype
+    {
+        DType::F64 =>
+        {
+            let adversarial = super::adversarial::finite_adversarial_scalars();
+            if (index + salt).is_multiple_of(2)
+            {
+                PROBE_VALUES[(index + salt) % PROBE_VALUES.len()]
+            }
+            else
+            {
+                adversarial[(index / 2 + salt) % adversarial.len()]
+            }
+        },
+        DType::F32 =>
+        {
+            let adversarial: Vec<f64> = super::adversarial::adversarial_scalars_f32()
+                .into_iter()
+                .filter(|value| value.is_finite())
+                .collect();
+            if (index + salt).is_multiple_of(2)
+            {
+                PROBE_VALUES[(index + salt) % PROBE_VALUES.len()]
+            }
+            else
+            {
+                adversarial[(index / 2 + salt) % adversarial.len()]
+            }
+        },
+        DType::Bool => ((index + salt) % 2) as f64,
+    }
+}
+
+/// Build one deterministic probe tensor matching `value_type`.
+///
+/// Fallible by design: whether a probe is well-formed depends on the
+/// externally declared `ValueType`, so construction returns a structured
+/// error instead of panicking on a false "well-formed by construction"
+/// assumption.
+pub fn probe_tensor(value_type: &ValueType, salt: usize) -> Result<ValueTensor, TensorDataError> {
+    let elements = value_type
+        .checked_elements()
+        .ok_or_else(|| TensorDataError::ShapeOverflow {
+            shape: value_type.shape.clone(),
+        })?;
     let data = (0..elements)
-        .map(|index| PROBE_VALUES[(index + salt) % PROBE_VALUES.len()])
+        .map(|index| probe_element(value_type.dtype, index, salt))
         .collect();
     ValueTensor::new(value_type.dtype, value_type.shape.clone(), data)
-        .expect("probe tensors are well-formed by construction")
 }
 
 /// Execute a program on the deterministic probe dataset.
@@ -50,8 +113,8 @@ pub fn probe_execution(
         .inputs
         .iter()
         .enumerate()
-        .map(|(index, value_type)| probe_tensor(value_type, index))
-        .collect();
+        .map(|(index, value_type)| probe_tensor(value_type, index).ok())
+        .collect::<Option<Vec<_>>>()?;
     let items_per_step = program.items.len();
     let steps = (program.steps).min(MAX_PROBED_STEPS);
     let mut items = Vec::new();
@@ -62,10 +125,21 @@ pub fn probe_execution(
         {
             for (slot, value_type) in program.items.iter().enumerate()
             {
-                items.push(probe_tensor(value_type, step as usize + slot));
+                // A missing item probe means the signature itself is unprovable.
+                items.push(probe_tensor(value_type, step as usize + slot).ok()?);
             }
         }
     }
+    execute_probed(program, inputs, items, steps, limits)
+}
+
+fn execute_probed(
+    program: &ResearchProgram,
+    inputs: Vec<ValueTensor>,
+    items: Vec<ValueTensor>,
+    steps: u32,
+    limits: VerificationLimits,
+) -> Option<ExecutionResult> {
     // A program whose declared steps exceed the probe budget still needs a
     // consistent stream: verify against the *probed* shape first.
     let mut probed = program.clone();
@@ -273,11 +347,93 @@ mod tests {
     #[test]
     fn probe_tensors_are_deterministic_and_finite() {
         let value_type = ValueType::new(DType::F64, vec![4]);
-        let left = probe_tensor(&value_type, 0);
-        let right = probe_tensor(&value_type, 0);
+        let left = probe_tensor(&value_type, 0).unwrap();
+        let right = probe_tensor(&value_type, 0).unwrap();
         assert_eq!(left, right);
         assert!(left.data.iter().all(|value| value.is_finite()));
-        let shifted = probe_tensor(&value_type, 1);
+        let shifted = probe_tensor(&value_type, 1).unwrap();
         assert_ne!(left.data, shifted.data);
+    }
+
+    /// Regression: Boolean probes used to reuse generic float values
+    /// (`-2.0`, `0.5`, …), which are illegal Boolean payload encodings and
+    /// made construction panic behind an "well-formed by construction"
+    /// expect. Probes must be dtype-aware and fallible instead.
+    #[test]
+    fn bool_probes_use_only_exact_boolean_encodings() {
+        let value_type = ValueType::new(DType::Bool, vec![7]);
+        for salt in 0..16
+        {
+            let tensor =
+                probe_tensor(&value_type, salt).expect("bool probes must always construct");
+            assert_eq!(tensor.dtype, DType::Bool);
+            for (index, &value) in tensor.data.iter().enumerate()
+            {
+                assert!(
+                    value.to_bits() == 0.0f64.to_bits() || value.to_bits() == 1.0f64.to_bits(),
+                    "element {index} of bool probe {salt} is not an exact boolean encoding"
+                );
+            }
+        }
+        // Both phases occur deterministically.
+        assert_ne!(
+            probe_tensor(&value_type, 0).unwrap().data,
+            probe_tensor(&value_type, 1).unwrap().data
+        );
+    }
+
+    /// `F32` probes must stay exactly representable in binary32: feeding
+    /// binary64-only extremes would silently turn F32 probing into F64
+    /// probing (or reject construction).
+    #[test]
+    fn f32_probes_are_exactly_representable_in_binary32() {
+        let value_type = ValueType::new(DType::F32, vec![64]);
+        for salt in 0..32
+        {
+            let tensor = probe_tensor(&value_type, salt).expect("f32 probes must always construct");
+            for &value in &tensor.data
+            {
+                assert_eq!(
+                    (value as f32) as f64,
+                    value,
+                    "probe {salt} leaked an f64-only value"
+                );
+            }
+        }
+    }
+
+    /// `F64` probes cover the finite adversarial classes (signed zeros,
+    /// extreme magnitudes) while staying executable under the default policy;
+    /// non-finite coverage is the equivalence grid's job.
+    #[test]
+    fn f64_probes_cover_finite_adversarial_classes() {
+        let value_type = ValueType::new(DType::F64, vec![128]);
+        let mut saw_signed_zero = false;
+        let mut saw_subnormal_magnitude = false;
+        let mut saw_huge_magnitude = false;
+        for salt in 0..8
+        {
+            for &value in &probe_tensor(&value_type, salt).unwrap().data
+            {
+                assert!(value.is_finite(), "behavioral probes must stay finite");
+                saw_signed_zero |= value == 0.0 && value.is_sign_negative();
+                saw_subnormal_magnitude |= value != 0.0 && value.abs() < 1e-300;
+                saw_huge_magnitude |= value.abs() > 1e300;
+            }
+        }
+        assert!(saw_signed_zero);
+        assert!(saw_subnormal_magnitude);
+        assert!(saw_huge_magnitude);
+    }
+
+    /// A signature whose element count overflows `usize` yields a structured
+    /// error, never a silent empty tensor or a panic.
+    #[test]
+    fn unbuildable_probe_signatures_report_a_structured_error() {
+        let huge = ValueType::new(DType::F64, vec![usize::MAX, 2]);
+        assert!(matches!(
+            probe_tensor(&huge, 0),
+            Err(TensorDataError::ShapeOverflow { .. })
+        ));
     }
 }

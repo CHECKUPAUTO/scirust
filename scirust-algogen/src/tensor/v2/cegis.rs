@@ -177,14 +177,14 @@ fn oracle_case(
         .inputs
         .iter()
         .enumerate()
-        .map(|(index, value_type)| probe_tensor(value_type, index + salt))
-        .collect();
+        .map(|(index, value_type)| probe_tensor(value_type, index + salt).ok())
+        .collect::<Option<Vec<_>>>()?;
     let mut items = Vec::new();
     for step in 0..steps
     {
         for (slot, value_type) in target.items.iter().enumerate()
         {
-            items.push(probe_tensor(value_type, step as usize * 5 + slot + salt));
+            items.push(probe_tensor(value_type, step as usize * 5 + slot + salt).ok()?);
         }
     }
     let result = execute_program(target, &inputs, &items, policy, limits).ok()?;

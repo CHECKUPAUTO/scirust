@@ -14,6 +14,11 @@ use super::verify::VerificationLimits;
 
 /// The canonical adversarial scalar set: signed zeros, quiet NaN, both
 /// infinities, unit/fractional magnitudes and the binary64 range extremes.
+///
+/// Every element is exact `binary64`. For `f32` probes use
+/// [`adversarial_scalars_f32`] instead: several `binary64` extremes are not
+/// representable in `binary32`, and feeding them to an `F32` tensor would
+/// silently turn an `f32` experiment into an `f64` one (or reject it).
 #[must_use]
 pub fn adversarial_scalars() -> Vec<f64> {
     vec![
@@ -30,6 +35,30 @@ pub fn adversarial_scalars() -> Vec<f64> {
         -(f64::MIN_POSITIVE),
         f64::MAX,
         f64::MIN,
+    ]
+}
+
+/// The `binary32` counterpart of [`adversarial_scalars`]: same coverage
+/// classes (signed zeros, NaN, ±∞, unit/fractional magnitudes, smallest
+/// positive normal, range extremes) but every element is exactly
+/// representable as `f32`, so it survives the lossless-carrier check of
+/// `ValueTensor::new(DType::F32, …)` unchanged.
+#[must_use]
+pub fn adversarial_scalars_f32() -> Vec<f64> {
+    vec![
+        0.0,
+        -0.0,
+        f32::NAN as f64,
+        f32::INFINITY as f64,
+        f32::NEG_INFINITY as f64,
+        1.0,
+        -1.0,
+        0.5,
+        -2.5,
+        f32::MIN_POSITIVE as f64,
+        -(f32::MIN_POSITIVE as f64),
+        f32::MAX as f64,
+        f32::MIN as f64,
     ]
 }
 
@@ -127,20 +156,75 @@ fn run_pair(
     .map(|result| result.outputs[0].data[0].to_bits())
 }
 
+/// Observable outcome of one operand-order execution.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SwapOutcome {
+    /// The execution succeeded; the first output element's exact bits.
+    Value(u64),
+    /// The execution was rejected under the policy (non-finite input,
+    /// non-finite intermediate, budget…). Never encoded as a magic bit value.
+    Rejected,
+}
+
+/// What the forward/swapped pair of observations establishes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SwapRelation {
+    /// Both executions succeeded and produced identical bits: positive
+    /// evidence of order invariance *on this case*.
+    BitIdentical,
+    /// Both executed but the output bits differ: order dependence.
+    ValueDivergence,
+    /// Exactly one side executed: outcome asymmetry is itself order
+    /// dependence, never invariance.
+    OutcomeAsymmetric,
+    /// Both sides rejected. This is *symmetric rejection* — recorded as its
+    /// own class because it is NOT positive value-level evidence of
+    /// invariance.
+    SymmetricRejection,
+}
+
 /// One operand-order observation for a binary operator.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SwapObservation {
     pub left: f64,
     pub right: f64,
-    pub forward_bits: u64,
-    pub swapped_bits: u64,
-    pub invariant: bool,
+    pub forward: SwapOutcome,
+    pub swapped: SwapOutcome,
 }
 
-/// Sweep `op` over `pairs` and report whether swapping operands changes any
-/// observable output bit. For `Min`/`Max` every case must be invariant by
-/// contract; for `Add`/`Mul`/`Dot` invariance is only promised on the finite
-/// domain, so pass [`only_finite_pairs`] there.
+impl SwapObservation {
+    /// Classify this observation honestly: only two successful executions
+    /// with identical bits count as (bounded) invariance evidence.
+    #[must_use]
+    pub fn relation(&self) -> SwapRelation {
+        match (self.forward, self.swapped)
+        {
+            (SwapOutcome::Value(forward_bits), SwapOutcome::Value(swapped_bits)) =>
+            {
+                if forward_bits == swapped_bits
+                {
+                    SwapRelation::BitIdentical
+                }
+                else
+                {
+                    SwapRelation::ValueDivergence
+                }
+            },
+            (SwapOutcome::Rejected, SwapOutcome::Rejected) => SwapRelation::SymmetricRejection,
+            (SwapOutcome::Value(_), SwapOutcome::Rejected)
+            | (SwapOutcome::Rejected, SwapOutcome::Value(_)) => SwapRelation::OutcomeAsymmetric,
+        }
+    }
+}
+
+/// Sweep `op` over `pairs` and report, per pair, what swapping operands
+/// changes about the observable outcome. For `Min`/`Max` every pair must be
+/// at least [`SwapRelation::BitIdentical`] by contract; for
+/// `Add`/`Mul`/`Dot` invariance is only promised on the finite domain, so
+/// pass [`only_finite_pairs`] there.
+///
+/// Rejections are preserved as first-class outcomes ([`SwapOutcome::Rejected`]);
+/// they are never folded into `invariant = true`.
 pub fn check_swap_invariance(
     op: BinaryOpKind,
     pairs: &[(f64, f64)],
@@ -154,28 +238,13 @@ pub fn check_swap_invariance(
     {
         // Both sides consume the SAME input order; only the operand
         // references inside the program are exchanged.
-        let (Some(forward_bits), Some(swapped_bits)) = (
-            run_pair(&forward, left, right, policy, limits),
-            run_pair(&swapped, left, right, policy, limits),
-        )
-        else
-        {
-            // A policy rejection on one side is itself order information.
-            observations.push(SwapObservation {
-                left,
-                right,
-                forward_bits: u64::MAX,
-                swapped_bits: u64::MAX,
-                invariant: true,
-            });
-            continue;
-        };
+        let forward_outcome = run_pair(&forward, left, right, policy, limits);
+        let swapped_outcome = run_pair(&swapped, left, right, policy, limits);
         observations.push(SwapObservation {
             left,
             right,
-            forward_bits,
-            swapped_bits,
-            invariant: forward_bits == swapped_bits,
+            forward: forward_outcome.map_or(SwapOutcome::Rejected, SwapOutcome::Value),
+            swapped: swapped_outcome.map_or(SwapOutcome::Rejected, SwapOutcome::Value),
         });
     }
     observations
@@ -225,10 +294,12 @@ mod tests {
             assert!(!observations.is_empty());
             for observation in &observations
             {
-                assert!(
-                    observation.invariant,
-                    "{op:?} not swap-invariant at ({:?},{:?})",
-                    observation.left, observation.right
+                assert_eq!(
+                    observation.relation(),
+                    SwapRelation::BitIdentical,
+                    "{op:?} not swap-invariant at ({:?},{:?}): {observation:?}",
+                    observation.left,
+                    observation.right
                 );
             }
         }
@@ -243,7 +314,44 @@ mod tests {
             VerificationLimits::default(),
         );
         assert_eq!(observations.len(), 1);
-        assert!(!observations[0].invariant);
+        assert_eq!(observations[0].relation(), SwapRelation::ValueDivergence);
+    }
+
+    /// Regression: a policy rejection on both sides used to be reported as
+    /// `invariant = true` via the `u64::MAX` sentinel. It must be recorded as
+    /// its own class — symmetric rejection is NOT invariance evidence.
+    #[test]
+    fn jointly_rejected_cases_are_symmetric_rejections_never_invariant() {
+        // NaN inputs are rejected outright by the default finite policy.
+        let observations = check_swap_invariance(
+            BinaryOpKind::Min,
+            &[(f64::NAN, f64::NAN)],
+            ExecutionPolicy::default(),
+            VerificationLimits::default(),
+        );
+        assert_eq!(observations.len(), 1);
+        assert_eq!(observations[0].relation(), SwapRelation::SymmetricRejection);
+    }
+
+    /// Outcome asymmetry must classify as order dependence, never as
+    /// invariance, whatever the underlying cause.
+    #[test]
+    fn asymmetric_outcomes_are_order_dependence() {
+        let forward_only = SwapObservation {
+            left: 1.0,
+            right: 2.0,
+            forward: SwapOutcome::Value(7),
+            swapped: SwapOutcome::Rejected,
+        };
+        let swapped_only = SwapObservation {
+            left: 1.0,
+            right: 2.0,
+            forward: SwapOutcome::Rejected,
+            swapped: SwapOutcome::Value(7),
+        };
+        assert_eq!(forward_only.relation(), SwapRelation::OutcomeAsymmetric);
+        assert_eq!(swapped_only.relation(), SwapRelation::OutcomeAsymmetric);
+        assert_ne!(forward_only.relation(), SwapRelation::BitIdentical);
     }
 
     #[test]
@@ -255,5 +363,33 @@ mod tests {
         assert_eq!(finite_adversarial_scalars().len(), scalars.len() - 3);
         assert_eq!(only_finite_pairs(&[(0.0, 1.0), (f64::NAN, 1.0)]).len(), 1);
         assert!(!admissible_constant(f64::NAN));
+    }
+
+    /// Every `f32`-class adversarial value must survive the exact-binary32
+    /// round trip, unlike several `binary64` extremes.
+    #[test]
+    fn f32_adversarial_set_is_exactly_representable() {
+        for &value in &adversarial_scalars_f32()
+        {
+            let round_trip = (value as f32) as f64;
+            let exact = if value.is_nan()
+            {
+                round_trip.is_nan()
+            }
+            else
+            {
+                round_trip.to_bits() == value.to_bits()
+            };
+            assert!(exact, "{value} is not exactly representable as f32");
+        }
+        // The binary64 set deliberately contains values that would fail that
+        // check — which is why the f32 set exists.
+        assert!(
+            !adversarial_scalars()
+                .iter()
+                .filter(|value| !value.is_nan())
+                .all(|&value| ((value as f32) as f64).to_bits() == value.to_bits())
+        );
+        assert_eq!(adversarial_scalars().len(), adversarial_scalars_f32().len());
     }
 }

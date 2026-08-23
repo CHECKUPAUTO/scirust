@@ -34,26 +34,11 @@ pub enum BoundedEquivalence {
     Incomparable { reason: String },
 }
 
-fn probe_tensor(value_type: &ValueType, salt: usize) -> ValueTensor {
-    let elements = value_type.checked_elements().unwrap_or(0);
-    // Interleave adversarial scalars with the tame probe pattern so both
-    // signed-zero/NaN behaviour and ordinary arithmetic are exercised.
-    let scalars = adversarial_scalars();
-    let data = (0..elements)
-        .map(|index| {
-            if (index + salt).is_multiple_of(2)
-            {
-                super::recognize::PROBE_VALUES
-                    [(index + salt) % super::recognize::PROBE_VALUES.len()]
-            }
-            else
-            {
-                scalars[(index / 2 + salt) % scalars.len()]
-            }
-        })
-        .collect();
-    ValueTensor::new(value_type.dtype, value_type.shape.clone(), data)
-        .expect("grid tensors are well-formed by construction")
+fn probe_tensor(value_type: &ValueType, salt: usize) -> Option<ValueTensor> {
+    // Dtype-aware and fallible by design; cases whose probes cannot be built
+    // are skipped here and accounted for explicitly by the bounded-evidence
+    // redesign.
+    super::recognize::probe_tensor(value_type, salt).ok()
 }
 
 /// Compare two programs over the deterministic bounded grid.
@@ -100,23 +85,28 @@ pub fn bounded_equivalence(
     let mut grids: Vec<Vec<ValueTensor>> = Vec::new();
     for salt in 0..6
     {
-        grids.push(
-            left.inputs
-                .iter()
-                .enumerate()
-                .map(|(index, value_type)| probe_tensor(value_type, index + salt))
-                .collect(),
-        );
+        let mut case = Vec::with_capacity(left.inputs.len());
+        let mut constructible = true;
+        for (index, value_type) in left.inputs.iter().enumerate()
+        {
+            match probe_tensor(value_type, index + salt)
+            {
+                Some(tensor) => case.push(tensor),
+                None => constructible = false,
+            }
+        }
+        if constructible
+        {
+            grids.push(case);
+        }
     }
     if left.inputs.len() == 1
     {
         for &value in &adversarial_scalars()
         {
             let value_type = &left.inputs[0];
-            if let Some(data_check) = value_type.checked_elements()
+            if let Some(elements) = value_type.checked_elements()
             {
-                let _ = data_check;
-                let elements = value_type.checked_elements().unwrap_or(0);
                 let data = vec![value; elements];
                 if let Ok(tensor) =
                     ValueTensor::new(value_type.dtype, value_type.shape.clone(), data)
@@ -133,7 +123,7 @@ pub fn bounded_equivalence(
     }
 
     // Recurrent programs need an item stream per case.
-    let build_items = |program: &ResearchProgram, salt: usize| -> Vec<ValueTensor> {
+    let build_items = |program: &ResearchProgram, salt: usize| -> Option<Vec<ValueTensor>> {
         let steps = program.steps.min(super::recognize::MAX_PROBED_STEPS);
         let mut items = Vec::new();
         for step in 0..steps
@@ -143,10 +133,10 @@ pub fn bounded_equivalence(
                 items.push(probe_tensor(
                     value_type,
                     step as usize * 7 + slot * 3 + salt,
-                ));
+                )?);
             }
         }
-        items
+        Some(items)
     };
 
     // Both sides must be executed with the same probed step count so streams
@@ -161,7 +151,11 @@ pub fn bounded_equivalence(
 
     for (case_index, inputs) in grids.iter().enumerate()
     {
-        let items = build_items(left, case_index);
+        let Some(items) = build_items(left, case_index)
+        else
+        {
+            continue;
+        };
         let left_run = execute_program(left, inputs, &items, policy, limits);
         let right_run = execute_program(right, inputs, &items, policy, limits);
         match (left_run, right_run)
