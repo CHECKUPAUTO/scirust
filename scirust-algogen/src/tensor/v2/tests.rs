@@ -2375,9 +2375,7 @@ fn overflowing_narrow_range_is_rejected_and_displayable() {
 
 #[test]
 fn cegis_refines_counterexamples_and_finds_the_sum_recurrence() {
-    use super::cegis::{CegisConfig, cedis_discover};
-    use super::evolve::MutationConfig;
-    let _ = MutationConfig::default();
+    use super::cegis::{CegisConfig, DiscoveryStatus, cegis_discover};
 
     // Reuse the honest sum-discovery setup: the target oracle is the
     // reference recurrence; its AST is never handed to the generator.
@@ -2426,17 +2424,34 @@ fn cegis_refines_counterexamples_and_finds_the_sum_recurrence() {
             execution_policy: ExecutionPolicy::default(),
         },
         max_rounds: 3,
+        seed_probes: 4,
+        fresh_probes_per_round: 4,
+        candidates_to_falsify: 2,
     };
 
-    let outcome = cedis_discover(&target, &config).expect("target must be executable");
+    let outcome = cegis_discover(&target, &config).expect("target must be executable");
     assert!(!outcome.rounds.is_empty());
     assert!(outcome.dataset.cases.len() >= outcome.rounds[0].dataset_cases);
     // Determinism of the whole loop:
-    let replay = cedis_discover(&target, &config).unwrap();
+    let replay = cegis_discover(&target, &config).unwrap();
     assert_eq!(outcome, replay);
     if let Some(found) = &outcome.discovered
     {
-        // Exact on every case of the final refined dataset.
+        // Survival status is conservative and matches the ledger.
+        assert_eq!(
+            outcome.status,
+            DiscoveryStatus::SurvivedFreshFalsification {
+                compared_probes: config.fresh_probes_per_round,
+                candidate_digest: super::canonical::program_digest(found),
+            },
+            "discovery must be reported as bounded survival, never as proof"
+        );
+        assert!(
+            outcome.falsifications.len() < config.max_rounds,
+            "each round falsifies at most one candidate"
+        );
+        // Exact on every case of the final refined dataset — including any
+        // counterexample that killed an earlier challenger.
         let fitness = evaluate_on_counterexamples(
             found,
             &outcome.dataset,
@@ -2444,5 +2459,15 @@ fn cegis_refines_counterexamples_and_finds_the_sum_recurrence() {
             VerificationLimits::default(),
         );
         assert!(fitness.correctness.exact);
+    }
+    else
+    {
+        assert!(
+            !matches!(
+                outcome.status,
+                DiscoveryStatus::SurvivedFreshFalsification { .. }
+            ),
+            "no discovered program may claim survival"
+        );
     }
 }
