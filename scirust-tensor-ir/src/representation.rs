@@ -10,12 +10,13 @@
 //! therefore impossible by construction, mirroring how the canonical
 //! [`Graph`] only permits inputs referring to previously created nodes.
 //!
-//! Dense storage remains the identity representation. The first composite
-//! family, [`PrimitiveRepresentation::Factorized`], defines a value by two
-//! contracted matrix factors and accounts storage as the exact sum of its
-//! components. Quantization, codebooks, packed/sub-bit payloads, sparse
-//! representations, cost models and backend-specific materialization remain
-//! intentionally out of scope.
+//! Dense storage remains the identity representation. The composite families
+//! are [`PrimitiveRepresentation::Factorized`] (two contracted matrix factors)
+//! and [`PrimitiveRepresentation::Quantized`] (discrete codes corrected by
+//! continuous scales). Storage is accounted as the exact sum of declared
+//! components. Codebook layouts, block geometry, packed/sub-bit payloads,
+//! sparse representations, cost models and backend-specific materialization
+//! remain intentionally out of scope.
 
 use alloc::vec::Vec;
 use core::fmt;
@@ -123,6 +124,21 @@ pub enum PrimitiveRepresentation {
         /// Right factor with shape `[r, n]`.
         right: RepresentationComponent,
     },
+    /// Affine quantization skeleton: discrete `codes` corrected by continuous
+    /// `scales`.
+    ///
+    /// The family contract constrains component dtypes only, and is enforced
+    /// once at declaration time: codes must be integer-valued (discrete
+    /// payload) and scales floating-point (continuous correction). Block
+    /// layouts, group sizes, zero-points and codebook geometry belong to
+    /// concrete schemes and stay out of scope; no shape relationship binds the
+    /// components to each other or to the logical tensor type.
+    Quantized {
+        /// Discrete code payload with an integer dtype.
+        codes: RepresentationComponent,
+        /// Continuous dequantization factors with a floating dtype.
+        scales: RepresentationComponent,
+    },
 }
 
 impl PrimitiveRepresentation {
@@ -136,12 +152,20 @@ impl PrimitiveRepresentation {
         Self::Factorized { left, right }
     }
 
+    /// Construct a quantized representation from codes and scales.
+    pub const fn quantized(
+        codes: RepresentationComponent,
+        scales: RepresentationComponent,
+    ) -> Self {
+        Self::Quantized { codes, scales }
+    }
+
     /// Return the dense storage dtype when this is a dense representation.
     pub const fn dense_dtype(&self) -> Option<DType> {
         match self
         {
             Self::Dense { storage_dtype } => Some(*storage_dtype),
-            Self::Factorized { .. } => None,
+            Self::Factorized { .. } | Self::Quantized { .. } => None,
         }
     }
 
@@ -152,16 +176,18 @@ impl PrimitiveRepresentation {
     /// named components so generic passes can audit declaration ordering
     /// without matching every variant.
     pub fn components(&self) -> impl Iterator<Item = &RepresentationComponent> {
-        let (head, tail): (
+        let (first, second, third): (
+            Option<&RepresentationComponent>,
             Option<&RepresentationComponent>,
             Option<&RepresentationComponent>,
         ) = match self
         {
-            Self::Dense { .. } => (None, None),
-            Self::Factorized { left, right } => (Some(left), Some(right)),
+            Self::Dense { .. } => (None, None, None),
+            Self::Factorized { left, right } => (Some(left), Some(right), None),
+            Self::Quantized { codes, scales } => (Some(codes), Some(scales), None),
         };
 
-        head.into_iter().chain(tail)
+        first.into_iter().chain(second).chain(third)
     }
 
     /// Validate that this physical representation can represent `logical`.
@@ -169,7 +195,9 @@ impl PrimitiveRepresentation {
     /// Dense storage is currently an identity representation: changing dtype
     /// would require an explicitly defined conversion/quantization family.
     /// Factorized storage is inherently converting, so only its contraction
-    /// structure is validated against the logical tensor type.
+    /// structure is validated against the logical tensor type. Quantized
+    /// storage carries no logical binding yet; its family contract is enforced
+    /// once at declaration time by [`PrimitiveRepresentation::validate_declaration`].
     fn validate_for(&self, logical: &TensorType) -> Result<(), RepresentationError> {
         match self
         {
@@ -204,6 +232,38 @@ impl PrimitiveRepresentation {
                     }),
                 }
             },
+            Self::Quantized { .. } => Ok(()),
+        }
+    }
+
+    /// Validate contracts internal to a declaration, independent of any
+    /// logical tensor binding.
+    ///
+    /// Runs once when a representation enters a plan so that invalid
+    /// declarations can never be interned. Structure that only makes sense
+    /// against a logical value (dense identity, factor contraction) stays in
+    /// [`PrimitiveRepresentation::validate_for`].
+    fn validate_declaration(&self) -> Result<(), RepresentationError> {
+        match self
+        {
+            Self::Dense { .. } | Self::Factorized { .. } => Ok(()),
+            Self::Quantized { codes, scales } =>
+            {
+                let codes_dtype = codes.tensor_type().dtype;
+                let scales_dtype = scales.tensor_type().dtype;
+
+                if !is_integer_dtype(codes_dtype) || !is_float_dtype(scales_dtype)
+                {
+                    Err(RepresentationError::QuantizedInvalidComponentDTypes {
+                        codes: codes_dtype,
+                        scales: scales_dtype,
+                    })
+                }
+                else
+                {
+                    Ok(())
+                }
+            },
         }
     }
 }
@@ -215,6 +275,28 @@ fn matrix_dims(shape: &Shape) -> Option<(usize, usize)> {
         [rows, columns] => Some((*rows, *columns)),
         _ => None,
     }
+}
+
+/// Whether `dtype` carries discrete integer values.
+///
+/// `Bool` is excluded: it is a logical flag, not a code value.
+fn is_integer_dtype(dtype: DType) -> bool {
+    matches!(
+        dtype,
+        DType::U8
+            | DType::I8
+            | DType::U16
+            | DType::I16
+            | DType::U32
+            | DType::I32
+            | DType::U64
+            | DType::I64
+    )
+}
+
+/// Whether `dtype` carries continuous floating-point values.
+fn is_float_dtype(dtype: DType) -> bool {
+    matches!(dtype, DType::F16 | DType::Bf16 | DType::F32 | DType::F64)
 }
 
 /// Exact bit count of dense scalar storage for `logical`.
@@ -281,6 +363,16 @@ pub enum RepresentationError {
         /// Logical tensor shape.
         logical: Shape,
     },
+    /// Quantized component dtypes violate the family contract.
+    ///
+    /// Codes must carry discrete integer values and scales continuous
+    /// floating-point values.
+    QuantizedInvalidComponentDTypes {
+        /// Dtype carried by the codes component.
+        codes: DType,
+        /// Dtype carried by the scales component.
+        scales: DType,
+    },
 }
 
 impl fmt::Display for RepresentationError {
@@ -323,6 +415,13 @@ impl fmt::Display for RepresentationError {
                 write!(
                     formatter,
                     "factorized shapes left {left:?} x right {right:?} do not compose into logical shape {logical:?}"
+                )
+            },
+            Self::QuantizedInvalidComponentDTypes { codes, scales } =>
+            {
+                write!(
+                    formatter,
+                    "quantized codes dtype {codes:?} must be integer-valued and scales dtype {scales:?} floating-point"
                 )
             },
         }
@@ -403,6 +502,8 @@ impl RepresentationPlan {
             physical.validate_for(dependency.tensor_type())?;
         }
 
+        primitive.validate_declaration()?;
+
         if let Some(index) = self
             .representations
             .iter()
@@ -466,6 +567,18 @@ impl RepresentationPlan {
                 left_bits
                     .get()
                     .checked_add(right_bits.get())
+                    .map(StorageBits::new)
+                    .ok_or(RepresentationError::StorageSizeOverflow)
+            },
+            PrimitiveRepresentation::Quantized { codes, scales } =>
+            {
+                let codes_bits = self.storage_bits(codes.representation(), codes.tensor_type())?;
+                let scales_bits =
+                    self.storage_bits(scales.representation(), scales.tensor_type())?;
+
+                codes_bits
+                    .get()
+                    .checked_add(scales_bits.get())
                     .map(StorageBits::new)
                     .ok_or(RepresentationError::StorageSizeOverflow)
             },
@@ -1113,6 +1226,181 @@ mod tests {
                 assert_eq!(right.representation(), dense_f32);
             },
             other => panic!("unexpected stored representation: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn quantized_declares_with_integer_codes_and_float_scales() {
+        let mut plan = empty_plan();
+        let dense_u8 = plan
+            .declare(PrimitiveRepresentation::dense(DType::U8))
+            .unwrap();
+        let dense_f32 = plan
+            .declare(PrimitiveRepresentation::dense(DType::F32))
+            .unwrap();
+
+        let codes = plan
+            .component(TensorType::new(DType::U8, Shape::new(vec![4, 2])), dense_u8)
+            .unwrap();
+        let scales = plan
+            .component(TensorType::new(DType::F32, Shape::new(vec![4])), dense_f32)
+            .unwrap();
+
+        let quantized = plan
+            .declare(PrimitiveRepresentation::quantized(
+                codes.clone(),
+                scales.clone(),
+            ))
+            .unwrap();
+
+        // Redeclaring an equal composite interns the existing identifier.
+        assert_eq!(quantized, RepresentationId::new(2));
+        assert_eq!(
+            plan.declare(PrimitiveRepresentation::quantized(codes, scales)),
+            Ok(quantized)
+        );
+
+        // Codes and scales keep their named roles, dtypes and references.
+        match plan.representation(quantized)
+        {
+            Some(PrimitiveRepresentation::Quantized { codes, scales }) =>
+            {
+                assert_eq!(codes.tensor_type().dtype, DType::U8);
+                assert_eq!(codes.representation(), dense_u8);
+                assert_eq!(scales.tensor_type().dtype, DType::F32);
+                assert_eq!(scales.representation(), dense_f32);
+            },
+            other => panic!("unexpected stored representation: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn quantized_storage_bits_sum_component_storage_exactly() {
+        let mut plan = empty_plan();
+        let dense_u8 = plan
+            .declare(PrimitiveRepresentation::dense(DType::U8))
+            .unwrap();
+        let dense_f32 = plan
+            .declare(PrimitiveRepresentation::dense(DType::F32))
+            .unwrap();
+
+        let codes = plan
+            .component(TensorType::new(DType::U8, Shape::new(vec![4, 2])), dense_u8)
+            .unwrap();
+        let scales = plan
+            .component(TensorType::new(DType::F32, Shape::new(vec![4])), dense_f32)
+            .unwrap();
+        let quantized = plan
+            .declare(PrimitiveRepresentation::quantized(codes, scales))
+            .unwrap();
+
+        // The parent dtype is irrelevant to a converting representation.
+        let logical = TensorType::new(DType::F32, Shape::new(vec![4, 2]));
+
+        // 4*2 code bytes * 8 bits + 4 scale words * 4 bytes * 8 bits.
+        assert_eq!(
+            plan.storage_bits(quantized, &logical),
+            Ok(StorageBits::new(64 + 128))
+        );
+    }
+
+    #[test]
+    fn quantized_declaration_rejects_invalid_component_dtypes_atomically() {
+        let mut plan = empty_plan();
+        let dense_bool = plan
+            .declare(PrimitiveRepresentation::dense(DType::Bool))
+            .unwrap();
+        let dense_f16 = plan
+            .declare(PrimitiveRepresentation::dense(DType::F16))
+            .unwrap();
+        let dense_u8 = plan
+            .declare(PrimitiveRepresentation::dense(DType::U8))
+            .unwrap();
+        let dense_f32 = plan
+            .declare(PrimitiveRepresentation::dense(DType::F32))
+            .unwrap();
+
+        let component_of = |plan: &RepresentationPlan, dtype: DType, shape: &[usize], id| {
+            plan.component(TensorType::new(dtype, Shape::new(shape.to_vec())), id)
+                .unwrap()
+        };
+
+        // Non-integer codes are rejected before interning.
+        assert_eq!(
+            plan.declare(PrimitiveRepresentation::quantized(
+                component_of(&plan, DType::F16, &[4], dense_f16),
+                component_of(&plan, DType::F32, &[4], dense_f32),
+            )),
+            Err(RepresentationError::QuantizedInvalidComponentDTypes {
+                codes: DType::F16,
+                scales: DType::F32,
+            })
+        );
+
+        // Boolean payloads are flags, not code values.
+        assert_eq!(
+            plan.declare(PrimitiveRepresentation::quantized(
+                component_of(&plan, DType::Bool, &[4], dense_bool),
+                component_of(&plan, DType::F32, &[4], dense_f32),
+            )),
+            Err(RepresentationError::QuantizedInvalidComponentDTypes {
+                codes: DType::Bool,
+                scales: DType::F32,
+            })
+        );
+
+        // Non-floating scales are rejected as well.
+        assert_eq!(
+            plan.declare(PrimitiveRepresentation::quantized(
+                component_of(&plan, DType::U8, &[4, 2], dense_u8),
+                component_of(&plan, DType::U8, &[4], dense_u8),
+            )),
+            Err(RepresentationError::QuantizedInvalidComponentDTypes {
+                codes: DType::U8,
+                scales: DType::U8,
+            })
+        );
+
+        // Rejected declarations never enter the table.
+        assert_eq!(plan.representations().len(), 4);
+        for (index, declared) in plan.representations().iter().enumerate()
+        {
+            for dependency in declared.components()
+            {
+                assert!(dependency.representation().get() < index as u32);
+            }
+        }
+    }
+
+    #[test]
+    fn quantized_binds_to_logical_types_without_structural_constraints() {
+        let mut plan = empty_plan();
+        let dense_u8 = plan
+            .declare(PrimitiveRepresentation::dense(DType::U8))
+            .unwrap();
+        let dense_f16 = plan
+            .declare(PrimitiveRepresentation::dense(DType::F16))
+            .unwrap();
+
+        let codes = plan
+            .component(TensorType::new(DType::U8, Shape::new(vec![64])), dense_u8)
+            .unwrap();
+        let scales = plan
+            .component(TensorType::new(DType::F16, Shape::new(vec![8])), dense_f16)
+            .unwrap();
+        let quantized = plan
+            .declare(PrimitiveRepresentation::quantized(codes, scales))
+            .unwrap();
+
+        // Block geometry is scheme-specific and out of IR scope: any logical
+        // type binds as long as components were declared validly.
+        for dims in [vec![64], vec![8, 8], vec![2, 4, 8]]
+        {
+            let logical = TensorType::new(DType::F32, Shape::new(dims));
+            assert_eq!(
+                plan.storage_bits(quantized, &logical),
+                Ok(StorageBits::new(64 * 8 + 8 * 2 * 8))
+            );
         }
     }
 }
