@@ -3,7 +3,7 @@
 
 use super::compat::from_v1;
 use super::interpret::{
-    ExecutionError, ExecutionPolicy, FloatPolicy, ValueTensor, execute_program,
+    ExecutionError, ExecutionPolicy, FloatPolicy, TensorDataError, ValueTensor, execute_program,
 };
 use super::ir::{
     AxisOp, Bin, Narrow, Op, Permute, Reduce, Ref, ResearchProgram, Section, ShapeTo, Ter, Un,
@@ -1614,25 +1614,56 @@ fn fused_multiply_add_is_observably_distinct_from_mul_then_add() {
 }
 
 #[test]
-fn nan_infinity_and_signed_zero_minmax_comparisons_match_native_rust() {
+fn min_max_follow_the_documented_deterministic_extrema_contract() {
+    // The kernels are defined by contract (see `deterministic_min_f32`);
+    // this test pins the observable rule for both operand orders, both
+    // dtypes, zeros, infinities and NaNs. On mainstream targets the values
+    // coincide with native `f32::min/max`, which is a continuity property,
+    // not the contract itself.
     let program = ResearchProgram::expression(
         vec![f64_type(&[]), f64_type(&[])],
         Section::new(vec![
             Op::Min(Bin::new(Ref::Input(0), Ref::Input(1))),
             Op::Max(Bin::new(Ref::Input(0), Ref::Input(1))),
-            Op::Eq(Bin::new(Ref::Input(0), Ref::Input(1))),
-            Op::Ne(Bin::new(Ref::Input(0), Ref::Input(1))),
-            Op::Lt(Bin::new(Ref::Input(0), Ref::Input(1))),
         ]),
-        vec![0, 1, 2, 3, 4],
+        vec![0, 1],
     );
+    let canonical_nan = f64::NAN.to_bits();
     for (left, right) in [
-        (f64::NAN, 1.0),
-        (0.0, -0.0),
+        (0.0f64, -0.0f64),
+        (-0.0f64, 0.0f64),
+        (1.5, -2.5),
         (f64::INFINITY, f64::NEG_INFINITY),
+        (f64::NAN, 3.0),
+        (3.0, f64::NAN),
+        (f64::NAN, f64::NAN),
     ]
     {
-        let result = execute_program(
+        for (a, b) in [(left, right), (right, left)]
+        {
+            let result = execute_program(
+                &program,
+                &[ValueTensor::scalar_f64(a), ValueTensor::scalar_f64(b)],
+                &[],
+                ExecutionPolicy {
+                    floats: FloatPolicy::AllowNonFinite,
+                },
+                default_limits(),
+            )
+            .unwrap();
+            assert_eq!(
+                result.outputs[0].data[0].to_bits(),
+                super::interpret::deterministic_min_f64(a, b).to_bits(),
+                "min({a:?},{b:?})"
+            );
+            assert_eq!(
+                result.outputs[1].data[0].to_bits(),
+                super::interpret::deterministic_max_f64(a, b).to_bits(),
+                "max({a:?},{b:?})"
+            );
+        }
+        // Swap-symmetry: operand order must never be observable.
+        let forward = execute_program(
             &program,
             &[
                 ValueTensor::scalar_f64(left),
@@ -1645,18 +1676,43 @@ fn nan_infinity_and_signed_zero_minmax_comparisons_match_native_rust() {
             default_limits(),
         )
         .unwrap();
+        let swapped = execute_program(
+            &program,
+            &[
+                ValueTensor::scalar_f64(right),
+                ValueTensor::scalar_f64(left),
+            ],
+            &[],
+            ExecutionPolicy {
+                floats: FloatPolicy::AllowNonFinite,
+            },
+            default_limits(),
+        )
+        .unwrap();
         assert_eq!(
-            result.outputs[0].data[0].to_bits(),
-            left.min(right).to_bits()
+            forward.outputs[0].data[0].to_bits(),
+            swapped.outputs[0].data[0].to_bits()
         );
         assert_eq!(
-            result.outputs[1].data[0].to_bits(),
-            left.max(right).to_bits()
+            forward.outputs[1].data[0].to_bits(),
+            swapped.outputs[1].data[0].to_bits()
         );
-        assert_eq!(result.outputs[2].data[0] != 0.0, left == right);
-        assert_eq!(result.outputs[3].data[0] != 0.0, left != right);
-        assert_eq!(result.outputs[4].data[0] != 0.0, left < right);
     }
+    // Both-NaN extrema collapse onto the canonical quiet NaN.
+    let both_nan = execute_program(
+        &program,
+        &[
+            ValueTensor::scalar_f64(f64::NAN),
+            ValueTensor::scalar_f64(f64::NAN),
+        ],
+        &[],
+        ExecutionPolicy {
+            floats: FloatPolicy::AllowNonFinite,
+        },
+        default_limits(),
+    )
+    .unwrap();
+    assert_eq!(both_nan.outputs[0].data[0].to_bits(), canonical_nan);
 }
 
 #[test]
@@ -1705,4 +1761,474 @@ fn subnormal_values_are_not_normalized_by_the_ir() {
     )
     .unwrap();
     assert_eq!(result.outputs[0].data[0].to_bits(), subnormal.to_bits());
+}
+
+// ---------------------------------------------------------------------------
+// Adversarial numerical-semantics coverage (signed zero / extrema / folding)
+// ---------------------------------------------------------------------------
+
+/// Comparisons keep native IEEE semantics: NaN makes every ordered comparison
+/// and equality false and inequality true; `+0 == -0`.
+#[test]
+fn float_comparisons_follow_ieee_on_nan_and_signed_zero() {
+    let program = ResearchProgram::expression(
+        vec![f64_type(&[]), f64_type(&[])],
+        Section::new(vec![
+            Op::Eq(Bin::new(Ref::Input(0), Ref::Input(1))),
+            Op::Ne(Bin::new(Ref::Input(0), Ref::Input(1))),
+            Op::Lt(Bin::new(Ref::Input(0), Ref::Input(1))),
+            Op::Ge(Bin::new(Ref::Input(0), Ref::Input(1))),
+        ]),
+        vec![0, 1, 2, 3],
+    );
+    for (left, right) in [
+        (f64::NAN, 1.0),
+        (0.0, -0.0),
+        (f64::INFINITY, f64::NEG_INFINITY),
+    ]
+    {
+        let result = execute_program(
+            &program,
+            &[
+                ValueTensor::scalar_f64(left),
+                ValueTensor::scalar_f64(right),
+            ],
+            &[],
+            ExecutionPolicy {
+                floats: FloatPolicy::AllowNonFinite,
+            },
+            default_limits(),
+        )
+        .unwrap();
+        assert_eq!(result.outputs[0].data[0] != 0.0, left == right);
+        assert_eq!(result.outputs[1].data[0] != 0.0, left != right);
+        assert_eq!(result.outputs[2].data[0] != 0.0, left < right);
+        assert_eq!(result.outputs[3].data[0] != 0.0, left >= right);
+    }
+}
+
+/// Elementwise extrema resolve opposite-signed zeros identically in f32 and
+/// f64, in both operand orders, including through `Clamp` bounds.
+#[test]
+fn signed_zero_extrema_are_order_independent_in_both_dtypes() {
+    let build = |dtype: DType| {
+        ResearchProgram::expression(
+            vec![ValueType::scalar(dtype), ValueType::scalar(dtype)],
+            Section::new(vec![
+                Op::Min(Bin::new(Ref::Input(0), Ref::Input(1))),
+                Op::Max(Bin::new(Ref::Input(0), Ref::Input(1))),
+                Op::Const(match dtype
+                {
+                    DType::F32 => ScalarValue::F32(-5.0),
+                    _ => ScalarValue::F64(-5.0),
+                }),
+                Op::Const(match dtype
+                {
+                    DType::F32 => ScalarValue::F32(0.0),
+                    _ => ScalarValue::F64(0.0),
+                }),
+                Op::Clamp(Ter::new(Ref::Input(0), Ref::Local(2), Ref::Input(1))),
+            ]),
+            vec![0, 1, 4],
+        )
+    };
+    for dtype in [DType::F32, DType::F64]
+    {
+        let scalar = |value: f64| ValueTensor {
+            dtype,
+            shape: vec![],
+            data: vec![value],
+        };
+        for (left, right) in [(0.0f64, -0.0f64), (-0.0f64, 0.0f64)]
+        {
+            // validate_layout requires exact binary32 payloads for F32.
+            if dtype == DType::F32
+            {
+                assert!((left as f32) as f64 == left && (right as f32) as f64 == right);
+            }
+            let result = execute_program(
+                &build(dtype),
+                &[scalar(left), scalar(right)],
+                &[],
+                ExecutionPolicy::default(),
+                default_limits(),
+            )
+            .unwrap();
+            let min = super::interpret::deterministic_min_f64(left, right);
+            assert_eq!(
+                result.outputs[0].data[0].to_bits(),
+                min.to_bits(),
+                "{dtype:?} min({left},{right})"
+            );
+            assert_eq!(
+                result.outputs[1].data[0].to_bits(),
+                super::interpret::deterministic_max_f64(left, right).to_bits(),
+                "{dtype:?} max({left},{right})"
+            );
+            // clamp(+0, -5, -0): min(+0,-0) = -0 then max(-0,-5) = -0.
+            assert_eq!(
+                result.outputs[2].data[0].to_bits(),
+                super::interpret::deterministic_max_f64(min, -5.0).to_bits(),
+                "{dtype:?} clamp"
+            );
+        }
+    }
+}
+
+/// Constant folding of extrema must reproduce interpreter bits exactly,
+/// including the `-0` outcome of `min(+0,-0)` and its `+0` maximum.
+#[test]
+fn folded_extrema_constants_match_interpreted_extrema_bit_for_bit() {
+    let build = |min_first: bool| {
+        ResearchProgram::expression(
+            vec![],
+            Section::new(vec![
+                Op::Const(ScalarValue::F64(if min_first { 0.0 } else { -0.0 })),
+                Op::Const(ScalarValue::F64(if min_first { -0.0 } else { 0.0 })),
+                Op::Min(Bin::new(Ref::Local(0), Ref::Local(1))),
+                Op::Max(Bin::new(Ref::Local(0), Ref::Local(1))),
+            ]),
+            vec![2, 3],
+        )
+    };
+    for program in [build(true), build(false)]
+    {
+        let executed = execute_program(
+            &program,
+            &[],
+            &[],
+            ExecutionPolicy::default(),
+            default_limits(),
+        )
+        .unwrap();
+        let canonical =
+            super::simplify::canonicalize(&program, VerificationLimits::default()).unwrap();
+        // Both Min and Max fold into plain constants.
+        assert!(canonical.stats.constants_folded >= 2);
+        let refolded = execute_program(
+            &canonical.program,
+            &[],
+            &[],
+            ExecutionPolicy::default(),
+            default_limits(),
+        )
+        .unwrap();
+        assert_eq!(
+            executed.outputs[0].data[0].to_bits(),
+            refolded.outputs[0].data[0].to_bits()
+        );
+        assert_eq!(
+            executed.outputs[1].data[0].to_bits(),
+            refolded.outputs[1].data[0].to_bits()
+        );
+        assert_eq!(refolded.outputs[0].data[0].to_bits(), (-0.0f64).to_bits());
+        assert_eq!(refolded.outputs[1].data[0].to_bits(), 0.0f64.to_bits());
+        // Folding is idempotent on identity: digest stable after a second run.
+        let twice =
+            super::simplify::canonicalize(&canonical.program, VerificationLimits::default())
+                .unwrap();
+        assert_eq!(
+            super::program_digest(&canonical.program),
+            super::program_digest(&twice.program)
+        );
+    }
+}
+
+/// Canonicalization may normalize `Min`/`Max` operands even under
+/// `StrictIeee` because the kernels are swap-symmetric by contract; it must
+/// NOT normalize `Add` there, and must do so under `FiniteOnly`.
+#[test]
+fn commutative_normalization_respects_regime_validity_domains() {
+    let build = |swap: bool, op: fn(Bin) -> Op| {
+        ResearchProgram::expression(
+            vec![f64_type(&[4]), f64_type(&[4])],
+            Section::new(vec![
+                Op::Tanh(Un::new(Ref::Input(0))),
+                Op::Exp(Un::new(Ref::Input(1))),
+                op(
+                    if swap
+                    {
+                        Bin::new(Ref::Local(1), Ref::Local(0))
+                    }
+                    else
+                    {
+                        Bin::new(Ref::Local(0), Ref::Local(1))
+                    },
+                ),
+            ]),
+            vec![2],
+        )
+    };
+    // Min: both operand orders converge onto one canonical form under every
+    // regime, and execution over adversarial inputs stays bit-identical.
+    for semantics in [
+        NumericalSemantics::StrictIeee,
+        NumericalSemantics::FiniteOnly,
+        NumericalSemantics::RealAlgebraicExperimental,
+    ]
+    {
+        let left = build(false, Op::Min).with_semantics(semantics);
+        let right = build(true, Op::Min).with_semantics(semantics);
+        let canonical_left =
+            super::simplify::canonicalize(&left, VerificationLimits::default()).unwrap();
+        let canonical_right =
+            super::simplify::canonicalize(&right, VerificationLimits::default()).unwrap();
+        assert!(
+            super::canonical_equal(&canonical_left.program, &canonical_right.program),
+            "{semantics:?}: Min operands must normalize"
+        );
+
+        // Differential execution across zeros/infinities under the permissive
+        // research policy: the ±Inf rows would be rejected as outputs
+        // otherwise, which is the default policy's job, not this test's.
+        let policy = ExecutionPolicy {
+            floats: FloatPolicy::AllowNonFinite,
+        };
+        let inputs = || {
+            vec![
+                tensor_f64(&[0.0, -0.0, f64::INFINITY, 3.5], &[4]),
+                tensor_f64(&[-0.0, 0.0, -1.0, f64::NEG_INFINITY], &[4]),
+            ]
+        };
+        let a = execute_program(
+            &canonical_left.program,
+            &inputs(),
+            &[],
+            policy,
+            default_limits(),
+        )
+        .unwrap();
+        let b = execute_program(
+            &canonical_right.program,
+            &inputs(),
+            &[],
+            policy,
+            default_limits(),
+        )
+        .unwrap();
+        assert_eq!(
+            a.outputs[0].data[0].to_bits(),
+            b.outputs[0].data[0].to_bits()
+        );
+    }
+
+    // Add: normalization only where finite rewrites are admitted.
+    let strict_pair = (
+        build(false, Op::Add).with_semantics(NumericalSemantics::StrictIeee),
+        build(true, Op::Add).with_semantics(NumericalSemantics::StrictIeee),
+    );
+    let strict_left =
+        super::simplify::canonicalize(&strict_pair.0, VerificationLimits::default()).unwrap();
+    let strict_right =
+        super::simplify::canonicalize(&strict_pair.1, VerificationLimits::default()).unwrap();
+    assert!(
+        !super::canonical_equal(&strict_left.program, &strict_right.program),
+        "StrictIeee must not reorder floating Add operands"
+    );
+    let finite_pair = (
+        build(false, Op::Add).with_semantics(NumericalSemantics::FiniteOnly),
+        build(true, Op::Add).with_semantics(NumericalSemantics::FiniteOnly),
+    );
+    let finite_left =
+        super::simplify::canonicalize(&finite_pair.0, VerificationLimits::default()).unwrap();
+    let finite_right =
+        super::simplify::canonicalize(&finite_pair.1, VerificationLimits::default()).unwrap();
+    assert!(super::canonical_equal(
+        &finite_left.program,
+        &finite_right.program
+    ));
+}
+
+/// Reduce-max/min are encounter-order independent for signed zeros and defer
+/// to numeric elements when NaN appears (permissive policy).
+#[test]
+fn reduction_extrema_are_canonical_over_zeros_and_nan() {
+    let program = ResearchProgram::expression(
+        vec![f64_type(&[2])],
+        Section::new(vec![
+            Op::ReduceMax(Reduce {
+                src: Ref::Input(0),
+                axis: None,
+            }),
+            Op::ReduceMin(Reduce {
+                src: Ref::Input(0),
+                axis: None,
+            }),
+        ]),
+        vec![0, 1],
+    );
+    // Opposite orders of the same multiset must agree bit-for-bit.
+    for values in [
+        ([0.0f64, -0.0f64], [-0.0f64, 0.0f64]),
+        ([5.0, 5.0], [5.0, 5.0]),
+    ]
+    {
+        let forward = execute_program(
+            &program,
+            &[tensor_f64(&values.0, &[2])],
+            &[],
+            ExecutionPolicy::default(),
+            default_limits(),
+        )
+        .unwrap();
+        let backward = execute_program(
+            &program,
+            &[tensor_f64(&values.1, &[2])],
+            &[],
+            ExecutionPolicy::default(),
+            default_limits(),
+        )
+        .unwrap();
+        assert_eq!(
+            forward.outputs[0].data[0].to_bits(),
+            backward.outputs[0].data[0].to_bits()
+        );
+        assert_eq!(
+            forward.outputs[1].data[0].to_bits(),
+            backward.outputs[1].data[0].to_bits()
+        );
+    }
+    // Canonical outcomes themselves.
+    let zeros = execute_program(
+        &program,
+        &[tensor_f64(&[0.0, -0.0], &[2])],
+        &[],
+        ExecutionPolicy::default(),
+        default_limits(),
+    )
+    .unwrap();
+    assert_eq!(zeros.outputs[0].data[0].to_bits(), 0.0f64.to_bits());
+    assert_eq!(zeros.outputs[1].data[0].to_bits(), (-0.0f64).to_bits());
+
+    // NaN defers to numeric operands; a reduction whose elements are all NaN
+    // keeps its ±Infinity identity (the seed is never displaced).
+    let mixed = execute_program(
+        &program,
+        &[tensor_f64(&[5.0, f64::NAN], &[2])],
+        &[],
+        ExecutionPolicy {
+            floats: FloatPolicy::AllowNonFinite,
+        },
+        default_limits(),
+    )
+    .unwrap();
+    assert_eq!(mixed.outputs[0].data[0], 5.0);
+    let all_nan = execute_program(
+        &program,
+        &[tensor_f64(&[f64::NAN, f64::NAN], &[2])],
+        &[],
+        ExecutionPolicy {
+            floats: FloatPolicy::AllowNonFinite,
+        },
+        default_limits(),
+    )
+    .unwrap();
+    assert_eq!(
+        all_nan.outputs[0].data[0].to_bits(),
+        f64::NEG_INFINITY.to_bits()
+    );
+    // Under the default policy the same program aborts at the producer node.
+    let rejected = execute_program(
+        &program,
+        &[tensor_f64(&[f64::NAN, f64::NAN], &[2])],
+        &[],
+        ExecutionPolicy::default(),
+        default_limits(),
+    );
+    assert!(
+        matches!(
+            rejected,
+            Err(ExecutionError::NonFiniteInput { input: 0, .. })
+        ),
+        "NaN external inputs stay rejected before execution"
+    );
+}
+
+/// `Min(x,x)`/`Max(x,x)` collapse only where finite rewrites are admitted;
+/// under `StrictIeee` the self-extrema nodes survive.
+#[test]
+fn min_max_self_rewrites_stay_finite_domain_gated() {
+    let build = || {
+        ResearchProgram::expression(
+            vec![f64_type(&[4])],
+            Section::new(vec![
+                Op::Abs(Un::new(Ref::Input(0))),
+                Op::Min(Bin::new(Ref::Local(0), Ref::Local(0))),
+                Op::Max(Bin::new(Ref::Local(0), Ref::Local(0))),
+                Op::Add(Bin::new(Ref::Local(1), Ref::Local(2))),
+            ]),
+            vec![3],
+        )
+    };
+    let strict = super::simplify::canonicalize(
+        &build().with_semantics(NumericalSemantics::StrictIeee),
+        VerificationLimits::default(),
+    )
+    .unwrap();
+    assert!(
+        strict
+            .program
+            .finalize
+            .ops
+            .iter()
+            .any(|op| matches!(op, Op::Min(_) | Op::Max(_))),
+        "StrictIeee keeps self-extrema nodes"
+    );
+    let finite = super::simplify::canonicalize(
+        &build().with_semantics(NumericalSemantics::FiniteOnly),
+        VerificationLimits::default(),
+    )
+    .unwrap();
+    assert!(
+        !finite
+            .program
+            .finalize
+            .ops
+            .iter()
+            .any(|op| matches!(op, Op::Min(_) | Op::Max(_))),
+        "FiniteOnly collapses self-extrema nodes"
+    );
+}
+
+/// The public conversion boundary returns a structured error instead of
+/// panicking on a hostile dtype mismatch.
+#[test]
+fn to_f32_tensor_reports_a_structured_error_for_wrong_dtype() {
+    let tensor = ValueTensor::scalar_f64(1.0);
+    let error = tensor
+        .to_f32_tensor()
+        .expect_err("f64 must not convert as f32");
+    assert_eq!(
+        error,
+        TensorDataError::DTypeMismatch {
+            expected: DType::F32,
+            found: DType::F64,
+        }
+    );
+    let boolean = ValueTensor::scalar_bool(true);
+    assert!(matches!(
+        boolean.to_f32_tensor(),
+        Err(TensorDataError::DTypeMismatch { .. })
+    ));
+}
+
+/// A hostile `Narrow{start: usize::MAX}` must be rejected without the error
+/// formatter itself overflowing (`start + len` used to panic in debug).
+#[test]
+fn overflowing_narrow_range_is_rejected_and_displayable() {
+    let program = ResearchProgram::expression(
+        vec![f64_type(&[4])],
+        Section::new(vec![Op::Narrow(Narrow {
+            src: Ref::Input(0),
+            axis: 0,
+            start: usize::MAX,
+            len: 2,
+        })]),
+        vec![0],
+    );
+    let error = expect_error(&program, default_limits());
+    assert!(matches!(error, ProgramError::NarrowRangeInvalid { .. }));
+    // Formatting must not panic (debug builds check integer overflow).
+    let rendered = error.to_string();
+    assert!(rendered.contains("exceeds axis"));
 }
