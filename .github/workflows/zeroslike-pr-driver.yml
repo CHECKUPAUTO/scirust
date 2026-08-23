@@ -1,0 +1,60 @@
+name: ZerosLike PR driver
+
+on:
+  pull_request:
+    branches:
+      - master
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'research/tensor-zeroslike-lowering' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: research/tensor-zeroslike-lowering
+          fetch-depth: 0
+
+      - name: Install pinned nightly
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt
+
+      - name: Execute staged source patch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          lines = Path('.github/workflows/zeroslike-one-shot.yml').read_text().splitlines()
+          start = lines.index('        run: |', lines.index('      - name: Apply ZerosLike compiler and Reference support')) + 1
+          end = lines.index('      - name: Format', start)
+          script_lines = lines[start:end]
+          script = '\n'.join(line[10:] if line.startswith('          ') else line for line in script_lines)
+          exec(compile(script, 'zeroslike-one-shot', 'exec'), {'__name__': '__main__'})
+          PY
+
+      - name: Format
+        run: cargo +nightly-2026-07-02 fmt --all
+
+      - name: Test tensor compiler
+        run: cargo test -p scirust-tensor-compile --all-targets
+
+      - name: Test Reference format and interpreter
+        run: cargo test -p scirust-tensor-reference --all-targets
+
+      - name: Test Reference CPU runtime
+        run: cargo test -p scirust-tensor-runtime --test reference_cpu_plan
+
+      - name: Commit validated patch and remove staging workflows
+        run: |
+          rm .github/workflows/zeroslike-one-shot.yml .github/workflows/zeroslike-pr-driver.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "feat(tensor): lower zeros-like through reference CPU"
+          git push origin HEAD:research/tensor-zeroslike-lowering
