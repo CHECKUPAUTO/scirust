@@ -119,10 +119,15 @@
 use scirust_tensor_core::TensorND;
 
 mod canonical;
+mod compiler_ir;
 mod lowering;
 mod memory;
 
 pub use canonical::{CanonicalCompiler, CompileError, CompileStats, ExecutionPlan, Instruction};
+pub use compiler_ir::{
+    CompilerIr, CompilerIrError, CompilerIrIdentifierSpace, IrBlock, IrBlockId, IrOperation,
+    IrOperationId, IrRegion, IrRegionId, IrValue, IrValueId, verify_compiler_ir,
+};
 pub use lowering::{
     BinaryKernel, ExternalBinding, ExternalBindings, ExternalValueKind, IdentifierSpace,
     KernelArgument, KernelArgumentAccess, KernelArgumentSource, KernelFamily, KernelLowerer,
