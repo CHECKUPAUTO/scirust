@@ -19,7 +19,8 @@ use core::fmt;
 
 use scirust_compute::ComputeError;
 use scirust_tensor_compile::{
-    BufferSlot, CompileError, ExternalValueKind, LogicalBindingId, LogicalKernelId, LoweringError,
+    BufferSlot, CompileError, CompilerPipelineError, ExternalValueKind, LogicalBindingId,
+    LogicalKernelId, LoweringError,
 };
 use scirust_tensor_ir::{ConstantId, DType, GraphError, NodeId, TensorType};
 use scirust_tensor_reference::{ReferenceGenerationError, ReferenceOpcode};
@@ -754,8 +755,8 @@ impl core::error::Error for PlanExecutionError {
 
 /// A failure while turning a canonical `Graph` into a reusable session.
 ///
-/// The three encapsulating variants keep the underlying compiler, lowerer and
-/// plan-runtime errors intact and reachable through [`core::error::Error::source`]
+/// The encapsulating variants keep compiler, compiler-pipeline, legacy lowerer
+/// and plan-runtime errors intact and reachable through [`core::error::Error::source`]
 /// rather than flattening them into a message.
 ///
 /// Several variants guard invariants the canonical pipeline already establishes
@@ -767,8 +768,10 @@ impl core::error::Error for PlanExecutionError {
 pub enum GraphSessionPreparationError {
     /// `CanonicalCompiler` rejected the graph.
     GraphCompilation { source: CompileError },
-    /// `KernelLowerer` rejected the execution plan.
+    /// Legacy direct `KernelLowerer` failure, retained for API compatibility.
     KernelLowering { source: LoweringError },
+    /// `CompilerPipeline` rejected the canonical execution plan.
+    CompilerPipeline { source: CompilerPipelineError },
     /// The Reference plan runtime rejected the lowered plan.
     PlanPreparation { source: PlanPreparationError },
     /// A binding names a node the graph does not declare as an external value:
@@ -881,6 +884,10 @@ impl fmt::Display for GraphSessionPreparationError {
             Self::KernelLowering { source } =>
             {
                 write!(formatter, "kernel lowering failed: {source}")
+            },
+            Self::CompilerPipeline { source } =>
+            {
+                write!(formatter, "compiler pipeline failed: {source}")
             },
             Self::PlanPreparation { source } =>
             {
@@ -1050,6 +1057,7 @@ impl core::error::Error for GraphSessionPreparationError {
         {
             Self::GraphCompilation { source } => Some(source),
             Self::KernelLowering { source } => Some(source),
+            Self::CompilerPipeline { source } => Some(source),
             Self::PlanPreparation { source } => Some(source),
             _ => None,
         }
