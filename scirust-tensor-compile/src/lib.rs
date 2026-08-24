@@ -76,7 +76,7 @@
 //! Supported in this phase:
 //!
 //! * `Add`, `Sub`, `Mul`, `Div` — [`KernelFamily::ElementwiseBinary`];
-//! * `Relu`, `Exp`, `Log`, `Scale` — [`KernelFamily::ElementwiseUnary`];
+//! * `Relu`, `Exp`, `Log`, `ZerosLike`, `Scale` — [`KernelFamily::ElementwiseUnary`];
 //! * `Reshape` — [`KernelFamily::ShapeCopy`];
 //! * `Transpose` — [`KernelFamily::Permute`].
 //!
