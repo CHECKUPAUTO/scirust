@@ -17,7 +17,10 @@
 
 use scirust_compute::{DType, Shape};
 use scirust_gpu::CpuComputeAdapter;
-use scirust_tensor_compile::{CompileError, LoweringError};
+use scirust_tensor_compile::{
+    CompileError, CompilerIrLoweringError, CompilerPipeline, CompilerPipelineError, LoweringError,
+    ScaleZeroCanonicalizationPass,
+};
 use scirust_tensor_ir::{ConstantId, Graph, NodeId, Operation, Scalar, TensorType};
 use scirust_tensor_runtime::{
     GraphConstants, GraphInputs, GraphSessionExecutionError, GraphSessionPreparationError,
@@ -99,7 +102,7 @@ fn run_binary(op: Operation, dims: Vec<usize>, left: &[f32], right: &[f32]) -> V
 }
 
 // ---------------------------------------------------------------------------
-// The eight supported opcodes
+// The nine supported opcodes
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -107,6 +110,36 @@ fn executes_relu() {
     assert_eq!(
         run_unary(Operation::Relu, vec![4], &[-2.0, -0.5, 0.0, 3.0]),
         vec![0.0, 0.0, 0.0, 3.0]
+    );
+}
+
+#[test]
+fn custom_compiler_pipeline_reaches_graph_session_execution() {
+    let (graph, input) = unary_graph(
+        Operation::Scale {
+            factor: Scalar::f32(0.0),
+        },
+        vec![5],
+    );
+    let mut pipeline = CompilerPipeline::new();
+    pipeline.push_pass(ScaleZeroCanonicalizationPass);
+
+    let session = ReferenceGraphSession::prepare_with_pipeline(
+        runtime(),
+        &graph,
+        &GraphConstants::new(),
+        &mut pipeline,
+    )
+    .expect("preparable graph through compiler pipeline");
+
+    let values = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -0.0, 7.5];
+    let mut inputs = GraphInputs::new();
+    inputs.bind(input, &values);
+
+    let outputs = session.execute(&inputs).expect("successful run");
+    assert_eq!(
+        bits(&outputs.into_values()[0].values),
+        vec![0u32; values.len()]
     );
 }
 
@@ -1045,11 +1078,13 @@ fn matmul_is_rejected_by_the_lowerer() {
 
     assert_eq!(
         try_session(&graph, &GraphConstants::new()).err(),
-        Some(GraphSessionPreparationError::KernelLowering {
-            source: LoweringError::UnsupportedOperation {
-                node: product,
-                operation: Operation::MatMul,
-            },
+        Some(GraphSessionPreparationError::CompilerPipeline {
+            source: CompilerPipelineError::Lowering(CompilerIrLoweringError::Lowering(
+                LoweringError::UnsupportedOperation {
+                    node: product,
+                    operation: Operation::MatMul,
+                },
+            )),
         })
     );
 }
@@ -1072,8 +1107,10 @@ fn an_inconsistent_reshape_is_rejected_by_the_lowerer() {
 
     assert_eq!(
         try_session(&graph, &GraphConstants::new()).err(),
-        Some(GraphSessionPreparationError::KernelLowering {
-            source: LoweringError::InvalidReshape { node: reshaped },
+        Some(GraphSessionPreparationError::CompilerPipeline {
+            source: CompilerPipelineError::Lowering(CompilerIrLoweringError::Lowering(
+                LoweringError::InvalidReshape { node: reshaped },
+            )),
         })
     );
 }
@@ -1096,8 +1133,10 @@ fn a_semantically_inconsistent_graph_is_rejected_by_the_lowerer() {
     assert!(
         matches!(
             try_session(&graph, &GraphConstants::new()).err(),
-            Some(GraphSessionPreparationError::KernelLowering {
-                source: LoweringError::OperandTypeMismatch { .. },
+            Some(GraphSessionPreparationError::CompilerPipeline {
+                source: CompilerPipelineError::Lowering(CompilerIrLoweringError::Lowering(
+                    LoweringError::OperandTypeMismatch { .. },
+                )),
             })
         ),
         "a semantically inconsistent graph must be rejected"
