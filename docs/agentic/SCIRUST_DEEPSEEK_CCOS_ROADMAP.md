@@ -47,6 +47,7 @@ No child may widen its parent's authority.
 | H-2 | Scoped secret capability store | MERGED | #1279 (`e6bdfeae`) | Opaque handles, explicit grants, revocable, audit views never contain values |
 | H-3 | Resource-budget + explicit-egress policy primitives | MERGED | #1280 (`80c7d694`) | Fail-closed capability checks exist; real OS/network enforcement is not yet wired into ToolRuntime |
 | H-4 | In-memory correlated enterprise audit trail | MERGED | #1281 (`bbae8850`) | SHA-256 chained tenant..artifact correlation; persistence and automatic runtime wiring remain TODO |
+| H-5 | Kernel-enforced resource governance | OPEN PR | `feat/sciagent-real-resource-enforcement` | rlimits (`prlimit64` AS/NPROC/FSIZE/CPU), `sched_setaffinity` pinning, seccomp-BPF denial of `socket(AF_INET/INET6)` for deny-all egress, bwrap `--unshare-net`, governed wall-time kill deadline; GPU caps and host allow-lists refuse rather than fake enforcement |
 | I | Scientific autonomy (generalize optimizer) | PARTIAL | PR #1254 MERGED | CPU/SIMD/CUDA/WGPU generalization TODO |
 | — | Evidence-driven optimization loop | MERGED | #1254 (`c55dcc04`) | baseline -> generate -> compile -> verify -> benchmark -> promote |
 | — | Typed ToolRuntime contracts | MERGED | #1256 | typed ToolCall, registry, validation, policy hooks |
@@ -77,7 +78,7 @@ No child may widen its parent's authority.
 | sandbox escalation | one-shot escalation in approval request | one-shot escalation + independent approval requirement | equivalent | escalation cannot bypass approval | #1266 (MERGED) | — | tests |
 | child delegation | `source: 'delegation'` seeds override into child | `DelegationContext` ceilings for tools/sandbox/resources/secrets/workspace | finite optional resource ceiling bug identified; repair in #1286 | child must never remove a finite parent resource ceiling | #1286 OPEN | #1275 | finite-parent/None-child regression tests |
 | fail-closed behavior | missing answerer => unavailable | missing/erroring answerer => Unavailable | equivalent for answerer availability | no silent grant | #1274 | — | tests |
-| enterprise budgets/egress | n/a | policy/capability seams exist | real cgroup/rlimit/GPU/network enforcement and ToolRuntime wiring TODO | declared limits must correspond to actual enforcement | TODO H-5+ | #1280 | integration tests against real enforcement backend |
+| enterprise budgets/egress | n/a | rlimit/seccomp enforcement wired through the sandboxed ToolRuntime spawn path (`ToolRuntime::execute_governed`); declared limits are checked against the probed kernel backend BEFORE execution and installed `pre_exec` on every backend (direct, bubblewrap, Landlock) | cgroup-delegated GPU memory caps and per-host egress allow-lists still refuse instead of enforcing; durable enterprise audit persistence TODO | declared limits must correspond to actual enforcement | H-5 branch | #1280 | live tests: SIGXFSZ via RLIMIT_FSIZE, pinned `nproc`, bash `/dev/tcp` blocked by seccomp against a local listener, 1s wall-time deadline kills `sleep 30` |
 | enterprise correlated audit | n/a | SHA-256 chained in-memory `EnterpriseAuditTrail` | durable storage/replay and automatic runtime emission TODO | process restart currently loses enterprise trail | TODO H-5+ | #1281 | restart/tamper/runtime-correlation tests |
 
 ## Hardware evidence/status

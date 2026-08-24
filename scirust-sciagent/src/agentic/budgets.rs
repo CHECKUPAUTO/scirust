@@ -7,8 +7,14 @@
 //! satisfiability BEFORE execution: a limit that cannot be enforced denies
 //! the call instead of running unbounded.
 
+use serde::{Deserialize, Serialize};
+
+fn default_enforce() -> bool {
+    true
+}
+
 /// One egress target: hostname or CIDR plus the allowed ports.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EgressTarget {
     pub host: String,
     pub ports: Vec<u16>,
@@ -35,11 +41,16 @@ impl EgressTarget {
 
 /// Explicit network egress policy. Default deny-all: any egress attempt not
 /// covered by an allow target is refused.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EgressPolicy {
     /// True when the enforcement backend is present and authoritative.
     /// When false, claiming isolation is impossible: egress fails closed.
+    /// Deserialization defaults to `true` so a wire payload that omits the
+    /// field keeps the fail-closed deny-all posture instead of silently
+    /// disabling enforcement.
+    #[serde(default = "default_enforce")]
     pub enforce: bool,
+    #[serde(default)]
     pub allow: Vec<EgressTarget>,
 }
 
@@ -92,7 +103,7 @@ impl EgressPolicy {
 
 /// Resource limits for one execution. `None` means no limit is set — the
 /// enforcement layer must still be able to verify it can run without limits.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ResourceLimits {
     pub wall_time_seconds: Option<u64>,
     pub max_memory_bytes: Option<u64>,
@@ -197,6 +208,20 @@ pub trait ResourceBackend: Send + Sync {
     fn supports_gpu_memory_limit(&self, _bytes: u64) -> bool {
         false
     }
+    /// Whether the backend can enforce a non-empty host/port allow-list.
+    /// Kernel-level backends in this workspace can only deny whole address
+    /// families (deny-all); per-host filtering needs a network namespace with
+    /// a proxy or an nftables/ebpf setup, so the safe default is `false`.
+    fn supports_egress_allow_list(&self) -> bool {
+        false
+    }
+    /// Whether the backend can enforce deny-all network egress (blocking
+    /// INET socket creation kernel-side). The safe default is `false`: a
+    /// host with no enforcement capability must refuse governed execution
+    /// instead of silently allowing network access.
+    fn supports_egress_deny_all(&self) -> bool {
+        false
+    }
 }
 
 /// Minimal backend with no enforcement capability: every limit fails closed.
@@ -226,6 +251,12 @@ impl ResourceBackend for FullResourceBackend {
         true
     }
     fn supports_gpu_memory_limit(&self, _bytes: u64) -> bool {
+        true
+    }
+    fn supports_egress_allow_list(&self) -> bool {
+        true
+    }
+    fn supports_egress_deny_all(&self) -> bool {
         true
     }
 }
@@ -322,5 +353,41 @@ mod tests {
             .check_enforceable(&CpuOnly, &EgressPolicy::deny_all())
             .expect_err("process limit cannot be enforced by cpu-only backend");
         assert!(error.contains("process limit"), "{error}");
+    }
+
+    #[test]
+    fn wire_payload_defaults_to_enforced_deny_all() {
+        let egress: EgressPolicy = serde_json::from_str("{}").expect("empty payload must parse");
+        assert!(egress.enforce, "missing enforce flag must default to true");
+        assert!(egress.allow.is_empty());
+        assert!(egress.authorize("example.com", 443).is_err());
+    }
+
+    #[test]
+    fn limits_and_egress_round_trip_through_json() {
+        let limits = ResourceLimits {
+            wall_time_seconds: Some(12),
+            max_memory_bytes: Some(1 << 20),
+            ..ResourceLimits::default()
+        };
+        let egress = EgressPolicy::with_targets(vec![EgressTarget::new("example.com", vec![443])]);
+        let limits_json = serde_json::to_string(&limits).unwrap();
+        let egress_json = serde_json::to_string(&egress).unwrap();
+        assert_eq!(
+            serde_json::from_str::<ResourceLimits>(&limits_json).unwrap(),
+            limits
+        );
+        assert_eq!(
+            serde_json::from_str::<EgressPolicy>(&egress_json).unwrap(),
+            egress
+        );
+    }
+
+    #[test]
+    fn explicit_false_enforce_flag_is_preserved() {
+        let egress: EgressPolicy =
+            serde_json::from_str(r#"{"enforce": false}"#).expect("payload must parse");
+        assert!(!egress.enforce);
+        assert!(egress.authorize("example.com", 443).is_err());
     }
 }

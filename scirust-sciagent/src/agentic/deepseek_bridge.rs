@@ -114,6 +114,7 @@ pub enum BridgeError {
     PolicyDenied(String),
     ApprovalUnavailable,
     SandboxEscalationDenied(String),
+    GovernanceDenied(String),
     ExecutionFailed(String),
     UnknownValue(String),
     Cancelled,
@@ -129,6 +130,7 @@ impl std::fmt::Display for BridgeError {
             Self::PolicyDenied(r) => write!(f, "denied by policy: {r}"),
             Self::ApprovalUnavailable => write!(f, "approval unavailable; refusing to execute"),
             Self::SandboxEscalationDenied(r) => write!(f, "sandbox escalation refused: {r}"),
+            Self::GovernanceDenied(r) => write!(f, "resource governance refused: {r}"),
             Self::ExecutionFailed(e) => write!(f, "execution failed: {e}"),
             Self::UnknownValue(v) => write!(f, "unknown value {v:?}; failing closed"),
             Self::Cancelled => write!(f, "cancelled"),
@@ -163,6 +165,10 @@ impl From<ToolRuntimeError> for BridgeError {
             ToolRuntimeError::SandboxEscalationDenied { tool, reason } =>
             {
                 Self::SandboxEscalationDenied(format!("{tool}: {reason}"))
+            },
+            ToolRuntimeError::GovernanceDenied { tool, reason } =>
+            {
+                Self::GovernanceDenied(format!("{tool}: {reason}"))
             },
         }
     }
