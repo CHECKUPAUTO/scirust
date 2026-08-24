@@ -910,7 +910,7 @@ checksum = "d45db016d36b838f563236e9193d0ee6ce38f3f68b6c94e914b4929c96bbb890"
 [[package]]
 name = "flat-attention"
 version = "0.1.0"
-source = "git+https://github.com/Memorithm/FLAT-ATTENTION?rev=43b4c0ba08e109ac7025a01a01837da6927d05d0#43b4c0ba08e109ac7025a01a01837da6927d05d0"
+source = "git+https://github.com/Memorithm/FLAT-ATTENTION?rev=fd0f748b9a5285858ffbf4867e405a3729c4b70b#fd0f748b9a5285858ffbf4867e405a3729c4b70b"
 dependencies = [
  "pollster",
  "wgpu",
