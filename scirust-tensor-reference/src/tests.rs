@@ -156,6 +156,17 @@ fn log_generates_the_log_opcode() {
 }
 
 #[test]
+fn zeros_like_generates_the_v1_1_zeros_like_opcode() {
+    let plan = single_unary_plan(Operation::ZerosLike, f32_type(vec![4]));
+    let artifact = only_artifact(&plan);
+
+    assert_eq!(artifact.opcode(), ReferenceOpcode::ZerosLike);
+    assert_eq!(artifact.operands().len(), 1);
+    assert_eq!(artifact.attributes(), &ReferenceAttributes::None);
+    assert_eq!(artifact.version(), REFERENCE_FORMAT_VERSION);
+}
+
+#[test]
 fn add_generates_the_add_opcode_with_two_operands() {
     let plan = single_binary_plan(Operation::Add, f32_type(vec![2, 2]));
     let artifact = only_artifact(&plan);

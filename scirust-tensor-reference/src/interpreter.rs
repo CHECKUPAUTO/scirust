@@ -120,7 +120,6 @@ impl PreparedReferenceKernel {
                 return Err(ReferenceExecutionError::DeterministicMathUnavailable { opcode });
             },
             ReferenceOpcode::ReluGrad
-            | ReferenceOpcode::ZerosLike
             | ReferenceOpcode::OnesLike
             | ReferenceOpcode::BroadcastTo
             | ReferenceOpcode::ReduceSumTo
@@ -130,6 +129,7 @@ impl PreparedReferenceKernel {
                 return Err(ReferenceExecutionError::UnsupportedOpcode { opcode });
             },
             ReferenceOpcode::Relu
+            | ReferenceOpcode::ZerosLike
             | ReferenceOpcode::Scale
             | ReferenceOpcode::Add
             | ReferenceOpcode::Sub
@@ -201,6 +201,7 @@ impl PreparedReferenceKernel {
             },
             (
                 ReferenceOpcode::Relu
+                | ReferenceOpcode::ZerosLike
                 | ReferenceOpcode::Add
                 | ReferenceOpcode::Sub
                 | ReferenceOpcode::Mul
@@ -338,6 +339,11 @@ impl ReferenceInterpreter {
                     *target = relu(value);
                 }
             },
+            ReferenceOpcode::ZerosLike =>
+            {
+                let _ = first_operand(operands)?;
+                output.fill(0.0);
+            },
             ReferenceOpcode::Scale =>
             {
                 let operand = first_operand(operands)?;
@@ -431,7 +437,6 @@ impl ReferenceInterpreter {
                 return Err(ReferenceExecutionError::DeterministicMathUnavailable { opcode });
             },
             ReferenceOpcode::ReluGrad
-            | ReferenceOpcode::ZerosLike
             | ReferenceOpcode::OnesLike
             | ReferenceOpcode::BroadcastTo
             | ReferenceOpcode::ReduceSumTo

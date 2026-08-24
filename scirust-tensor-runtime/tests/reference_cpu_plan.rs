@@ -102,7 +102,7 @@ fn bits(values: &[f32]) -> Vec<u32> {
 }
 
 // ---------------------------------------------------------------------------
-// The eight supported opcodes
+// The nine supported opcodes
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -112,6 +112,15 @@ fn executes_relu() {
         bits(&run_unary(&plan, &[-1.5, 0.0, 2.5, -0.0])),
         bits(&[0.0, 0.0, 2.5, 0.0])
     );
+}
+
+#[test]
+fn executes_zeros_like_as_positive_zero_for_every_input_class() {
+    let plan = unary_plan(Operation::ZerosLike, vec![5]);
+    let input = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -0.0, 7.5];
+    let output = run_unary(&plan, &input);
+
+    assert_eq!(bits(&output), vec![0u32; input.len()]);
 }
 
 #[test]
