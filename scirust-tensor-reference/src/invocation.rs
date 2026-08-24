@@ -49,6 +49,7 @@ pub(crate) fn validate(
     match opcode
     {
         ReferenceOpcode::Relu
+        | ReferenceOpcode::ZerosLike
         | ReferenceOpcode::Scale
         | ReferenceOpcode::Add
         | ReferenceOpcode::Sub
@@ -62,7 +63,6 @@ pub(crate) fn validate(
             return Err(ReferenceExecutionError::DeterministicMathUnavailable { opcode });
         },
         ReferenceOpcode::ReluGrad
-        | ReferenceOpcode::ZerosLike
         | ReferenceOpcode::OnesLike
         | ReferenceOpcode::BroadcastTo
         | ReferenceOpcode::ReduceSumTo
@@ -80,6 +80,7 @@ pub(crate) fn validate(
             | (ReferenceOpcode::Permute, PreparedAttributes::Permute { .. })
             | (
                 ReferenceOpcode::Relu
+                    | ReferenceOpcode::ZerosLike
                     | ReferenceOpcode::Add
                     | ReferenceOpcode::Sub
                     | ReferenceOpcode::Mul
