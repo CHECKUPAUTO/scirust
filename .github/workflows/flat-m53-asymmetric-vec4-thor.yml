@@ -33,7 +33,7 @@ jobs:
       RUSTFLAGS: "-D warnings"
       SCIRUST_THOR_GPU_LOCK: /dev/nvidia0
       SCIRUST_SOURCE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
-      FLAT_M53_CANDIDATE_REVISION: 43b4c0ba08e109ac7025a01a01837da6927d05d0
+      FLAT_M53_CANDIDATE_REVISION: fd0f748b9a5285858ffbf4867e405a3729c4b70b
       SCIRUST_M53_Q_HEADS: "8"
       SCIRUST_M53_KV_HEADS: "2"
       SCIRUST_M53_WARMUPS: "3"
