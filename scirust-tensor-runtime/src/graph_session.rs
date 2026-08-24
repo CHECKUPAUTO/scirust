@@ -44,7 +44,7 @@
 
 use scirust_compute::{ComputeBackend, DType};
 use scirust_tensor_compile::{
-    CanonicalCompiler, ExternalBindings, ExternalValueKind, KernelLowerer, LogicalBindingId,
+    CanonicalCompiler, CompilerPipeline, ExternalValueKind, LogicalBindingId,
 };
 use scirust_tensor_ir::{ConstantId, Graph, NodeId, Operation, TensorType};
 
@@ -201,41 +201,55 @@ impl<B: ComputeBackend> ReferenceGraphSession<B> {
         graph: &Graph,
         constants: &GraphConstants<'_>,
     ) -> Result<Self, GraphSessionPreparationError> {
+        let mut pipeline = CompilerPipeline::new();
+        Self::prepare_with_pipeline(runtime, graph, constants, &mut pipeline)
+    }
+
+    /// Compiles, optimizes, lowers and prepares `graph` through `pipeline`.
+    ///
+    /// The caller controls the compiler-pass sequence while the session keeps
+    /// ownership of runtime preparation. This method runs the pipeline once;
+    /// [`Self::execute`] never reruns compiler passes.
+    pub fn prepare_with_pipeline(
+        runtime: ReferencePlanRuntime<B>,
+        graph: &Graph,
+        constants: &GraphConstants<'_>,
+        pipeline: &mut CompilerPipeline,
+    ) -> Result<Self, GraphSessionPreparationError> {
         // 1. Canonical compilation. Validates the graph and eliminates every
         //    node unreachable from the declared outputs.
         let execution_plan = CanonicalCompiler::new()
             .compile(graph)
             .map_err(|source| GraphSessionPreparationError::GraphCompilation { source })?;
 
-        // 2. External binding table, in the canonical order of the retained
-        //    instructions. The caller never chooses this order.
-        let bindings = ExternalBindings::derive(&execution_plan);
+        // 2. Compiler SSA, caller-selected passes, post-pass memory planning
+        //    and logical lowering. CompilerPipeline keeps these artefacts coherent.
+        let compiled = pipeline
+            .compile_execution_plan(&execution_plan)
+            .map_err(|source| GraphSessionPreparationError::CompilerPipeline { source })?;
+        let lowered = compiled.lowered_plan();
 
-        // 3. Lowering.
-        let lowered = KernelLowerer::new()
-            .lower(&execution_plan, &bindings)
-            .map_err(|source| GraphSessionPreparationError::KernelLowering { source })?;
+        // 3-5. Walk the post-pass plan's own binding table and correlate every
+        //      entry with the canonical graph.
+        let resolved = resolve_bindings(graph, lowered)?;
 
-        // 4-6. Walk the plan's own binding table — the post-elimination source
-        //      of truth — and correlate every entry with the graph.
-        let resolved = resolve_bindings(graph, &lowered)?;
-
-        // 7-8. Validate the whole constant store, then clone only what survives.
+        // 6-7. Validate the whole constant store, then clone only what survives.
         let (payloads, constant_bindings) = resolve_constants(graph, &resolved, constants)?;
 
-        // 9. Physical preparation. The graph-supplied types complete the
-        //    metadata a lowered plan cannot carry.
+        // 8. Physical preparation. The graph-supplied types complete metadata
+        //    that a lowered plan cannot carry on external-only outputs.
         let prepared = runtime
-            .prepare_with_external_types(&lowered, &resolved.external_types)
+            .prepare_with_external_types(lowered, &resolved.external_types)
             .map_err(|source| GraphSessionPreparationError::PlanPreparation { source })?;
 
-        // 10. The prepared plan must describe exactly the bindings we resolved.
+        // 9. The prepared plan must describe exactly the bindings we resolved.
         check_prepared_externals(&prepared, &resolved)?;
 
-        // 11. The prepared outputs must be the graph's outputs, in order.
+        // 10. The prepared outputs must be the graph's outputs, in order.
         let outputs = resolve_outputs(graph, &prepared)?;
 
-        // 12. Immutable session.
+        // 11. Immutable session. `compiled` can now be dropped: execution owns
+        //     only the prepared backend plan and resolved graph metadata.
         Ok(Self {
             runtime,
             prepared,
