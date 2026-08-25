@@ -1,0 +1,14 @@
+[package]
+name = "scirust-hashsig"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "Pure-Rust deterministic Lamport/Merkle hash signatures shared across SciRust"
+license-file = "../LICENSE.md"
+repository = "https://github.com/Memorithm/scirust"
+
+[dependencies]
+sha2 = "0.10"
+
+[lints.rust]
+unsafe_code = "deny"
