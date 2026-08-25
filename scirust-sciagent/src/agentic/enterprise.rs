@@ -20,10 +20,18 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 /// Strict tenant identifier: 1..=64 ASCII alphanumeric plus `-` and `_`.
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
 pub struct TenantId(String);
+
+impl<'de> serde::Deserialize<'de> for TenantId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        Self::parse(&value).map_err(serde::de::Error::custom)
+    }
+}
 
 /// Strict organization identifier inside a tenant.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

@@ -310,19 +310,32 @@ impl EnterpriseAuditSink for EnterpriseAuditTrail {
 #[derive(Debug)]
 pub struct FileEnterpriseAuditTrail {
     path: std::path::PathBuf,
+    transaction: std::sync::Mutex<()>,
 }
 
 impl FileEnterpriseAuditTrail {
     pub fn new(path: impl Into<std::path::PathBuf>) -> Self {
-        Self { path: path.into() }
+        Self {
+            path: path.into(),
+            transaction: std::sync::Mutex::new(()),
+        }
     }
 
     pub fn path(&self) -> &std::path::Path {
         &self.path
     }
 
+    fn lock_transaction(&self) -> Result<std::sync::MutexGuard<'_, ()>, String> {
+        self.transaction.lock().map_err(|_| {
+            format!(
+                "enterprise audit log {} transaction lock is unavailable",
+                self.path.display()
+            )
+        })
+    }
+
     /// Load and fully verify the log. Missing file replays as empty.
-    fn load(&self) -> Result<Vec<EnterpriseAuditEvent>, String> {
+    fn load_unlocked(&self) -> Result<Vec<EnterpriseAuditEvent>, String> {
         let file = match std::fs::File::open(&self.path)
         {
             Ok(file) => file,
@@ -382,12 +395,14 @@ impl FileEnterpriseAuditTrail {
 
     /// Replay the full durable trail in order. Corruption fails closed.
     pub fn replay(&self) -> Result<Vec<EnterpriseAuditEvent>, String> {
-        self.load()
+        let _transaction = self.lock_transaction()?;
+        self.load_unlocked()
     }
 
     /// Verify the whole durable chain from genesis.
     pub fn verify(&self) -> Result<(), String> {
-        let events = self.load()?;
+        let _transaction = self.lock_transaction()?;
+        let events = self.load_unlocked()?;
         let mut expected = ENTERPRISE_AUDIT_GENESIS.to_string();
         for (index, event) in events.iter().enumerate()
         {
@@ -415,7 +430,9 @@ impl EnterpriseAuditSink for FileEnterpriseAuditTrail {
         decision: &str,
         output_digest: &str,
     ) -> Result<(), String> {
-        let events = self.load()?;
+        // Atomic for concurrent calls sharing this sink instance.
+        let _transaction = self.lock_transaction()?;
+        let events = self.load_unlocked()?;
         let mut event =
             EnterpriseAuditEvent::new(events.len() as u64, tenant.clone(), subject, session_id);
         if let Some(request_id) = request_id
@@ -731,6 +748,69 @@ mod tests {
         let path = temp_log();
         let store = FileEnterpriseAuditTrail::new(&path);
         assert!(store.replay().unwrap().is_empty());
+        store.verify().unwrap();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn durable_replay_revalidates_tenant_id() {
+        let path = temp_log();
+        let valid = serde_json::to_string(&base(0)).unwrap();
+        let invalid = valid.replace("\"acme\"", "\"bad/tenant\"");
+        std::fs::write(&path, format!("{invalid}\n")).unwrap();
+        let store = FileEnterpriseAuditTrail::new(&path);
+        let error = store.replay().expect_err("invalid tenant must fail");
+        assert!(error.contains("invalid tenant id"), "{error}");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn shared_file_sink_serializes_concurrent_appends() {
+        const WORKERS: usize = 16;
+        let path = temp_log();
+        let store = std::sync::Arc::new(FileEnterpriseAuditTrail::new(&path));
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(WORKERS));
+        let mut handles = Vec::with_capacity(WORKERS);
+        for index in 0..WORKERS
+        {
+            let store = std::sync::Arc::clone(&store);
+            let barrier = std::sync::Arc::clone(&barrier);
+            handles.push(std::thread::spawn(move || {
+                barrier.wait();
+                store
+                    .record_execution(
+                        &TenantId::parse("acme").unwrap(),
+                        "worker",
+                        "session-concurrent",
+                        None,
+                        &format!("call-{index}"),
+                        "build",
+                        "workspace-write",
+                        "executed",
+                        &format!("digest-{index}"),
+                    )
+                    .unwrap();
+            }));
+        }
+        for handle in handles
+        {
+            handle.join().unwrap();
+        }
+        let events = store.replay().unwrap();
+        assert_eq!(events.len(), WORKERS);
+        for (index, event) in events.iter().enumerate()
+        {
+            assert_eq!(event.sequence, index as u64);
+            let expected = if index == 0
+            {
+                ENTERPRISE_AUDIT_GENESIS
+            }
+            else
+            {
+                events[index - 1].chain_hash.as_str()
+            };
+            assert_eq!(event.prev_hash, expected);
+        }
         store.verify().unwrap();
         let _ = std::fs::remove_file(&path);
     }

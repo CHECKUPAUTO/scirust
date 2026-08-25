@@ -287,21 +287,32 @@ impl<P: super::tool_runtime::ToolPolicy> DeepSeekBridge<P> {
         });
 
         // Resolve sandbox metadata into the approval input before execution.
-        // The ApprovalRequested event itself is emitted only after the
-        // ApprovalService has generated the authoritative request id.
-        let (configured, requested) = match wire.sandbox_permissions.as_deref()
+        // Also resolve the effective permission for the durable audit trail:
+        // configured mode normally, approved one-shot request on escalation.
+        let configured = if super::sandbox::tool_supports_sandbox(&call.tool)
+            || wire.sandbox_permissions.is_some()
         {
-            None => (None, None),
-            Some(requested) =>
-            {
-                let requested_perm = SandboxPermission::parse(requested).map_err(|_| {
-                    BridgeError::UnknownValue(format!("sandbox permission {requested:?}"))
-                })?;
-                let configured_perm = super::sandbox::configured_permission()
-                    .map_err(BridgeError::SandboxEscalationDenied)?;
-                (Some(configured_perm), Some(requested_perm))
-            },
+            Some(
+                super::sandbox::configured_permission()
+                    .map_err(BridgeError::SandboxEscalationDenied)?,
+            )
+        }
+        else
+        {
+            None
         };
+        let requested =
+            match wire.sandbox_permissions.as_deref()
+            {
+                None => None,
+                Some(value) => Some(SandboxPermission::parse(value).map_err(|_| {
+                    BridgeError::UnknownValue(format!("sandbox permission {value:?}"))
+                })?),
+            };
+        let effective_sandbox = requested
+            .or(configured)
+            .map(SandboxPermission::label)
+            .unwrap_or("not-applicable");
 
         // ApprovalService (id generation, policy, answerer, cancellation).
         let mut input = ApprovalServiceRequest::new(call.clone())
@@ -381,7 +392,7 @@ impl<P: super::tool_runtime::ToolPolicy> DeepSeekBridge<P> {
                 {
                     self.audit_execution(
                         &call,
-                        wire.sandbox_permissions.as_deref(),
+                        effective_sandbox,
                         Some(&resolved.request_id),
                         "rejected",
                         "",
@@ -405,7 +416,7 @@ impl<P: super::tool_runtime::ToolPolicy> DeepSeekBridge<P> {
                         // though side effects already happened.
                         self.audit_execution(
                             &call,
-                            wire.sandbox_permissions.as_deref(),
+                            effective_sandbox,
                             Some(&approved_request_id),
                             "executed",
                             &crate::sha256::sha256_hex(output.as_bytes()),
@@ -422,7 +433,7 @@ impl<P: super::tool_runtime::ToolPolicy> DeepSeekBridge<P> {
                         // is best-effort and never masks the original error.
                         let _ = self.audit_execution(
                             &call,
-                            wire.sandbox_permissions.as_deref(),
+                            effective_sandbox,
                             Some(&approved_request_id),
                             "failed",
                             "",
@@ -444,7 +455,7 @@ impl<P: super::tool_runtime::ToolPolicy> DeepSeekBridge<P> {
     fn audit_execution(
         &self,
         call: &ToolCall,
-        sandbox_permissions: Option<&str>,
+        sandbox: &str,
         request_id: Option<&ApprovalRequestId>,
         decision: &str,
         output_digest: &str,
@@ -460,7 +471,6 @@ impl<P: super::tool_runtime::ToolPolicy> DeepSeekBridge<P> {
                 "enterprise audit is wired but the session id is empty".to_string(),
             ));
         }
-        let sandbox = sandbox_permissions.unwrap_or("not-requested").to_string();
         sink.record_execution(
             &identity.tenant,
             &identity.subject,
@@ -468,7 +478,7 @@ impl<P: super::tool_runtime::ToolPolicy> DeepSeekBridge<P> {
             request_id,
             &call.id,
             &call.tool,
-            &sandbox,
+            sandbox,
             decision,
             output_digest,
         )
@@ -893,7 +903,7 @@ mod tests {
         assert_eq!(event.session_id, "session-77");
         assert_eq!(event.call_id.as_deref(), Some("call-audit-1"));
         assert_eq!(event.tool.as_deref(), Some("read"));
-        assert_eq!(event.sandbox.as_deref(), Some("not-requested"));
+        assert_eq!(event.sandbox.as_deref(), Some("not-applicable"));
         assert_eq!(event.decision.as_deref(), Some("executed"));
         assert_eq!(
             event.execution_digest.as_deref(),
@@ -905,6 +915,34 @@ mod tests {
             crate::agentic::enterprise_audit::ENTERPRISE_AUDIT_GENESIS
         );
         store.verify().unwrap();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn sandboxed_call_records_configured_effective_permission() {
+        use crate::agentic::enterprise_audit::FileEnterpriseAuditTrail;
+        let path = temp_enterprise_log();
+        let bridge = test_bridge().with_enterprise_audit(
+            Arc::new(FileEnterpriseAuditTrail::new(&path)),
+            enterprise_identity(),
+            "session-sandbox",
+        );
+        let wire = ToolCallWire {
+            call_id: "call-audit-sandbox".to_string(),
+            tool: "status".to_string(),
+            params: HashMap::new(),
+            sandbox_permissions: None,
+            justification: None,
+        };
+        bridge
+            .execute(wire, &CancellationToken::new(), &|_| {})
+            .expect("status must execute");
+        let events = FileEnterpriseAuditTrail::new(&path).replay().unwrap();
+        assert_eq!(events.len(), 1);
+        let expected = super::super::sandbox::configured_permission()
+            .unwrap()
+            .label();
+        assert_eq!(events[0].sandbox.as_deref(), Some(expected));
         let _ = std::fs::remove_file(&path);
     }
 
