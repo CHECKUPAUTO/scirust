@@ -1,0 +1,286 @@
+name: FLAT M59 Q1 Thor qualification
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - "scirust-gpu/examples/flat_m28_naive_vs_fused.rs"
+      - "docs/FLAT_M59_Q1_THOR_QUALIFICATION.md"
+      - ".github/workflows/flat-m59-q1-thor-qualification.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flat-m59-q1-thor-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  m59-thor:
+    name: SciRust multi-dispatch vs FLAT Q1 on physical Thor
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, ARM64, scirust-arm64, jetson-thor, internal]
+    timeout-minutes: 360
+    env:
+      CARGO_INCREMENTAL: 0
+      RUSTFLAGS: "-D warnings"
+      SCIRUST_THOR_GPU_LOCK: /dev/nvidia0
+      SCIRUST_SOURCE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+      SCIRUST_M28_WARMUPS: "3"
+      SCIRUST_M28_REPEATS: "9"
+      SCIRUST_M28_FLAT_ROUTE: q1_vec4_mha
+      SCIRUST_THOR_IDLE_SETTLE_SECONDS: "300"
+      WGPU_BACKEND: vulkan
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Require persistent physical Thor runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "runner_name=$RUNNER_NAME"
+          case "$RUNNER_NAME" in
+            tarek-scirust-arm64-01|tarek-scirust-arm64-02|tarek-scirust-arm64-03|tarek-scirust-arm64-04)
+              ;;
+            *)
+              echo "::error::M59 physical evidence requires one of the persistent tarek-scirust-arm64-01..04 runners; refusing $RUNNER_NAME before build"
+              exit 1
+              ;;
+          esac
+
+      - name: Verify exact source revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          echo "source_revision=$actual"
+          test "$actual" = "$SCIRUST_SOURCE_REVISION"
+          grep -n 'flat-attention = { git' scirust-gpu/Cargo.toml
+
+      - name: Prepare executable build directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="$GITHUB_WORKSPACE/.target-m59-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          rm -rf "$target"
+          mkdir -p "$target"
+          echo "CARGO_TARGET_DIR=$target" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt, clippy
+
+      - name: Format
+        run: rustup run nightly-2026-07-02 cargo fmt --all -- --check
+
+      - name: Build M59 benchmark
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup run nightly-2026-07-02 cargo build --release --locked -p scirust-gpu \
+            --features flat-attention --example flat_m28_naive_vs_fused
+          benchmark="$CARGO_TARGET_DIR/release/examples/flat_m28_naive_vs_fused"
+          test -x "$benchmark"
+          echo "FLAT_M59_BENCHMARK=$benchmark" >> "$GITHUB_ENV"
+
+      - name: Physical Thor paired benchmark
+        shell: bash
+        timeout-minutes: 330
+        run: |
+          set -euo pipefail
+          command -v flock >/dev/null
+          command -v pgrep >/dev/null
+          command -v stat >/dev/null
+          if ! command -v nvidia-smi >/dev/null 2>&1; then
+            echo "::error::nvidia-smi is required to qualify the physical Thor state"
+            exit 1
+          fi
+          if ! command -v vulkaninfo >/dev/null 2>&1; then
+            echo "::error::vulkaninfo is required to qualify the physical Thor Vulkan adapter"
+            exit 1
+          fi
+
+          training_processes() {
+            pgrep -af '[c]uda_pretrain' || true
+          }
+
+          compute_processes() {
+            nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null
+          }
+
+          if [[ ! -c "$SCIRUST_THOR_GPU_LOCK" ]]; then
+            echo "::error::physical Thor lock target is not an NVIDIA character device: $SCIRUST_THOR_GPU_LOCK"
+            ls -l /dev/nvidia* 2>/dev/null || true
+            exit 1
+          fi
+          if [[ ! -r "$SCIRUST_THOR_GPU_LOCK" || ! -w "$SCIRUST_THOR_GPU_LOCK" ]]; then
+            echo "::error::physical Thor device lock is not readable/writable by this persistent runner"
+            ls -l "$SCIRUST_THOR_GPU_LOCK" || true
+            exit 1
+          fi
+          stat -Lc 'gpu_lock_target=%n st_dev=%d inode=%i rdev_hex=%t:%T mode=%a owner=%U:%G type=%F' "$SCIRUST_THOR_GPU_LOCK"
+          exec 9<>"$SCIRUST_THOR_GPU_LOCK"
+          flock -x 9
+          echo "gpu_lock_acquired=true runner=$RUNNER_NAME"
+          if flock -n "$SCIRUST_THOR_GPU_LOCK" -c 'true'; then
+            echo "::error::physical GPU lock does not contend across independent file descriptions"
+            exit 1
+          fi
+          echo "gpu_lock_self_contention=pass"
+
+          gpu_inventory="$(nvidia-smi --query-gpu=name,driver_version --format=csv,noheader)" || {
+            echo "::error::cannot query NVIDIA GPU inventory"
+            exit 1
+          }
+          printf '%s\n' "$gpu_inventory"
+          grep -F "NVIDIA Thor" <<< "$gpu_inventory" >/dev/null || {
+            echo "::error::expected physical NVIDIA Thor was not found"
+            exit 1
+          }
+
+          vulkan_summary="$(vulkaninfo --summary 2>&1)" || {
+            printf '%s\n' "$vulkan_summary"
+            echo "::error::cannot query Vulkan adapter inventory"
+            exit 1
+          }
+          printf '%s\n' "$vulkan_summary"
+          grep -F "NVIDIA Tegra NVIDIA Thor" <<< "$vulkan_summary" >/dev/null || {
+            echo "::error::physical Thor is not exposed through Vulkan"
+            exit 1
+          }
+
+          deadline=$((SECONDS + 18000))
+          settle_step=5
+          settle_required="$SCIRUST_THOR_IDLE_SETTLE_SECONDS"
+          settled=0
+          while (( settled < settle_required )); do
+            training="$(training_processes)"
+            if ! active="$(compute_processes)"; then
+              echo "::error::M59 cannot verify Thor compute occupancy"
+              exit 1
+            fi
+
+            if [[ -n "${training//[[:space:]]/}" ]]; then
+              echo "SciAgent cuda_pretrain is active; M59 timing remains blocked."
+              printf '%s\n' "$training"
+              settled=0
+            elif [[ -n "${active//[[:space:]]/}" ]]; then
+              echo "::error::Unknown GPU compute activity is active while M59 owns the Thor reservation:"
+              printf '%s\n' "$active"
+              exit 1
+            else
+              settled=$((settled + settle_step))
+              if (( settled == settle_step || settled % 60 == 0 )); then
+                echo "Thor continuously idle: ${settled}/${settle_required}s"
+              fi
+            fi
+
+            if (( SECONDS >= deadline )); then
+              echo "::error::Thor never reached the required ${settle_required}s continuous idle window before the five-hour deadline"
+              exit 1
+            fi
+            sleep "$settle_step"
+          done
+
+          echo "Thor idle/cooldown qualification satisfied for ${settle_required}s."
+          nvidia-smi --query-gpu=temperature.gpu,utilization.gpu,clocks.gr,clocks.sm,power.draw --format=csv,noheader || true
+
+          contamination="$RUNNER_TEMP/flat-m59-thor-contamination.txt"
+          : > "$contamination"
+          (
+            while true; do
+              training="$(training_processes)"
+              if [[ -n "${training//[[:space:]]/}" ]]; then
+                {
+                  date -u +'%Y-%m-%dT%H:%M:%SZ'
+                  printf '%s\n' "$training"
+                } >> "$contamination"
+                exit 0
+              fi
+              sleep 1
+            done
+          ) &
+          watchdog_pid=$!
+          cleanup_watchdog() {
+            kill "$watchdog_pid" 2>/dev/null || true
+            wait "$watchdog_pid" 2>/dev/null || true
+          }
+          trap cleanup_watchdog EXIT
+
+          echo "source_revision=$(git rev-parse HEAD)"
+          echo "benchmark_scope=resident_wgpu_same_context_upload_readback_excluded"
+          echo "flat_route=$SCIRUST_M28_FLAT_ROUTE"
+          echo "warmups=$SCIRUST_M28_WARMUPS repeats=$SCIRUST_M28_REPEATS"
+          echo "thor_idle_settle_seconds=$SCIRUST_THOR_IDLE_SETTLE_SECONDS"
+          echo "sciagent_contamination_watch=continuous_1s"
+
+          benchmark="$FLAT_M59_BENCHMARK"
+          test -x "$benchmark"
+          for seq in 128 512; do
+            for dim in 64 128; do
+              echo "=== geometry seq_len=$seq head_dim=$dim ==="
+              out="$RUNNER_TEMP/flat-m59-thor-${seq}-${dim}.csv"
+              route_meta="$RUNNER_TEMP/flat-m59-thor-${seq}-${dim}.route.txt"
+              SCIRUST_M28_SEQ_LEN="$seq" \
+              SCIRUST_M28_HEAD_DIM="$dim" \
+              "$benchmark" 2> >(tee "$route_meta" >&2) | tee "$out"
+
+              if [[ -s "$contamination" ]]; then
+                echo "::error::SciAgent training appeared during the measured M59 window; all timing evidence from this run is invalid"
+                cat "$contamination"
+                exit 1
+              fi
+              if [[ -n "$(training_processes)" ]]; then
+                echo "::error::SciAgent training is active immediately after a measured geometry"
+                training_processes
+                exit 1
+              fi
+
+              grep -Fx "flat_route=q1_vec4_mha" "$route_meta" >/dev/null || {
+                echo "::error::M59 benchmark did not select the requested Q1 route"
+                cat "$route_meta"
+                exit 1
+              }
+              grep -F "NVIDIA Tegra NVIDIA Thor,Vulkan," "$out" >/dev/null || {
+                echo "::error::M59 benchmark did not execute through Vulkan on the physical Thor WGPU adapter"
+                exit 1
+              }
+              rows="$(grep -c ',none$' "$out")"
+              if [[ "$rows" -ne 2 ]]; then
+                echo "::error::expected exactly two M59 timing rows for geometry seq=$seq dim=$dim; got $rows"
+                cat "$out"
+                exit 1
+              fi
+            done
+          done
+
+          cleanup_watchdog
+          trap - EXIT
+
+          if ! post_active="$(compute_processes)"; then
+            echo "::error::M59 cannot verify post-benchmark Thor compute occupancy"
+            exit 1
+          fi
+          if [[ -n "${post_active//[[:space:]]/}" ]]; then
+            echo "::error::GPU compute activity is present immediately after M59 timing; evidence is not accepted"
+            printf '%s\n' "$post_active"
+            exit 1
+          fi
+
+          nvidia-smi --query-gpu=temperature.gpu,utilization.gpu,clocks.gr,clocks.sm,power.draw --format=csv,noheader || true
+          echo "performance_claim=measurement_only_no_production_routing_change"
+
+      - name: Clean M59 build directory
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${CARGO_TARGET_DIR:-}" && "$CARGO_TARGET_DIR" == "$GITHUB_WORKSPACE"/.target-m59-* ]]; then
+            rm -rf "$CARGO_TARGET_DIR"
+          fi
