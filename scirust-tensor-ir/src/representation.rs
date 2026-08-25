@@ -10,15 +10,21 @@
 //! therefore impossible by construction, mirroring how the canonical
 //! [`Graph`] only permits inputs referring to previously created nodes.
 //!
-//! Dense storage remains the identity representation. The composite families
-//! are [`PrimitiveRepresentation::Factorized`] (two contracted matrix factors),
-//! [`PrimitiveRepresentation::Quantized`] (discrete codes corrected by
-//! continuous scales) and [`PrimitiveRepresentation::Sparse`] (integer
-//! positions plus numeric nonzero magnitudes). Storage is accounted as the
-//! exact sum of declared components, aggregatable per graph through
-//! [`RepresentationPlan::total_storage_bits`]. Codebook layouts, block
-//! geometry, packed/sub-bit payloads, storage formats, cost models and
-//! backend-specific materialization remain intentionally out of scope.
+//! Dense storage remains the identity representation.
+//! [`PrimitiveRepresentation::Factorized`] is the first composite family whose
+//! reconstruction contract is complete enough to bind to a logical tensor:
+//! two matrix factors must contract exactly to the logical matrix shape.
+//!
+//! [`PrimitiveRepresentation::Quantized`] and [`PrimitiveRepresentation::Sparse`]
+//! are retained as declaration skeletons only. Their typed components and
+//! declaration invariants can be explored and interned internally, but they are
+//! not valid logical-tensor representations until their layout and reconstruction
+//! geometry are explicitly defined. In particular, no storage saving is claimed
+//! merely from the sizes of codes/scales or indices/values.
+//!
+//! Codebook layouts, block geometry, packed/sub-bit payloads, sparse formats,
+//! cost models and backend-specific materialization remain intentionally out of
+//! scope.
 
 use alloc::vec::Vec;
 use core::fmt;
@@ -143,8 +149,9 @@ pub enum PrimitiveRepresentation {
     /// once at declaration time: codes must be integer-valued (discrete
     /// payload) and scales floating-point (continuous correction). Block
     /// layouts, group sizes, zero-points and codebook geometry belong to
-    /// concrete schemes and stay out of scope; no shape relationship binds the
-    /// components to each other or to the logical tensor type.
+    /// concrete schemes and stay out of scope. Because those relationships are
+    /// required to prove that the components reconstruct a logical tensor, this
+    /// skeleton cannot currently be bound to one.
     Quantized {
         /// Discrete code payload with an integer dtype.
         codes: RepresentationComponent,
@@ -159,8 +166,9 @@ pub enum PrimitiveRepresentation {
     /// positions) and values must be numeric (magnitudes of any integer or
     /// floating dtype; boolean masks are predicates, not payloads). Storage
     /// formats, nnz layout and compression schemes belong to concrete formats
-    /// and stay out of scope; no shape relationship binds the components to
-    /// each other or to the logical tensor type.
+    /// and stay out of scope. Because those relationships are required to prove
+    /// how indices and values reconstruct the logical tensor, this skeleton
+    /// cannot currently be bound to one.
     Sparse {
         /// Nonzero positions with an integer dtype.
         indices: RepresentationComponent,
@@ -277,7 +285,8 @@ impl PrimitiveRepresentation {
                     }),
                 }
             },
-            Self::Quantized { .. } | Self::Sparse { .. } => Ok(()),
+            Self::Quantized { .. } => Err(RepresentationError::QuantizedLayoutUndefined),
+            Self::Sparse { .. } => Err(RepresentationError::SparseLayoutUndefined),
         }
     }
 
@@ -452,6 +461,12 @@ pub enum RepresentationError {
         /// Dtype carried by the values component.
         values: DType,
     },
+    /// Quantized components have been declared, but no layout/reconstruction
+    /// geometry currently proves that they represent a logical tensor.
+    QuantizedLayoutUndefined,
+    /// Sparse components have been declared, but no sparse layout/reconstruction
+    /// contract currently proves that they represent a logical tensor.
+    SparseLayoutUndefined,
     /// The node is outside the plan's assignment scope.
     ///
     /// Assignments are indexed by canonical node identifiers; the plan only
@@ -549,6 +564,20 @@ impl fmt::Display for RepresentationError {
                 write!(
                     formatter,
                     "sparse indices dtype {indices:?} must be integer-valued and values dtype {values:?} numeric"
+                )
+            },
+            Self::QuantizedLayoutUndefined =>
+            {
+                write!(
+                    formatter,
+                    "quantized representation has no defined logical reconstruction layout"
+                )
+            },
+            Self::SparseLayoutUndefined =>
+            {
+                write!(
+                    formatter,
+                    "sparse representation has no defined logical reconstruction layout"
                 )
             },
             Self::UnknownAssignmentNode { node } =>
@@ -752,11 +781,15 @@ impl RepresentationPlan {
     /// Return the exact physical storage required to represent `logical` with
     /// the declared representation `id`.
     ///
-    /// Dense storage counts `elements × dtype size × 8` bits. Composite
-    /// families validate their structure against `logical`, then sum the exact
-    /// storage of their declared components, resolving nested references
-    /// recursively (references point strictly backwards, so recursion
-    /// terminates). All arithmetic is checked and never uses floating-point.
+    /// Dense storage counts `elements × dtype size × 8` bits. Factorized
+    /// storage validates its contraction against `logical`, then sums the exact
+    /// storage of its declared factors recursively (references point strictly
+    /// backwards, so recursion terminates).
+    ///
+    /// Quantized and sparse declaration skeletons deliberately return a typed
+    /// error here: component byte counts alone do not prove that those
+    /// components reconstruct the requested logical tensor. All successful
+    /// accounting uses checked integer arithmetic and never floating-point.
     pub fn storage_bits(
         &self,
         id: RepresentationId,
@@ -1674,7 +1707,7 @@ mod tests {
     }
 
     #[test]
-    fn quantized_storage_bits_sum_component_storage_exactly() {
+    fn quantized_storage_requires_a_defined_reconstruction_layout() {
         let mut plan = empty_plan();
         let dense_u8 = plan
             .declare(PrimitiveRepresentation::dense(DType::U8))
@@ -1689,17 +1722,16 @@ mod tests {
         let scales = plan
             .component(TensorType::new(DType::F32, Shape::new(vec![4])), dense_f32)
             .unwrap();
+
         let quantized = plan
             .declare(PrimitiveRepresentation::quantized(codes, scales))
             .unwrap();
 
-        // The parent dtype is irrelevant to a converting representation.
         let logical = TensorType::new(DType::F32, Shape::new(vec![4, 2]));
 
-        // 4*2 code bytes * 8 bits + 4 scale words * 4 bytes * 8 bits.
         assert_eq!(
             plan.storage_bits(quantized, &logical),
-            Ok(StorageBits::new(64 + 128))
+            Err(RepresentationError::QuantizedLayoutUndefined)
         );
     }
 
@@ -1772,7 +1804,7 @@ mod tests {
     }
 
     #[test]
-    fn quantized_binds_to_logical_types_without_structural_constraints() {
+    fn quantized_rejects_logical_binding_until_layout_is_defined() {
         let mut plan = empty_plan();
         let dense_u8 = plan
             .declare(PrimitiveRepresentation::dense(DType::U8))
@@ -1787,18 +1819,20 @@ mod tests {
         let scales = plan
             .component(TensorType::new(DType::F16, Shape::new(vec![8])), dense_f16)
             .unwrap();
+
         let quantized = plan
             .declare(PrimitiveRepresentation::quantized(codes, scales))
             .unwrap();
 
-        // Block geometry is scheme-specific and out of IR scope: any logical
-        // type binds as long as components were declared validly.
+        // Equal-sized or differently shaped logical tensors are all rejected:
+        // no block/group/padding relationship has been declared.
         for dims in [vec![64], vec![8, 8], vec![2, 4, 8]]
         {
             let logical = TensorType::new(DType::F32, Shape::new(dims));
+
             assert_eq!(
                 plan.storage_bits(quantized, &logical),
-                Ok(StorageBits::new(64 * 8 + 8 * 2 * 8))
+                Err(RepresentationError::QuantizedLayoutUndefined)
             );
         }
     }
@@ -1912,7 +1946,7 @@ mod tests {
     }
 
     #[test]
-    fn sparse_storage_bits_sum_component_storage_exactly() {
+    fn sparse_storage_requires_a_defined_reconstruction_layout() {
         let mut plan = empty_plan();
         let dense_u16 = plan
             .declare(PrimitiveRepresentation::dense(DType::U16))
@@ -1927,17 +1961,16 @@ mod tests {
         let values = plan
             .component(TensorType::new(DType::F32, Shape::new(vec![12])), dense_f32)
             .unwrap();
+
         let sparse = plan
             .declare(PrimitiveRepresentation::sparse(indices, values))
             .unwrap();
 
-        // The parent dtype is irrelevant to a converting representation.
         let logical = TensorType::new(DType::F32, Shape::new(vec![4, 3]));
 
-        // 12 index words * 2 bytes * 8 bits + 12 value words * 4 bytes * 8 bits.
         assert_eq!(
             plan.storage_bits(sparse, &logical),
-            Ok(StorageBits::new(192 + 384))
+            Err(RepresentationError::SparseLayoutUndefined)
         );
     }
 
@@ -2038,7 +2071,7 @@ mod tests {
     }
 
     #[test]
-    fn quantized_assignments_bind_without_structural_match() {
+    fn quantized_assignment_is_rejected_until_layout_is_defined() {
         let mut graph = Graph::new();
         let weight = graph
             .add_input(
@@ -2049,6 +2082,8 @@ mod tests {
         graph.set_outputs(vec![weight]).unwrap();
 
         let mut plan = RepresentationPlan::dense(&graph).unwrap();
+        let dense_default = plan.assignment(weight).unwrap();
+
         let dense_u8 = plan
             .declare(PrimitiveRepresentation::dense(DType::U8))
             .unwrap();
@@ -2062,18 +2097,21 @@ mod tests {
         let scales = plan
             .component(TensorType::new(DType::F16, Shape::new(vec![8])), dense_f16)
             .unwrap();
+
         let quantized = plan
             .declare(PrimitiveRepresentation::quantized(codes, scales))
             .unwrap();
 
-        plan.assign(&graph, weight, quantized).unwrap();
-        assert_eq!(plan.assignment(weight), Some(quantized));
         assert_eq!(
-            plan.storage_bits(
-                quantized,
-                &TensorType::new(DType::F32, Shape::new(vec![8, 8]))
-            ),
-            Ok(StorageBits::new(8 * 8 * 8 + 8 * 2 * 8))
+            plan.assign(&graph, weight, quantized),
+            Err(RepresentationError::QuantizedLayoutUndefined)
+        );
+
+        // Rejected assignment is atomic: dense identity remains bound.
+        assert_eq!(plan.assignment(weight), Some(dense_default));
+        assert_eq!(
+            plan.node_storage_bits(&graph, weight),
+            Ok(StorageBits::new(8 * 8 * 32))
         );
     }
 
@@ -2289,31 +2327,19 @@ mod tests {
         graph.set_outputs(vec![weight, bias]).unwrap();
 
         let mut plan = RepresentationPlan::dense(&graph).unwrap();
+
         assert_eq!(
             plan.total_storage_bits(&graph),
             Ok(StorageBits::new(256 + 128))
         );
 
-        // Factorized weight [4,3]x[3,2] F16 and quantized bias: codes U8[4] +
-        // scales F16[2].
-        let (left, right) = factorized_components(&mut plan, DType::F16, 4, 3, 2);
+        let dense_bias = plan.assignment(bias).unwrap();
+
+        // A rank-1 F16 factorization represents the matrix exactly at the
+        // representation-contract level: [4,1] x [1,2] -> [4,2].
+        let (left, right) = factorized_components(&mut plan, DType::F16, 4, 1, 2);
         let factored = plan
             .declare(PrimitiveRepresentation::factorized(left, right))
-            .unwrap();
-        let dense_u8 = plan
-            .declare(PrimitiveRepresentation::dense(DType::U8))
-            .unwrap();
-        let dense_f16 = plan
-            .declare(PrimitiveRepresentation::dense(DType::F16))
-            .unwrap();
-        let codes = plan
-            .component(TensorType::new(DType::U8, Shape::new(vec![4])), dense_u8)
-            .unwrap();
-        let scales = plan
-            .component(TensorType::new(DType::F16, Shape::new(vec![2])), dense_f16)
-            .unwrap();
-        let quantized = plan
-            .declare(PrimitiveRepresentation::quantized(codes, scales))
             .unwrap();
 
         plan.replan(
@@ -2325,20 +2351,21 @@ mod tests {
                 },
                 Rebinding {
                     node: bias,
-                    representation: quantized,
+                    representation: dense_bias,
                 },
             ],
         )
         .unwrap();
 
-        assert_eq!(plan.assignments(), &[factored, quantized]);
+        assert_eq!(plan.assignments(), &[factored, dense_bias]);
 
-        // Weight: (12 + 6) halves * 16 bits; bias: 4 bytes * 8 + 2 halves * 16.
+        // Weight factors: (4*1 + 1*2) F16 values = 6 * 16 = 96 bits.
+        // Bias remains dense F32[4] = 128 bits.
         assert_eq!(
             plan.total_storage_bits(&graph),
-            Ok(StorageBits::new(288 + 64))
+            Ok(StorageBits::new(96 + 128))
         );
-        // The canonical graph stays untouched.
+
         assert_eq!(
             graph.nodes()[weight.get() as usize].output.dtype,
             DType::F32
