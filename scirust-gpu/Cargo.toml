@@ -43,7 +43,7 @@ scirust-core = { path = "../scirust-core", optional = true }
 scirust-cuda = { path = "../scirust-cuda", optional = true }
 scirust-license = { path = "../scirust-license", optional = true }
 wgpu = { version = "0.20", optional = true }
-flat-attention = { git = "https://github.com/Memorithm/FLAT-ATTENTION", rev = "fd0f748b9a5285858ffbf4867e405a3729c4b70b", default-features = false, features = ["wgpu"], optional = true }
+flat-attention = { git = "https://github.com/Memorithm/FLAT-ATTENTION", rev = "c74a3806f8cfe621671694692fc14adfe08116f0", default-features = false, features = ["wgpu"], optional = true }
 pollster = { version = "0.3", optional = true }
 bytemuck = { version = "1", optional = true }
 
