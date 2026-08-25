@@ -76,9 +76,10 @@ impl StorageBits {
 /// representations may contain factors, packed payloads, scales, indices or
 /// other typed tensor components with different shapes and dtypes.
 ///
-/// Instances are constructed through [`RepresentationPlan::component`], which
-/// validates that the identifier exists and is compatible with the component's
-/// own tensor type.
+/// Instances are constructed internally by [`RepresentationPlan`] declaration
+/// methods. Public callers provide tensor types and representation identifiers;
+/// the target plan resolves those identifiers itself, so a component created
+/// against one plan cannot be transplanted into another plan by accident.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepresentationComponent {
     tensor_type: TensorType,
@@ -642,6 +643,35 @@ impl RepresentationPlan {
         &self.representations
     }
 
+    /// Declare and intern dense scalar storage.
+    ///
+    /// Dense declarations carry no component dependencies.
+    pub fn declare_dense(
+        &mut self,
+        storage_dtype: DType,
+    ) -> Result<RepresentationId, RepresentationError> {
+        self.declare(PrimitiveRepresentation::dense(storage_dtype))
+    }
+
+    /// Declare and intern a two-factor matrix representation.
+    ///
+    /// Component identifiers are resolved against this plan before the
+    /// representation is constructed. This deliberately prevents callers from
+    /// transporting a validated [`RepresentationComponent`] from another plan
+    /// and having its numeric identifier silently reinterpreted here.
+    pub fn declare_factorized(
+        &mut self,
+        left_type: TensorType,
+        left_representation: RepresentationId,
+        right_type: TensorType,
+        right_representation: RepresentationId,
+    ) -> Result<RepresentationId, RepresentationError> {
+        let left = self.component(left_type, left_representation)?;
+        let right = self.component(right_type, right_representation)?;
+
+        self.declare(PrimitiveRepresentation::factorized(left, right))
+    }
+
     /// Declare and intern one representation.
     ///
     /// Every [`RepresentationComponent`] the representation is declared over
@@ -655,9 +685,9 @@ impl RepresentationPlan {
     /// Redeclaring an equal representation returns the existing identifier, so
     /// interning stays deterministic.
     ///
-    /// This is the extension point representation-aware lowering uses to
-    /// register composite declarations built from validated components.
-    pub fn declare(
+    /// Internal insertion kernel shared by the public family-specific
+    /// declaration methods.
+    fn declare(
         &mut self,
         primitive: PrimitiveRepresentation,
     ) -> Result<RepresentationId, RepresentationError> {
@@ -818,8 +848,8 @@ impl RepresentationPlan {
     /// This validates both identifier membership and compatibility between the
     /// physical representation and the component's own tensor type. Composite
     /// representations name their dependencies through such validated
-    /// components when calling `RepresentationPlan::declare`.
-    pub fn component(
+    /// components before the internal declaration kernel is invoked.
+    fn component(
         &self,
         tensor_type: TensorType,
         representation: RepresentationId,

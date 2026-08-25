@@ -6,8 +6,8 @@
 
 use scirust_compute::{DType, Shape};
 use scirust_tensor_ir::{
-    Graph, NodeId, PrimitiveRepresentation, Rebinding, RepresentationError, RepresentationId,
-    RepresentationPlan, StorageBits, TensorType,
+    Graph, NodeId, Rebinding, RepresentationError, RepresentationId, RepresentationPlan,
+    StorageBits, TensorType,
 };
 
 fn tensor_type(dtype: DType, dims: &[usize]) -> TensorType {
@@ -22,97 +22,92 @@ fn downstream_crates_plan_composite_representations_end_to_end() {
         .unwrap();
     graph.set_outputs(vec![weight]).unwrap();
 
-    // Dense seeding over the canonical graph.
     let mut plan = RepresentationPlan::dense(&graph).unwrap();
 
-    // Declaration kernel interns building blocks deterministically.
-    let dense_u8 = plan
-        .declare(PrimitiveRepresentation::dense(DType::U8))
+    let dense_f16 = plan.declare_dense(DType::F16).unwrap();
+    assert_eq!(plan.declare_dense(DType::F16), Ok(dense_f16));
+
+    let factorized = plan
+        .declare_factorized(
+            tensor_type(DType::F16, &[8, 2]),
+            dense_f16,
+            tensor_type(DType::F16, &[2, 8]),
+            dense_f16,
+        )
         .unwrap();
-    let dense_f16 = plan
-        .declare(PrimitiveRepresentation::dense(DType::F16))
-        .unwrap();
-    assert!(dense_u8.get() < dense_f16.get());
+
+    // Equal declarations remain deterministically interned.
     assert_eq!(
-        plan.declare(PrimitiveRepresentation::dense(DType::U8)),
-        Ok(dense_u8)
+        plan.declare_factorized(
+            tensor_type(DType::F16, &[8, 2]),
+            dense_f16,
+            tensor_type(DType::F16, &[2, 8]),
+            dense_f16,
+        ),
+        Ok(factorized)
     );
 
-    let codes = plan
-        .component(tensor_type(DType::U8, &[8, 8]), dense_u8)
-        .unwrap();
-    let scales = plan
-        .component(tensor_type(DType::F16, &[8]), dense_f16)
-        .unwrap();
-    let quantized = plan
-        .declare(PrimitiveRepresentation::quantized(codes, scales))
-        .unwrap();
+    plan.assign(&graph, weight, factorized).unwrap();
 
-    // Binding and exact accounting through the published surface.
-    plan.assign(&graph, weight, quantized).unwrap();
+    assert_eq!(plan.assignment(weight), Some(factorized));
 
-    assert_eq!(plan.assignment(weight), Some(quantized));
+    // 8*2 + 2*8 F16 elements = 32 half words = 512 physical bits.
     assert_eq!(
         plan.node_storage_bits(&graph, weight),
-        Ok(StorageBits::new(8 * 8 * 8 + 8 * 2 * 8))
+        Ok(StorageBits::new(512))
     );
-    assert_eq!(
-        plan.total_storage_bits(&graph),
-        Ok(StorageBits::new(8 * 8 * 8 + 8 * 2 * 8))
-    );
+    assert_eq!(plan.total_storage_bits(&graph), Ok(StorageBits::new(512)));
 
-    // The assignment table mirrors canonical node order.
-    assert_eq!(plan.assignments(), &[quantized]);
+    assert_eq!(plan.assignments(), &[factorized]);
 
-    // Planning leaves the canonical graph untouched.
+    // Representation planning remains a side table.
     assert_eq!(
-        graph.nodes()[weight.get() as usize].output.dtype,
-        DType::F32
+        graph.nodes()[weight.get() as usize].output,
+        tensor_type(DType::F32, &[8, 8])
     );
 }
 
 #[test]
-fn foreign_values_cannot_bypass_the_public_declaration_kernel() {
-    let mut source_graph = Graph::new();
-    let u8_node = source_graph
-        .add_input("u8", tensor_type(DType::U8, &[4]))
+fn public_declarations_resolve_dependencies_in_the_target_plan() {
+    let mut graph = Graph::new();
+    let value = graph
+        .add_input("value", tensor_type(DType::U8, &[2, 2]))
         .unwrap();
-    let f16_node = source_graph
-        .add_input("f16", tensor_type(DType::F16, &[4]))
-        .unwrap();
-    source_graph.set_outputs(vec![u8_node, f16_node]).unwrap();
+    graph.set_outputs(vec![value]).unwrap();
 
-    let source = RepresentationPlan::dense(&source_graph).unwrap();
-    let codes = source
-        .component(tensor_type(DType::U8, &[4]), RepresentationId::new(0))
-        .unwrap();
-    let scales = source
-        .component(tensor_type(DType::F16, &[4]), RepresentationId::new(1))
-        .unwrap();
-    let foreign = PrimitiveRepresentation::quantized(codes, scales);
+    let mut plan = RepresentationPlan::dense(&graph).unwrap();
 
-    // The target plan only knows identifier 0, so depending on identifier 1
-    // is a forward reference there and must be rejected.
-    let mut target_graph = Graph::new();
-    let only = target_graph
-        .add_input("u8", tensor_type(DType::U8, &[4]))
-        .unwrap();
-    target_graph.set_outputs(vec![only]).unwrap();
-    let mut target = RepresentationPlan::dense(&target_graph).unwrap();
+    // The seeded U8 representation is identifier 0. Identifier 1 is not yet
+    // part of this plan and therefore cannot be used as a component.
+    let dense_u8 = plan.assignment(value).unwrap();
+    assert_eq!(dense_u8, RepresentationId::new(0));
 
+    let missing = RepresentationId::new(1);
     assert_eq!(
-        target.declare(foreign.clone()),
-        Err(RepresentationError::InvalidRepresentationId {
-            id: RepresentationId::new(1)
-        })
+        plan.declare_factorized(
+            tensor_type(DType::U8, &[2, 2]),
+            dense_u8,
+            tensor_type(DType::U16, &[2, 2]),
+            missing,
+        ),
+        Err(RepresentationError::InvalidRepresentationId { id: missing })
     );
 
-    // Plans are append-only: once the target declares its own identifier 1,
-    // the identical value becomes a legitimate backward reference.
-    target
-        .declare(PrimitiveRepresentation::dense(DType::F16))
-        .unwrap();
-    assert!(target.declare(foreign).is_ok());
+    // Once this plan itself declares identifier 1, the same numeric identifier
+    // resolves to this plan's own declaration. No foreign component object is
+    // accepted by the public API.
+    let dense_u16 = plan.declare_dense(DType::U16).unwrap();
+    assert_eq!(dense_u16, missing);
+
+    assert!(
+        plan.declare_factorized(
+            tensor_type(DType::U8, &[2, 2]),
+            dense_u8,
+            tensor_type(DType::U16, &[2, 2]),
+            dense_u16,
+        )
+        .is_ok()
+    );
 }
 
 #[test]
@@ -126,18 +121,14 @@ fn incompatible_bindings_rejected_atomically_through_the_public_surface() {
     let mut plan = RepresentationPlan::dense(&graph).unwrap();
     let dense_default = plan.assignment(weight).unwrap();
 
-    // Factors contracting to [2, 5] cannot represent the node's [4, 2].
-    let dense_f16 = plan
-        .declare(PrimitiveRepresentation::dense(DType::F16))
-        .unwrap();
-    let left = plan
-        .component(tensor_type(DType::F16, &[2, 3]), dense_f16)
-        .unwrap();
-    let right = plan
-        .component(tensor_type(DType::F16, &[3, 5]), dense_f16)
-        .unwrap();
+    let dense_f16 = plan.declare_dense(DType::F16).unwrap();
     let factored = plan
-        .declare(PrimitiveRepresentation::factorized(left, right))
+        .declare_factorized(
+            tensor_type(DType::F16, &[2, 3]),
+            dense_f16,
+            tensor_type(DType::F16, &[3, 5]),
+            dense_f16,
+        )
         .unwrap();
 
     assert_eq!(
@@ -219,30 +210,19 @@ fn replan_batches_apply_atomically_from_the_public_surface() {
 
     let mut plan = RepresentationPlan::dense(&graph).unwrap();
     let before_total = plan.total_storage_bits(&graph).unwrap();
+    let dense_f32 = plan.assignment(bias).unwrap();
 
-    // Build two composite declarations and swap both nodes in one batch.
-    let dense_f16 = plan
-        .declare(PrimitiveRepresentation::dense(DType::F16))
-        .unwrap();
-    let left = plan
-        .component(
-            TensorType::new(DType::F16, Shape::new(vec![4, 3])),
-            dense_f16,
-        )
-        .unwrap();
-    let right = plan
-        .component(
-            TensorType::new(DType::F16, Shape::new(vec![3, 2])),
-            dense_f16,
-        )
-        .unwrap();
+    let dense_f16 = plan.declare_dense(DType::F16).unwrap();
     let factored = plan
-        .declare(PrimitiveRepresentation::factorized(
-            left.clone(),
-            right.clone(),
-        ))
+        .declare_factorized(
+            TensorType::new(DType::F16, Shape::new(vec![4, 1])),
+            dense_f16,
+            TensorType::new(DType::F16, Shape::new(vec![1, 2])),
+            dense_f16,
+        )
         .unwrap();
 
+    // One invalid decision rejects the complete batch.
     plan.replan(
         &graph,
         &[
@@ -258,26 +238,10 @@ fn replan_batches_apply_atomically_from_the_public_surface() {
     )
     .expect_err("factorized cannot represent a vector bias");
 
-    // The whole batch was rejected: neither node moved.
-    for index in 0..2
-    {
-        assert_ne!(plan.assignment(NodeId::new(index)), Some(factored));
-    }
+    assert_ne!(plan.assignment(weight), Some(factored));
+    assert_eq!(plan.assignment(bias), Some(dense_f32));
 
-    // A corrected batch applies and the exact totals move accordingly.
-    let dense_u8 = plan
-        .declare(PrimitiveRepresentation::dense(DType::U8))
-        .unwrap();
-    let scales = plan
-        .component(TensorType::new(DType::F16, Shape::new(vec![2])), dense_f16)
-        .unwrap();
-    let codes = plan
-        .component(TensorType::new(DType::U8, Shape::new(vec![4])), dense_u8)
-        .unwrap();
-    let quantized = plan
-        .declare(PrimitiveRepresentation::quantized(codes, scales))
-        .unwrap();
-
+    // A corrected batch applies atomically.
     plan.replan(
         &graph,
         &[
@@ -287,13 +251,13 @@ fn replan_batches_apply_atomically_from_the_public_surface() {
             },
             Rebinding {
                 node: bias,
-                representation: quantized,
+                representation: dense_f32,
             },
         ],
     )
     .unwrap();
 
-    assert_eq!(plan.assignments(), &[factored, quantized]);
+    assert_eq!(plan.assignments(), &[factored, dense_f32]);
 
     let after_total = plan.total_storage_bits(&graph).unwrap();
     assert!(after_total.get() < before_total.get());
