@@ -201,16 +201,22 @@ fn main() -> Result<(), Box<dyn Error>> {
     let head_dim = env_usize("SCIRUST_M28_HEAD_DIM", DEFAULT_HEAD_DIM);
     let warmups = env_usize("SCIRUST_M28_WARMUPS", DEFAULT_WARMUPS);
     let repeats = env_usize("SCIRUST_M28_REPEATS", DEFAULT_REPEATS);
+    let flat_route =
+        std::env::var("SCIRUST_M28_FLAT_ROUTE").unwrap_or_else(|_| "q4_vec4_mha".to_owned());
     if seq_len == 0 || head_dim == 0 || warmups == 0 || repeats == 0
     {
         return Err("seq_len, head_dim, warmups and repeats must be non-zero".into());
     }
 
     let ctx = WgpuContext::new()?;
-    // Use the qualified vec4 MHA path (M44/M6, D=64/128) rather than the
-    // portable default so the comparison measures FLAT's best qualified
-    // kernel for the benchmark geometry.
-    let pipeline = WgpuGroupedForwardPipeline::with_vectorization(ctx.device(), true)?;
+    let pipeline = match flat_route.as_str()
+    {
+        // Preserve the accepted M28 baseline exactly when no route override is supplied.
+        "q4_vec4_mha" => WgpuGroupedForwardPipeline::with_vectorization(ctx.device(), true)?,
+        // M59 qualification path: M58's independent one-query-row vec4 candidate.
+        "q1_vec4_mha" => WgpuGroupedForwardPipeline::with_q1_vec4_mha(ctx.device(), true)?,
+        other => return Err(format!("unsupported SCIRUST_M28_FLAT_ROUTE={other}").into()),
+    };
     let shape = GroupedAttentionShape {
         batch: 1,
         q_heads: 1,
@@ -218,6 +224,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         seq_len,
         head_dim,
     };
+    if flat_route == "q1_vec4_mha"
+    {
+        let selected = format!("{:?}", pipeline.kernel_variant_for_shape(shape));
+        if selected != "Q1Vec4Mha"
+        {
+            return Err(format!(
+                "M59 requires Q1Vec4Mha, selected {selected} for seq_len={seq_len} head_dim={head_dim}"
+            )
+            .into());
+        }
+    }
     let layout = WgpuGroupedForwardPipeline::layout(shape)?;
     let elements = seq_len
         .checked_mul(head_dim)
@@ -238,6 +255,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         v: &v_flat,
     };
 
+    println!("flat_route={flat_route}");
     println!(
         "adapter,backend,causal,seq_len,head_dim,warmups,repeats,naive_median_us,naive_p95_us,flat_fresh_median_us,flat_fresh_p95_us,flat_reused_median_us,flat_reused_p95_us,naive_over_flat_fresh,naive_over_flat_reused,naive_parity_max_abs,flat_parity_max_abs,performance_claim"
     );
