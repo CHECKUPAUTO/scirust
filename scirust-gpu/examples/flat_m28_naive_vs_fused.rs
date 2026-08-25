@@ -255,7 +255,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         v: &v_flat,
     };
 
-    println!("flat_route={flat_route}");
+    eprintln!("flat_route={flat_route}");
     println!(
         "adapter,backend,causal,seq_len,head_dim,warmups,repeats,naive_median_us,naive_p95_us,flat_fresh_median_us,flat_fresh_p95_us,flat_reused_median_us,flat_reused_p95_us,naive_over_flat_fresh,naive_over_flat_reused,naive_parity_max_abs,flat_parity_max_abs,performance_claim"
     );
