@@ -6,7 +6,7 @@
 
 use scirust_compute::{DType, Shape};
 use scirust_tensor_ir::{
-    Graph, NodeId, Rebinding, RepresentationError, RepresentationId, RepresentationPlan,
+    Graph, NodeId, Operation, Rebinding, RepresentationError, RepresentationId, RepresentationPlan,
     StorageBits, TensorType,
 };
 
@@ -192,6 +192,109 @@ fn plans_reject_graphs_they_were_not_seeded_from() {
     let dense_f32 = plan.assignment(NodeId::new(0)).unwrap();
     plan.assign(&rebuilt, NodeId::new(0), dense_f32).unwrap();
     assert_eq!(plan.assignment(NodeId::new(0)), Some(dense_f32));
+}
+
+#[test]
+fn plans_reject_operation_drift_with_identical_tensor_types() {
+    let ty = tensor_type(DType::F32, &[8]);
+
+    let mut original = Graph::new();
+    let input = original.add_input("input", ty.clone()).unwrap();
+    let relu = original
+        .add_node(Operation::Relu, vec![input], ty.clone())
+        .unwrap();
+    original.set_outputs(vec![relu]).unwrap();
+
+    let plan = RepresentationPlan::dense(&original).unwrap();
+
+    let mut rewritten = Graph::new();
+    let rewritten_input = rewritten.add_input("input", ty.clone()).unwrap();
+    let exp = rewritten
+        .add_node(Operation::Exp, vec![rewritten_input], ty)
+        .unwrap();
+    rewritten.set_outputs(vec![exp]).unwrap();
+
+    assert_eq!(
+        plan.ensure_compatible_with(&rewritten),
+        Err(RepresentationError::GraphNodeOperationMismatch {
+            node: NodeId::new(1),
+            expected: Operation::Relu,
+            actual: Operation::Exp,
+        })
+    );
+}
+
+#[test]
+fn plans_reject_topology_drift_with_identical_operations_and_types() {
+    let ty = tensor_type(DType::F32, &[8]);
+
+    let mut original = Graph::new();
+    let lhs = original.add_input("lhs", ty.clone()).unwrap();
+    let rhs = original.add_input("rhs", ty.clone()).unwrap();
+    let sum = original
+        .add_node(Operation::Add, vec![lhs, rhs], ty.clone())
+        .unwrap();
+    let output = original
+        .add_node(Operation::Relu, vec![sum], ty.clone())
+        .unwrap();
+    original.set_outputs(vec![output]).unwrap();
+
+    let plan = RepresentationPlan::dense(&original).unwrap();
+
+    let mut rewired = Graph::new();
+    let rewired_lhs = rewired.add_input("lhs", ty.clone()).unwrap();
+    let rewired_rhs = rewired.add_input("rhs", ty.clone()).unwrap();
+    let rewired_sum = rewired
+        .add_node(Operation::Add, vec![rewired_lhs, rewired_rhs], ty.clone())
+        .unwrap();
+
+    assert_eq!(rewired_sum, NodeId::new(2));
+
+    let rewired_output = rewired
+        .add_node(Operation::Relu, vec![rewired_lhs], ty)
+        .unwrap();
+    rewired.set_outputs(vec![rewired_output]).unwrap();
+
+    assert_eq!(
+        plan.ensure_compatible_with(&rewired),
+        Err(RepresentationError::GraphNodeInputsMismatch {
+            node: NodeId::new(3),
+            expected: vec![NodeId::new(2)],
+            actual: vec![NodeId::new(0)],
+        })
+    );
+}
+
+#[test]
+fn plans_reject_changed_graph_outputs() {
+    let ty = tensor_type(DType::F32, &[8]);
+
+    let mut original = Graph::new();
+    let input = original.add_input("input", ty.clone()).unwrap();
+    let output = original
+        .add_node(Operation::Relu, vec![input], ty.clone())
+        .unwrap();
+    original.set_outputs(vec![output]).unwrap();
+
+    let plan = RepresentationPlan::dense(&original).unwrap();
+
+    let mut different_outputs = Graph::new();
+    let rebuilt_input = different_outputs.add_input("input", ty.clone()).unwrap();
+    let rebuilt_output = different_outputs
+        .add_node(Operation::Relu, vec![rebuilt_input], ty)
+        .unwrap();
+
+    different_outputs.set_outputs(vec![rebuilt_input]).unwrap();
+
+    assert_eq!(rebuilt_output, NodeId::new(1));
+
+    assert_eq!(
+        plan.ensure_compatible_with(&different_outputs),
+        Err(RepresentationError::GraphOutputsMismatch {
+            expected: vec![NodeId::new(1)],
+            actual: vec![NodeId::new(0)],
+        })
+    );
 }
 
 #[test]
