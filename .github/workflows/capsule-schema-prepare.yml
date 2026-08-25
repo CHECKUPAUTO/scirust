@@ -1,0 +1,46 @@
+name: Capsule schema branch preparation
+
+on:
+  push:
+    branches: [feat/capsule-schema-v1]
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: [self-hosted, Linux, ARM64, scirust-arm64, jetson-thor, internal]
+    timeout-minutes: 20
+    env:
+      CARGO_INCREMENTAL: 0
+      RUSTFLAGS: "-D warnings"
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: feat/capsule-schema-v1
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt, clippy
+      - name: Format branch
+        run: cargo +nightly-2026-07-02 fmt --all
+      - name: Resolve lockfile and check schema
+        run: cargo +nightly-2026-07-02 check -p scirust-capsule-schema
+      - name: Clippy schema
+        run: cargo +nightly-2026-07-02 clippy -p scirust-capsule-schema --all-targets --locked -- -D warnings
+      - name: Test schema
+        run: cargo +nightly-2026-07-02 test -p scirust-capsule-schema --locked
+      - name: Commit deterministic preparation changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- Cargo.lock Cargo.toml scirust-capsule-schema; then
+            echo "No preparation changes required."
+            exit 0
+          fi
+          git config user.name "SciRust CI"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.lock Cargo.toml scirust-capsule-schema
+          git commit -m "chore(capsule): prepare schema workspace state"
+          git push origin HEAD:feat/capsule-schema-v1
