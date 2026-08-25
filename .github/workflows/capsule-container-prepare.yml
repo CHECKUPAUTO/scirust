@@ -1,0 +1,64 @@
+name: Capsule container branch preparation
+
+on:
+  push:
+    branches:
+      - feat/capsule-container-v1
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: [self-hosted, Linux, ARM64, scirust-arm64, jetson-thor, internal]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+
+      - name: Install pinned SciRust toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt, clippy
+
+      - name: Register workspace member
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("Cargo.toml")
+          text = path.read_text()
+          needle = '    "scirust-capsule-schema",\n'
+          addition = needle + '    "scirust-capsule",\n'
+          if '    "scirust-capsule",\n' not in text:
+              if needle not in text:
+                  raise SystemExit("capsule schema workspace anchor not found")
+              text = text.replace(needle, addition, 1)
+              path.write_text(text)
+          PY
+
+      - name: Format
+        run: cargo +nightly-2026-07-02 fmt -p scirust-capsule
+
+      - name: Check
+        run: cargo +nightly-2026-07-02 check -p scirust-capsule
+
+      - name: Clippy
+        run: cargo +nightly-2026-07-02 clippy -p scirust-capsule --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo +nightly-2026-07-02 test -p scirust-capsule
+
+      - name: Commit deterministic workspace state
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock scirust-capsule/src/lib.rs
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(capsule): prepare container workspace state"
+            git push origin HEAD:feat/capsule-container-v1
+          fi
