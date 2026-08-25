@@ -18,6 +18,7 @@
 use super::approval_audit::{ApprovalAuditEvent, ApprovalAuditSink, ApprovalResolution};
 use super::approval_request::ApprovalRequestId;
 use super::permission::ApprovalPolicy;
+use super::permission::SharedApprovalPolicy;
 use super::sandbox_approval::SandboxPermission;
 use super::tool_runtime::ToolCall;
 use std::fmt;
@@ -163,15 +164,73 @@ pub trait ApprovalAnswerer: Send + Sync {
 #[derive(Clone)]
 pub struct ApprovalService {
     answerer: Option<Arc<dyn ApprovalAnswerer>>,
-    policy: ApprovalPolicy,
+    source: PolicySource,
     audit: Option<Arc<dyn ApprovalAuditSink>>,
+}
+
+/// Where the service reads its approval policy from.
+///
+/// `Owned` preserves the historical single-value behaviour; `Shared` binds
+/// the service to a [`SharedApprovalPolicy`] cell (typically the
+/// PermissionGate's) so a policy switch anywhere is observed everywhere —
+/// enforcement, pre-answerer rejection and the model-facing context.
+#[derive(Clone)]
+enum PolicySource {
+    Owned(ApprovalPolicy),
+    Shared(SharedApprovalPolicy),
+}
+
+impl PolicySource {
+    /// Best-effort read for presentation paths. A poisoned shared cell
+    /// reports `Never`: presentation must never advertise a weaker
+    /// supervision than enforcement, which refuses on the same poison.
+    fn effective(&self) -> ApprovalPolicy {
+        match self
+        {
+            Self::Owned(policy) => *policy,
+            Self::Shared(cell) => match cell.read()
+            {
+                Ok(policy) => *policy,
+                Err(_) => ApprovalPolicy::Never,
+            },
+        }
+    }
+
+    /// Strict read for enforcement paths. A poisoned shared cell refuses
+    /// supervision instead of guessing.
+    fn effective_strict(&self) -> Result<ApprovalPolicy, String> {
+        match self
+        {
+            Self::Owned(policy) => Ok(*policy),
+            Self::Shared(cell) => cell
+                .read()
+                .map(|policy| *policy)
+                .map_err(|_| "shared approval policy state is unavailable".to_string()),
+        }
+    }
+
+    fn assign(&mut self, policy: ApprovalPolicy) {
+        match self
+        {
+            Self::Owned(slot) => *slot = policy,
+            Self::Shared(cell) =>
+            {
+                // Write attempts are deliberate repairs: recover the inner
+                // value even from a poisoned cell instead of refusing the
+                // operator's explicit switch forever.
+                *cell
+                    .write()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = policy;
+            },
+        }
+    }
 }
 
 impl ApprovalService {
     pub fn new(answerer: Option<Arc<dyn ApprovalAnswerer>>) -> Self {
         Self {
             answerer,
-            policy: ApprovalPolicy::Ask,
+            source: PolicySource::Owned(ApprovalPolicy::Ask),
             audit: None,
         }
     }
@@ -181,7 +240,26 @@ impl ApprovalService {
     }
 
     pub fn with_policy(mut self, policy: ApprovalPolicy) -> Self {
-        self.policy = policy;
+        self.source = PolicySource::Owned(policy);
+        self
+    }
+
+    /// Bind this service to a shared policy cell (typically
+    /// [`PermissionGate::shared_approval_policy`]).
+    ///
+    /// From this point the gate and the service observe ONE authoritative
+    /// policy: a switch through either side is enforced by both and shown
+    /// to the model, and a durable-store replay at the gate reaches the
+    /// service without any re-binding.
+    pub fn with_shared_policy(mut self, cell: SharedApprovalPolicy) -> Self {
+        self.source = PolicySource::Shared(cell);
+        self
+    }
+
+    /// Convenience binding to a gate's own shared cell.
+    pub fn bind_to_gate(mut self, gate: &super::permission::PermissionGate) -> Self {
+        let cell = gate.shared_approval_policy();
+        self.source = PolicySource::Shared(cell);
         self
     }
 
@@ -190,12 +268,15 @@ impl ApprovalService {
         self
     }
 
+    /// The current effective policy. On an unreadable shared cell this
+    /// reports `Never` — presentation must never advertise a weaker
+    /// supervision than enforcement will apply.
     pub fn policy(&self) -> ApprovalPolicy {
-        self.policy
+        self.source.effective()
     }
 
     pub fn set_policy(&mut self, policy: ApprovalPolicy) {
-        self.policy = policy;
+        self.source.assign(policy);
     }
 
     /// Resolve one question while preserving the legacy answer-only API.
@@ -235,7 +316,7 @@ impl ApprovalService {
             configured_sandbox: input.configured_sandbox,
             requested_sandbox: input.requested_sandbox,
             justification: input.justification.clone(),
-            policy: self.policy,
+            policy: self.source.effective(),
         };
 
         if let Some(audit) = self.audit.as_ref()
@@ -256,7 +337,11 @@ impl ApprovalService {
             return Ok(None);
         }
 
-        if self.policy == ApprovalPolicy::Never
+        // Fail-closed policy gate: an unreadable shared cell is treated
+        // exactly like `Never` — rejection happens before any answerer
+        // dispatch, so no grant can escape unobservable supervision.
+        let supervised = matches!(self.source.effective_strict(), Ok(ApprovalPolicy::Ask));
+        if !supervised
         {
             self.record_resolution(&request_id, call, ApprovalResolution::Rejected)?;
             return Ok(Some(ResolvedApproval {
@@ -673,5 +758,217 @@ mod tests {
             ApprovalAnswer::parse("weird-value"),
             ApprovalAnswer::Rejected
         );
+    }
+
+    // -- Single authoritative policy source ---------------------------------
+
+    use crate::agentic::permission::PermissionGate;
+    use crate::agentic::policy_store::ApprovalPolicyStore as _;
+
+    fn counting_allow_answerer() -> (Arc<CountingAnswerer>, Arc<std::sync::atomic::AtomicUsize>) {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let answerer = Arc::new(CountingAnswerer {
+            calls: Arc::clone(&calls),
+            answer: Ok(ApprovalAnswer::AllowedOnce),
+        });
+        (answerer, calls)
+    }
+
+    struct NoopAnswerer;
+
+    impl ApprovalAnswerer for NoopAnswerer {
+        fn answer(&self, _request: &ApprovalRequest) -> Result<ApprovalAnswer, String> {
+            Ok(ApprovalAnswer::AllowedOnce)
+        }
+    }
+
+    struct CountingAnswerer {
+        calls: Arc<std::sync::atomic::AtomicUsize>,
+        answer: Result<ApprovalAnswer, String>,
+    }
+
+    impl ApprovalAnswerer for CountingAnswerer {
+        fn answer(&self, _request: &ApprovalRequest) -> Result<ApprovalAnswer, String> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.answer.clone()
+        }
+    }
+
+    fn ask_request(call_id: &str) -> ApprovalServiceRequest {
+        ApprovalServiceRequest::new(crate::agentic::tool_runtime::ToolCall::new(
+            call_id,
+            "build",
+            [("crate".to_string(), "core".to_string())]
+                .into_iter()
+                .collect(),
+        ))
+    }
+
+    #[test]
+    fn bound_service_follows_gate_switches_live() {
+        let gate = PermissionGate::new(crate::agentic::permission::PermissionPolicy::new(
+            crate::agentic::permission::PermissionDecision::Allow,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        ));
+        let (answerer, calls) = counting_allow_answerer();
+        let service = ApprovalService::with_answerer(answerer).bind_to_gate(&gate);
+
+        assert_eq!(service.policy(), gate.approval_policy().unwrap());
+
+        // Gate switches to Never through one clone; the service must observe
+        // it without any re-binding.
+        gate.clone()
+            .set_approval_policy(ApprovalPolicy::Never)
+            .unwrap();
+        assert_eq!(service.policy(), ApprovalPolicy::Never);
+
+        let resolved = service
+            .request_resolved(
+                &ask_request("c1"),
+                &crate::agentic::approval_service::CancellationToken::new(),
+                &|_| {},
+            )
+            .unwrap();
+        match resolved.expect("never resolves deterministically")
+        {
+            ResolvedApproval {
+                answer: ApprovalAnswer::Rejected,
+                ..
+            } =>
+            {},
+            other => panic!("expected rejection, got {other:?}"),
+        }
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "rejection must happen before any answerer dispatch"
+        );
+    }
+
+    #[test]
+    fn service_policy_writes_propagate_back_to_the_gate() {
+        let gate = PermissionGate::new(crate::agentic::permission::PermissionPolicy::new(
+            crate::agentic::permission::PermissionDecision::Allow,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        ));
+        let mut service =
+            ApprovalService::with_answerer(Arc::new(NoopAnswerer)).bind_to_gate(&gate);
+        service.set_policy(ApprovalPolicy::Never);
+        assert_eq!(gate.approval_policy().unwrap(), ApprovalPolicy::Never);
+        service.set_policy(ApprovalPolicy::Ask);
+        assert_eq!(gate.approval_policy().unwrap(), ApprovalPolicy::Ask);
+    }
+
+    #[test]
+    fn durable_store_replay_reaches_the_bound_service() {
+        use crate::agentic::policy_store::FileApprovalPolicyStore;
+
+        let mut path = std::env::temp_dir();
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        path.push(format!(
+            "policy-source-{}-{unique}.jsonl",
+            std::process::id()
+        ));
+        {
+            let store = FileApprovalPolicyStore::new(&path);
+            store.append(ApprovalPolicy::Never, "operator").unwrap();
+        }
+        let gate = PermissionGate::new(crate::agentic::permission::PermissionPolicy::new(
+            crate::agentic::permission::PermissionDecision::Allow,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        ))
+        .with_approval_policy_store(Arc::new(FileApprovalPolicyStore::new(&path)))
+        .unwrap();
+        assert_eq!(gate.approval_policy().unwrap(), ApprovalPolicy::Never);
+
+        let (answerer, calls) = counting_allow_answerer();
+        let service = ApprovalService::with_answerer(answerer).bind_to_gate(&gate);
+        assert_eq!(service.policy(), ApprovalPolicy::Never);
+        let resolved = service
+            .request_resolved(
+                &ask_request("c2"),
+                &crate::agentic::approval_service::CancellationToken::new(),
+                &|_| {},
+            )
+            .unwrap();
+        assert!(matches!(
+            resolved,
+            Some(ResolvedApproval {
+                answer: ApprovalAnswer::Rejected,
+                ..
+            })
+        ));
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "durable replay must reach the service pre-answerer"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn poisoned_shared_cell_fails_closed_everywhere() {
+        let gate = PermissionGate::new(crate::agentic::permission::PermissionPolicy::new(
+            crate::agentic::permission::PermissionDecision::Allow,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        ));
+        let cell = gate.shared_approval_policy();
+        // Poison the cell: a panic unwinds while holding the write lock.
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = cell.write().unwrap();
+            panic!("poison the policy cell");
+        }));
+        assert!(cell.is_poisoned(), "setup must have poisoned the cell");
+        let service = ApprovalService::with_answerer(Arc::new(NoopAnswerer)).bind_to_gate(&gate);
+        // Presentation never advertises weaker supervision than enforcement.
+        assert_eq!(service.policy(), ApprovalPolicy::Never);
+        let resolved = service
+            .request_resolved(
+                &ask_request("c3"),
+                &crate::agentic::approval_service::CancellationToken::new(),
+                &|_| {},
+            )
+            .unwrap();
+        assert!(matches!(
+            resolved,
+            Some(ResolvedApproval {
+                answer: ApprovalAnswer::Rejected,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn owned_mode_stays_independent() {
+        let mut service =
+            ApprovalService::with_answerer(Arc::new(NoopAnswerer)).with_policy(ApprovalPolicy::Ask);
+        assert_eq!(service.policy(), ApprovalPolicy::Ask);
+        service.set_policy(ApprovalPolicy::Never);
+        assert_eq!(service.policy(), ApprovalPolicy::Never);
+        let resolved = service
+            .request_resolved(
+                &ask_request("c4"),
+                &crate::agentic::approval_service::CancellationToken::new(),
+                &|_| {},
+            )
+            .unwrap();
+        assert!(matches!(
+            resolved,
+            Some(ResolvedApproval {
+                answer: ApprovalAnswer::Rejected,
+                ..
+            })
+        ));
     }
 }

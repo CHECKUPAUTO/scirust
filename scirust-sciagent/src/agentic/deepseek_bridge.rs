@@ -974,6 +974,38 @@ mod tests {
     }
 
     #[test]
+    fn model_facing_policy_context_follows_the_gate_live() {
+        use crate::agentic::permission::PermissionGate;
+
+        let gate = PermissionGate::new(crate::agentic::permission::PermissionPolicy::new(
+            crate::agentic::permission::PermissionDecision::Allow,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        ));
+        let approval = ApprovalService::with_answerer(Arc::new(AllowAnswerer {
+            calls: std::sync::atomic::AtomicUsize::new(0),
+            answer: ApprovalAnswer::AllowedOnce,
+        }))
+        .bind_to_gate(&gate);
+        let bridge = DeepSeekBridge::new(test_runtime(), approval);
+
+        assert_eq!(
+            bridge.approval_policy(),
+            crate::agentic::permission::ApprovalPolicy::Ask
+        );
+        gate.clone()
+            .set_approval_policy(crate::agentic::permission::ApprovalPolicy::Never)
+            .unwrap();
+        // The model-facing runtime context observes the same authoritative
+        // source enforcement uses — no second copy to drift.
+        assert_eq!(
+            bridge.approval_policy(),
+            crate::agentic::permission::ApprovalPolicy::Never
+        );
+    }
+
+    #[test]
     fn without_wired_sink_behaviour_is_unchanged() {
         let bridge = test_bridge();
         let output = bridge
