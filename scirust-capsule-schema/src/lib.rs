@@ -20,7 +20,7 @@
 #![forbid(unsafe_code)]
 
 use core::fmt;
-use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 
 pub const CAPSULE_SCHEMA_VERSION: u16 = 1;
 
@@ -29,10 +29,7 @@ pub enum CapsuleSchemaError {
     UnsupportedSchemaVersion(u16),
     EmptyName,
     EmptyPayloads,
-    InvalidPath {
-        value: String,
-        reason: &'static str,
-    },
+    InvalidPath { value: String, reason: &'static str },
     InvalidSha256(String),
     DuplicatePayloadPath(String),
     UnsortedPayloads,
@@ -41,28 +38,34 @@ pub enum CapsuleSchemaError {
 
 impl fmt::Display for CapsuleSchemaError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UnsupportedSchemaVersion(version) => {
+        match self
+        {
+            Self::UnsupportedSchemaVersion(version) =>
+            {
                 write!(f, "unsupported SciCapsule schema version {version}")
-            }
+            },
             Self::EmptyName => f.write_str("capsule name must not be empty"),
             Self::EmptyPayloads => f.write_str("capsule must contain at least one payload"),
-            Self::InvalidPath { value, reason } => {
+            Self::InvalidPath { value, reason } =>
+            {
                 write!(f, "invalid capsule path {value:?}: {reason}")
-            }
+            },
             Self::InvalidSha256(value) => write!(
                 f,
                 "invalid SHA-256 {value:?}: expected exactly 64 lowercase hexadecimal characters"
             ),
-            Self::DuplicatePayloadPath(path) => {
+            Self::DuplicatePayloadPath(path) =>
+            {
                 write!(f, "duplicate capsule payload path {path:?}")
-            }
-            Self::UnsortedPayloads => {
+            },
+            Self::UnsortedPayloads =>
+            {
                 f.write_str("capsule payloads must be strictly ordered by path")
-            }
-            Self::MissingEntrypoint(path) => {
+            },
+            Self::MissingEntrypoint(path) =>
+            {
                 write!(f, "capsule entrypoint {path:?} is not present in payloads")
-            }
+            },
         }
     }
 }
@@ -192,29 +195,37 @@ impl CapsuleManifestV1 {
     }
 
     pub fn validate(&self) -> Result<(), CapsuleSchemaError> {
-        if self.schema_version != CAPSULE_SCHEMA_VERSION {
+        if self.schema_version != CAPSULE_SCHEMA_VERSION
+        {
             return Err(CapsuleSchemaError::UnsupportedSchemaVersion(
                 self.schema_version,
             ));
         }
-        if self.name.trim().is_empty() {
+        if self.name.trim().is_empty()
+        {
             return Err(CapsuleSchemaError::EmptyName);
         }
-        if self.payloads.is_empty() {
+        if self.payloads.is_empty()
+        {
             return Err(CapsuleSchemaError::EmptyPayloads);
         }
 
-        for pair in self.payloads.windows(2) {
-            match pair[0].path.cmp(&pair[1].path) {
-                core::cmp::Ordering::Less => {}
-                core::cmp::Ordering::Equal => {
+        for pair in self.payloads.windows(2)
+        {
+            match pair[0].path.cmp(&pair[1].path)
+            {
+                core::cmp::Ordering::Less =>
+                {},
+                core::cmp::Ordering::Equal =>
+                {
                     return Err(CapsuleSchemaError::DuplicatePayloadPath(
                         pair[0].path.to_string(),
                     ));
-                }
-                core::cmp::Ordering::Greater => {
+                },
+                core::cmp::Ordering::Greater =>
+                {
                     return Err(CapsuleSchemaError::UnsortedPayloads);
-                }
+                },
             }
         }
 
@@ -278,31 +289,36 @@ impl<'de> Deserialize<'de> for CapsuleManifestV1 {
 }
 
 fn validate_capsule_path(value: &str) -> Result<(), CapsuleSchemaError> {
-    if value.is_empty() {
+    if value.is_empty()
+    {
         return Err(CapsuleSchemaError::InvalidPath {
             value: value.to_string(),
             reason: "path must not be empty",
         });
     }
-    if value.starts_with('/') {
+    if value.starts_with('/')
+    {
         return Err(CapsuleSchemaError::InvalidPath {
             value: value.to_string(),
             reason: "path must be relative",
         });
     }
-    if value.contains('\\') {
+    if value.contains('\\')
+    {
         return Err(CapsuleSchemaError::InvalidPath {
             value: value.to_string(),
             reason: "path must use forward slashes",
         });
     }
-    if value.contains(':') {
+    if value.contains(':')
+    {
         return Err(CapsuleSchemaError::InvalidPath {
             value: value.to_string(),
             reason: "colon is not portable across supported path syntaxes",
         });
     }
-    if value.contains('\0') {
+    if value.contains('\0')
+    {
         return Err(CapsuleSchemaError::InvalidPath {
             value: value.to_string(),
             reason: "path must not contain NUL",
@@ -337,7 +353,10 @@ mod tests {
         let manifest = CapsuleManifestV1::new(
             "demo",
             CapsulePath::new("bin/run").unwrap(),
-            vec![payload("data/input.bin", 'b', 7), payload("bin/run", 'a', 11)],
+            vec![
+                payload("data/input.bin", 'b', 7),
+                payload("bin/run", 'a', 11),
+            ],
         )
         .unwrap();
 
@@ -408,7 +427,8 @@ mod tests {
             "bin/./run",
             "bin\\run",
             "C:/bin/run",
-        ] {
+        ]
+        {
             assert!(CapsulePath::new(path).is_err(), "accepted {path:?}");
         }
         assert!(CapsulePath::new("bin/run").is_ok());
@@ -433,6 +453,10 @@ mod tests {
             ]
         }"#;
         let error = serde_json::from_str::<CapsuleManifestV1>(json).unwrap_err();
-        assert!(error.to_string().contains("unsupported SciCapsule schema version 2"));
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported SciCapsule schema version 2")
+        );
     }
 }
