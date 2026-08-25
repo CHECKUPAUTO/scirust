@@ -5,6 +5,7 @@ pub mod budgets;
 pub mod deepseek_bridge;
 pub mod delegation;
 pub mod durable_audit;
+pub mod enforcement;
 pub mod enterprise;
 pub mod enterprise_audit;
 pub mod guard;
@@ -37,6 +38,7 @@ pub use delegation::{
     ChildRequest, DelegationContext, DelegationError, ResourceBudget, SecretCapability,
 };
 pub use durable_audit::{AUDIT_GENESIS_HASH, DurableAuditEntry, FileApprovalAudit};
+pub use enforcement::ExecutionConstraints;
 pub use enterprise::{
     EnterpriseAction, EnterpriseDecision, EnterpriseIdentity, EnterprisePolicyGate, EnterpriseRule,
     OrgId, ProjectId, TenantId, WorkspaceId,
@@ -57,8 +59,8 @@ pub use sandbox_approval::{
 };
 pub use secrets::{SecretGrant, SecretHandle, SecretId, SecretStore};
 pub use tool_runtime::{
-    AllowAllPolicy, JUSTIFICATION_METADATA, SANDBOX_PERMISSIONS_METADATA, ToolCall, ToolPolicy,
-    ToolRuntime, ToolRuntimeError,
+    AllowAllPolicy, EGRESS_POLICY_METADATA, JUSTIFICATION_METADATA, RESOURCE_LIMITS_METADATA,
+    SANDBOX_PERMISSIONS_METADATA, ToolCall, ToolPolicy, ToolRuntime, ToolRuntimeError,
 };
 pub use tools::Tool;
 pub use tools::ToolResult;
@@ -159,7 +161,12 @@ impl AgentRouter {
             })
             .unwrap_or_default();
 
-        for key in [SANDBOX_PERMISSIONS_METADATA, JUSTIFICATION_METADATA]
+        for key in [
+            SANDBOX_PERMISSIONS_METADATA,
+            JUSTIFICATION_METADATA,
+            RESOURCE_LIMITS_METADATA,
+            EGRESS_POLICY_METADATA,
+        ]
         {
             if let Some(value) = json.get(key).and_then(|value| value.as_str())
             {
