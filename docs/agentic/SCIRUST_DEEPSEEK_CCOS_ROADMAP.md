@@ -46,7 +46,8 @@ No child may widen its parent's authority.
 | H-1 | CCOS Enterprise identity/RBAC/isolation primitives | MERGED | #1278 (`babdc2b7`) | TenantId/OrgId/ProjectId/WorkspaceId, tenant-scoped rules, workspace path isolation |
 | H-2 | Scoped secret capability store | MERGED | #1279 (`e6bdfeae`) | Opaque handles, explicit grants, revocable, audit views never contain values |
 | H-3 | Resource-budget + explicit-egress policy primitives | MERGED | #1280 (`80c7d694`) | Fail-closed capability checks exist; real OS/network enforcement is not yet wired into ToolRuntime |
-| H-4 | In-memory correlated enterprise audit trail | MERGED | #1281 (`bbae8850`) | SHA-256 chained tenant..artifact correlation; persistence and automatic runtime wiring remain TODO |
+| H-4 | In-memory correlated enterprise audit trail | MERGED | #1281 (`bbae8850`) | SHA-256 chained tenant..artifact correlation |
+| H-6 | Durable enterprise audit + automatic runtime emission | OPEN PR | #1325 | `FileEnterpriseAuditTrail` JSONL chain verified on read, shared `EnterpriseAuditSink`, and automatic `DeepSeekBridge` runtime emission |
 | H-5 | Kernel-enforced resource governance | OPEN PR | `feat/sciagent-real-resource-enforcement` | honest fail-closed enforcement: inherited `RLIMIT_FSIZE` plus deny-all INET egress via seccomp-BPF/bwrap network namespace; tree-wide memory/process/CPU/wall-time, GPU caps and host allow-lists are refused until a non-escapable backend exists |
 | I | Scientific autonomy (generalize optimizer) | PARTIAL | PR #1254 MERGED | CPU/SIMD/CUDA/WGPU generalization TODO |
 | — | Evidence-driven optimization loop | MERGED | #1254 (`c55dcc04`) | baseline -> generate -> compile -> verify -> benchmark -> promote |
@@ -79,7 +80,7 @@ No child may widen its parent's authority.
 | child delegation | `source: 'delegation'` seeds override into child | `DelegationContext` ceilings for tools/sandbox/resources/secrets/workspace | finite optional resource ceiling bug identified; repair in #1286 | child must never remove a finite parent resource ceiling | #1286 OPEN | #1275 | finite-parent/None-child regression tests |
 | fail-closed behavior | missing answerer => unavailable | missing/erroring answerer => Unavailable | equivalent for answerer availability | no silent grant | #1274 | — | tests |
 | enterprise budgets/egress | n/a | fail-closed governance wired through `ToolRuntime::execute_governed`; currently enforceable claims are inherited `RLIMIT_FSIZE` and deny-all INET egress via seccomp/bwrap isolation | tree-wide memory/process/CPU/wall-time need cgroup/PID-namespace-class control; GPU caps and per-host egress allow-lists also refuse rather than approximate | declared limits must correspond to non-escapable enforcement | H-5 branch | #1280 | live tests: SIGXFSZ via RLIMIT_FSIZE and bash `/dev/tcp` blocked by seccomp; capability tests prove unsupported tree-wide limits refuse before execution |
-| enterprise correlated audit | n/a | SHA-256 chained in-memory `EnterpriseAuditTrail` | durable storage/replay and automatic runtime emission TODO | process restart currently loses enterprise trail | TODO H-5+ | #1281 | restart/tamper/runtime-correlation tests |
+| enterprise correlated audit | n/a | `FileEnterpriseAuditTrail` JSONL SHA-256 chain verified on every read + `EnterpriseAuditSink`; `DeepSeekBridge::with_enterprise_audit` emits correlated executed/failed/rejected calls | rotation and independently constructed/cross-process concurrent writers remain a single-writer limitation | restart preserves the trail; audit refusal prevents an unaudited success from reaching the model | #1325 | #1281 | restart/tamper/torn-tail/concurrency tests; bridge emission + fail-closed sink tests |
 
 ## Hardware evidence/status
 
