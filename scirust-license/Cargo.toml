@@ -8,6 +8,7 @@ license-file = "../LICENSE.md"
 repository = "https://github.com/Memorithm/scirust"
 
 [dependencies]
+scirust-hashsig = { path = "../scirust-hashsig" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
