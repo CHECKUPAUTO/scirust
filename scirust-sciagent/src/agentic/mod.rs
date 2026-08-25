@@ -50,7 +50,8 @@ pub use enterprise_audit::{
 pub use guard::{ConformalGuard, GuardVerdict};
 pub use permission::{
     ApprovalChoice, ApprovalOutcome, ApprovalPolicy, PermissionDecision, PermissionGate,
-    PermissionPolicy, PermissionRule, PermissionRuleStore, ScopedToolApprover, ToolApprover,
+    PermissionPolicy, PermissionRule, PermissionRuleStore, ScopedToolApprover,
+    SharedApprovalPolicy, ToolApprover,
 };
 pub use policy_store::{
     ApprovalPolicyEvent, ApprovalPolicyStore, FileApprovalPolicyStore, MemoryApprovalPolicyStore,

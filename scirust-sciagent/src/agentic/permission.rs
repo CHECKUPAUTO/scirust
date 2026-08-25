@@ -83,6 +83,15 @@ pub enum ApprovalPolicy {
     Never,
 }
 
+/// The authoritative in-process home of the session approval policy.
+///
+/// Every consumer binds to the SAME cell: `PermissionGate` owns it and
+/// [`super::approval_service::ApprovalService`] can be bound to it, so
+/// gate-side refusal, service-side pre-answerer rejection and the
+/// model-facing context can never diverge. Lock failure is authorization
+/// failure at every reader.
+pub type SharedApprovalPolicy = std::sync::Arc<std::sync::RwLock<ApprovalPolicy>>;
+
 impl ApprovalPolicy {
     /// Wire-safe vocabulary label.
     pub fn label(self) -> &'static str {
@@ -448,6 +457,15 @@ impl PermissionGate {
     /// The installed durable policy store, if any.
     pub fn approval_policy_store(&self) -> Option<Arc<dyn ApprovalPolicyStore>> {
         self.approval_policy_store.clone()
+    }
+
+    /// The shared approval-policy cell backing this gate (and all clones).
+    ///
+    /// Bind an `ApprovalService` to the returned cell — e.g. via
+    /// `ApprovalService::bind_to_gate` — so both layers enforce and present
+    /// exactly one authoritative policy instead of two drifting copies.
+    pub fn shared_approval_policy(&self) -> SharedApprovalPolicy {
+        Arc::clone(&self.approval_policy)
     }
 
     /// Install the opt-in persistence sink used only for `ApprovalChoice::Always`.
