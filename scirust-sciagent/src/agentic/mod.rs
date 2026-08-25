@@ -43,7 +43,10 @@ pub use enterprise::{
     EnterpriseAction, EnterpriseDecision, EnterpriseIdentity, EnterprisePolicyGate, EnterpriseRule,
     OrgId, ProjectId, TenantId, WorkspaceId,
 };
-pub use enterprise_audit::{ENTERPRISE_AUDIT_GENESIS, EnterpriseAuditEvent, EnterpriseAuditTrail};
+pub use enterprise_audit::{
+    ENTERPRISE_AUDIT_GENESIS, EnterpriseAuditEvent, EnterpriseAuditSink, EnterpriseAuditTrail,
+    FileEnterpriseAuditTrail,
+};
 pub use guard::{ConformalGuard, GuardVerdict};
 pub use permission::{
     ApprovalChoice, ApprovalOutcome, ApprovalPolicy, PermissionDecision, PermissionGate,

@@ -20,7 +20,9 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 /// Strict tenant identifier: 1..=64 ASCII alphanumeric plus `-` and `_`.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct TenantId(String);
 
 /// Strict organization identifier inside a tenant.
