@@ -201,6 +201,7 @@ members = [
     "scirust-provenance",
     "scirust-digest",
     "scirust-capsule-schema",
+    "scirust-capsule",
     "scirust-retrieval",
     "scirust-mcp",
     "scirust-discovery",

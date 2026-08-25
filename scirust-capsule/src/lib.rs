@@ -83,7 +83,8 @@ pub enum CapsuleError {
 
 impl fmt::Display for CapsuleError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self
+        {
             Self::Schema(error) => write!(f, "invalid capsule schema: {error}"),
             Self::InvalidMagic => f.write_str("invalid SciCapsule container magic"),
             Self::TruncatedHeader { actual_bytes } => write!(
@@ -98,12 +99,14 @@ impl fmt::Display for CapsuleError {
                 f,
                 "truncated capsule manifest: expected {expected_bytes} bytes, got {actual_bytes}"
             ),
-            Self::InvalidManifestJson(error) => {
+            Self::InvalidManifestJson(error) =>
+            {
                 write!(f, "invalid capsule manifest JSON: {error}")
-            }
-            Self::NonCanonicalManifest => {
+            },
+            Self::NonCanonicalManifest =>
+            {
                 f.write_str("capsule manifest JSON is valid but not in canonical v1 encoding")
-            }
+            },
             Self::PayloadCountMismatch { expected, actual } => write!(
                 f,
                 "capsule payload count mismatch: manifest expects {expected}, got {actual}"
@@ -140,9 +143,13 @@ impl fmt::Display for CapsuleError {
                 f,
                 "truncated capsule payload {path:?}: expected {expected_bytes} bytes, got {actual_bytes}"
             ),
-            Self::TrailingBytes(bytes) => {
-                write!(f, "capsule contains {bytes} trailing byte(s) after declared payloads")
-            }
+            Self::TrailingBytes(bytes) =>
+            {
+                write!(
+                    f,
+                    "capsule contains {bytes} trailing byte(s) after declared payloads"
+                )
+            },
         }
     }
 }
@@ -243,7 +250,8 @@ impl Capsule {
         let mut total_len = CAPSULE_HEADER_LEN
             .checked_add(manifest_bytes.len())
             .ok_or(CapsuleError::LengthOverflow("capsule length"))?;
-        for payload in &self.payloads {
+        for payload in &self.payloads
+        {
             total_len = total_len
                 .checked_add(payload.bytes.len())
                 .ok_or(CapsuleError::LengthOverflow("capsule length"))?;
@@ -253,7 +261,8 @@ impl Capsule {
         encoded.extend_from_slice(&CAPSULE_MAGIC_V1);
         encoded.extend_from_slice(&manifest_len.to_le_bytes());
         encoded.extend_from_slice(&manifest_bytes);
-        for payload in &self.payloads {
+        for payload in &self.payloads
+        {
             encoded.extend_from_slice(&payload.bytes);
         }
         Ok(encoded)
@@ -265,12 +274,14 @@ impl Capsule {
     /// attacker-controlled allocation from an untrusted length field. A later
     /// streaming/file API can add explicit resource limits independently.
     pub fn decode(encoded: &[u8]) -> Result<Self, CapsuleError> {
-        if encoded.len() < CAPSULE_HEADER_LEN {
+        if encoded.len() < CAPSULE_HEADER_LEN
+        {
             return Err(CapsuleError::TruncatedHeader {
                 actual_bytes: encoded.len(),
             });
         }
-        if encoded[..CAPSULE_MAGIC_V1.len()] != CAPSULE_MAGIC_V1 {
+        if encoded[..CAPSULE_MAGIC_V1.len()] != CAPSULE_MAGIC_V1
+        {
             return Err(CapsuleError::InvalidMagic);
         }
 
@@ -281,7 +292,8 @@ impl Capsule {
         let manifest_end = CAPSULE_HEADER_LEN
             .checked_add(manifest_len)
             .ok_or(CapsuleError::LengthOverflow("manifest end offset"))?;
-        if manifest_end > encoded.len() {
+        if manifest_end > encoded.len()
+        {
             return Err(CapsuleError::TruncatedManifest {
                 expected_bytes: manifest_len,
                 actual_bytes: encoded.len() - CAPSULE_HEADER_LEN,
@@ -291,19 +303,22 @@ impl Capsule {
         let manifest_bytes = &encoded[CAPSULE_HEADER_LEN..manifest_end];
         let manifest: CapsuleManifestV1 = serde_json::from_slice(manifest_bytes)
             .map_err(|error| CapsuleError::InvalidManifestJson(error.to_string()))?;
-        if canonical_manifest_json(&manifest)?.as_slice() != manifest_bytes {
+        if canonical_manifest_json(&manifest)?.as_slice() != manifest_bytes
+        {
             return Err(CapsuleError::NonCanonicalManifest);
         }
 
         let mut cursor = manifest_end;
         let mut payloads = Vec::with_capacity(manifest.payloads().len());
-        for descriptor in manifest.payloads() {
+        for descriptor in manifest.payloads()
+        {
             let payload_len = usize::try_from(descriptor.size_bytes)
                 .map_err(|_| CapsuleError::LengthOverflow("payload length"))?;
             let payload_end = cursor
                 .checked_add(payload_len)
                 .ok_or(CapsuleError::LengthOverflow("payload end offset"))?;
-            if payload_end > encoded.len() {
+            if payload_end > encoded.len()
+            {
                 return Err(CapsuleError::TruncatedPayload {
                     path: descriptor.path.to_string(),
                     expected_bytes: payload_len,
@@ -317,7 +332,8 @@ impl Capsule {
             cursor = payload_end;
         }
 
-        if cursor != encoded.len() {
+        if cursor != encoded.len()
+        {
             return Err(CapsuleError::TrailingBytes(encoded.len() - cursor));
         }
 
@@ -330,9 +346,7 @@ impl Capsule {
 /// Canonical v1 is the compact UTF-8 JSON produced from the schema's fixed
 /// struct field order and strictly ordered payload vector. The schema contains
 /// no maps, so there is no unordered object supplied by callers.
-pub fn canonical_manifest_json(
-    manifest: &CapsuleManifestV1,
-) -> Result<Vec<u8>, CapsuleError> {
+pub fn canonical_manifest_json(manifest: &CapsuleManifestV1) -> Result<Vec<u8>, CapsuleError> {
     manifest.validate()?;
     serde_json::to_vec(manifest)
         .map_err(|error| CapsuleError::InvalidManifestJson(error.to_string()))
@@ -354,20 +368,19 @@ fn validate_parts(
     payloads: &[CapsulePayload],
 ) -> Result<(), CapsuleError> {
     manifest.validate()?;
-    if manifest.payloads().len() != payloads.len() {
+    if manifest.payloads().len() != payloads.len()
+    {
         return Err(CapsuleError::PayloadCountMismatch {
             expected: manifest.payloads().len(),
             actual: payloads.len(),
         });
     }
 
-    for (index, (descriptor, payload)) in manifest
-        .payloads()
-        .iter()
-        .zip(payloads.iter())
-        .enumerate()
+    for (index, (descriptor, payload)) in
+        manifest.payloads().iter().zip(payloads.iter()).enumerate()
     {
-        if descriptor.path != payload.path {
+        if descriptor.path != payload.path
+        {
             return Err(CapsuleError::PayloadPathMismatch {
                 index,
                 expected: descriptor.path.to_string(),
@@ -377,7 +390,8 @@ fn validate_parts(
 
         let actual_bytes = u64::try_from(payload.bytes.len())
             .map_err(|_| CapsuleError::LengthOverflow("payload length"))?;
-        if descriptor.size_bytes != actual_bytes {
+        if descriptor.size_bytes != actual_bytes
+        {
             return Err(CapsuleError::PayloadSizeMismatch {
                 path: descriptor.path.to_string(),
                 expected_bytes: descriptor.size_bytes,
@@ -386,7 +400,8 @@ fn validate_parts(
         }
 
         let actual_digest = raw_sha256_hex(&payload.bytes);
-        if descriptor.sha256.as_str() != actual_digest {
+        if descriptor.sha256.as_str() != actual_digest
+        {
             return Err(CapsuleError::PayloadDigestMismatch {
                 path: descriptor.path.to_string(),
                 expected: descriptor.sha256.to_string(),
@@ -401,7 +416,8 @@ fn raw_sha256_hex(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let digest = Sha256::digest(bytes);
     let mut out = String::with_capacity(64);
-    for byte in digest {
+    for byte in digest
+    {
         out.push(HEX[(byte >> 4) as usize] as char);
         out.push(HEX[(byte & 0x0f) as usize] as char);
     }
@@ -419,9 +435,12 @@ mod tests {
     fn sample_capsule(reverse_input: bool) -> Capsule {
         let run = CapsulePayload::new(path("bin/run"), b"run".to_vec());
         let input = CapsulePayload::new(path("data/input.bin"), b"input".to_vec());
-        let payloads = if reverse_input {
+        let payloads = if reverse_input
+        {
             vec![input, run]
-        } else {
+        }
+        else
+        {
             vec![run, input]
         };
         Capsule::new("demo", path("bin/run"), payloads).unwrap()
@@ -440,7 +459,8 @@ mod tests {
     #[test]
     fn canonical_manifest_bytes_are_pinned() {
         let capsule = sample_capsule(false);
-        let actual = String::from_utf8(canonical_manifest_json(capsule.manifest()).unwrap()).unwrap();
+        let actual =
+            String::from_utf8(canonical_manifest_json(capsule.manifest()).unwrap()).unwrap();
         let expected = concat!(
             "{\"schema_version\":1,\"name\":\"demo\",\"entrypoint\":\"bin/run\",\"payloads\":[",
             "{\"path\":\"bin/run\",\"sha256\":\"acba25512100f80b56fc3ccd14c65be55d94800cda77585c5f41a887e398f9be\",\"size_bytes\":3},",
@@ -490,7 +510,10 @@ mod tests {
         let capsule = sample_capsule(false);
         let mut encoded = capsule.encode().unwrap();
         encoded[0] = b'X';
-        assert_eq!(Capsule::decode(&encoded).unwrap_err(), CapsuleError::InvalidMagic);
+        assert_eq!(
+            Capsule::decode(&encoded).unwrap_err(),
+            CapsuleError::InvalidMagic
+        );
     }
 
     #[test]
@@ -507,7 +530,8 @@ mod tests {
         encoded.extend_from_slice(&CAPSULE_MAGIC_V1);
         encoded.extend_from_slice(&manifest_len.to_le_bytes());
         encoded.extend_from_slice(&noncanonical);
-        for payload in capsule.payloads() {
+        for payload in capsule.payloads()
+        {
             encoded.extend_from_slice(payload.bytes());
         }
 
@@ -520,11 +544,8 @@ mod tests {
     #[test]
     fn from_parts_rejects_manifest_digest_mismatch() {
         let payload = CapsulePayload::new(path("bin/run"), b"run".to_vec());
-        let descriptor = PayloadDescriptor::new(
-            path("bin/run"),
-            Sha256Hex::new("00".repeat(32)).unwrap(),
-            3,
-        );
+        let descriptor =
+            PayloadDescriptor::new(path("bin/run"), Sha256Hex::new("00".repeat(32)).unwrap(), 3);
         let manifest = CapsuleManifestV1::new("demo", path("bin/run"), vec![descriptor]).unwrap();
 
         let error = Capsule::from_parts(manifest, vec![payload]).unwrap_err();

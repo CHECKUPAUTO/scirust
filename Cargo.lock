@@ -2985,6 +2985,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-capsule"
+version = "0.1.0"
+dependencies = [
+ "scirust-capsule-schema",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "scirust-capsule-schema"
 version = "0.1.0"
 dependencies = [
