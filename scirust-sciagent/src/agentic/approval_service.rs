@@ -157,6 +157,11 @@ pub trait ApprovalAnswerer: Send + Sync {
 
 /// Supervision service above the approval traits.
 ///
+/// How often the waiting supervisor re-checks the cancellation token while
+/// a synchronous answerer blocks. Small enough that cancellation feels
+/// immediate, large enough to be invisible next to human approval latency.
+const APPROVAL_CANCEL_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(20);
+
 /// The service generates the id, checks policy before dispatching, contains
 /// answerer failures, and emits an audit pair (Requested/Resolved) through an
 /// optional [`ApprovalAuditSink`]. A missing answerer, an answerer error, or
@@ -360,7 +365,73 @@ impl ApprovalService {
             );
         };
 
-        let answer = match answerer.answer(&request)
+        // Dispatch on a worker thread so cancellation can interrupt even a
+        // blocked synchronous answerer: the waiter polls the token while the
+        // answerer runs. Dropping the JoinHandle detaches the worker; any
+        // outcome produced after a cancellation is discarded by the
+        // first-resolution-wins rules below, so a detached answerer can
+        // never grant authority retroactively.
+        let outcome = {
+            let answerer = Arc::clone(answerer);
+            let owned_request = request.clone();
+            let (result_tx, result_rx) =
+                std::sync::mpsc::channel::<Result<ApprovalAnswer, String>>();
+            let spawned = std::thread::Builder::new()
+                .name(format!("approval-{}", request.request_id.as_str()))
+                .spawn(move || {
+                    // A cancelled waiter may drop the receiver
+                    // mid-flight; send failures are the expected detach
+                    // path, not errors.
+                    let _ = result_tx.send(answerer.answer(&owned_request));
+                });
+            let worker = match spawned
+            {
+                Ok(worker) => worker,
+                Err(error) =>
+                {
+                    self.record_resolution(&request_id, call, ApprovalResolution::Unavailable)?;
+                    return Err(format!(
+                        "approval dispatch failed; refusing to execute: {error}"
+                    ));
+                },
+            };
+            // Held only until the end of scope: joining would reintroduce
+            // exactly the blocking this seam exists to prevent.
+            let _detached = worker;
+
+            loop
+            {
+                // Cancellation wins ties: it is checked before draining the
+                // channel, so an answer racing a cancel never grants.
+                if token.is_cancelled()
+                {
+                    break None;
+                }
+                match result_rx.recv_timeout(APPROVAL_CANCEL_POLL_INTERVAL)
+                {
+                    Ok(result) => break Some(result),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                    // The worker died before answering (panic): fail closed
+                    // through the ordinary answerer-failure vocabulary.
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) =>
+                    {
+                        break Some(Err(
+                            "approval answerer panicked before answering".to_string()
+                        ));
+                    },
+                }
+            }
+        };
+
+        let Some(result) = outcome
+        else
+        {
+            // Cancellation interrupted a possibly-still-blocked answerer.
+            self.record_resolution(&request_id, call, ApprovalResolution::Cancelled)?;
+            return Ok(None);
+        };
+
+        let answer = match result
         {
             Ok(answer) => answer,
             Err(error) =>
@@ -947,6 +1018,131 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    // -- Interruptible dispatch ---------------------------------------------
+
+    struct BlockedAnswerer {
+        gate: Arc<std::sync::Barrier>,
+        entered: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl ApprovalAnswerer for BlockedAnswerer {
+        fn answer(&self, _request: &ApprovalRequest) -> Result<ApprovalAnswer, String> {
+            self.entered
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            // Blocks until the test releases it: a faithful stand-in for a
+            // human approver who never answers.
+            let _ = self.gate.wait();
+            Ok(ApprovalAnswer::AllowedOnce)
+        }
+    }
+
+    #[test]
+    fn cancellation_interrupts_a_blocked_answerer() {
+        use std::sync::Barrier;
+
+        let audit =
+            Arc::new(crate::agentic::approval_audit::InMemoryApprovalAudit::new(16).unwrap());
+        let barrier = Arc::new(Barrier::new(2));
+        let entered = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let service = ApprovalService::with_answerer(Arc::new(BlockedAnswerer {
+            gate: Arc::clone(&barrier),
+            entered: Arc::clone(&entered),
+        }))
+        .with_audit(audit.clone());
+
+        let token = CancellationToken::new();
+        let waiter = {
+            let service = service.clone();
+            let token = token.clone();
+            std::thread::spawn(move || service.request(&ask_request("blocked-1"), &token))
+        };
+
+        // Wait until the answerer is provably inside its blocking answer.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while entered.load(std::sync::atomic::Ordering::SeqCst) == 0
+        {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "answerer never reached its blocking point"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let started = std::time::Instant::now();
+        token.cancel();
+        let resolved = waiter.join().unwrap().expect("cancelled request succeeds");
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < std::time::Duration::from_secs(3),
+            "cancellation must interrupt the blocked answerer promptly, took {elapsed:?}"
+        );
+        assert_eq!(resolved, None, "cancelled requests resolve to no grant");
+
+        // First resolution wins: exactly Requested + Cancelled was recorded,
+        // even though the worker is still blocked on its answer.
+        let events = audit.snapshot().unwrap();
+        let resolutions: Vec<_> = events
+            .iter()
+            .filter(|event| {
+                event.lifecycle == crate::agentic::approval_audit::ApprovalLifecycle::Resolved
+            })
+            .collect();
+        assert_eq!(resolutions.len(), 1);
+        assert_eq!(
+            resolutions[0].resolution,
+            Some(crate::agentic::approval_audit::ApprovalResolution::Cancelled)
+        );
+
+        // Release the detached worker and prove it did run to completion —
+        // with no second resolution recorded afterwards.
+        barrier.wait();
+        // Give the detached worker a moment to finish its (discarded) send.
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let events = audit.snapshot().unwrap();
+        let resolutions: Vec<_> = events
+            .iter()
+            .filter(|event| {
+                event.lifecycle == crate::agentic::approval_audit::ApprovalLifecycle::Resolved
+            })
+            .collect();
+        assert_eq!(
+            resolutions.len(),
+            1,
+            "a detached late outcome must never add a second resolution"
+        );
+    }
+
+    struct PanickingAnswerer;
+
+    impl ApprovalAnswerer for PanickingAnswerer {
+        fn answer(&self, _request: &ApprovalRequest) -> Result<ApprovalAnswer, String> {
+            panic!("answerer exploded");
+        }
+    }
+
+    #[test]
+    fn panicking_answerer_fails_closed() {
+        let audit =
+            Arc::new(crate::agentic::approval_audit::InMemoryApprovalAudit::new(16).unwrap());
+        let service =
+            ApprovalService::with_answerer(Arc::new(PanickingAnswerer)).with_audit(audit.clone());
+        let error = service
+            .request(&ask_request("panic-1"), &CancellationToken::new())
+            .expect_err("a panicked answerer must fail closed");
+        assert!(error.contains("panicked"), "{error}");
+        let events = audit.snapshot().unwrap();
+        let resolutions: Vec<_> = events
+            .iter()
+            .filter(|event| {
+                event.lifecycle == crate::agentic::approval_audit::ApprovalLifecycle::Resolved
+            })
+            .collect();
+        assert_eq!(resolutions.len(), 1);
+        assert_eq!(
+            resolutions[0].resolution,
+            Some(crate::agentic::approval_audit::ApprovalResolution::Unavailable)
+        );
     }
 
     #[test]
