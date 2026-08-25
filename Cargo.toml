@@ -200,6 +200,7 @@ members = [
     "scirust-license",
     "scirust-provenance",
     "scirust-digest",
+    "scirust-capsule-schema",
     "scirust-retrieval",
     "scirust-mcp",
     "scirust-discovery",
