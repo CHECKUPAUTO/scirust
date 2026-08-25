@@ -8,16 +8,23 @@ The accepted M28 physical-Thor evidence showed the qualified Q4 vec4 MHA route s
 
 The M58 candidate is already correctness-qualified in FLAT. M59 performs the missing product-side paired measurement against the same SciRust baseline that established the negative M28 result.
 
-## Compared paths
+## Canonical benchmark and route selection
 
-The benchmark `scirust-gpu/examples/flat_m59_q1_vs_naive.rs` executes both paths on one `WgpuContext`:
+M59 intentionally reuses `scirust-gpu/examples/flat_m28_naive_vs_fused.rs` rather than cloning the benchmark. The harness now accepts `SCIRUST_M28_FLAT_ROUTE`:
+
+- unset or `q4_vec4_mha`: the accepted historical M28 behavior, using `with_vectorization(..., true)`;
+- `q1_vec4_mha`: the M59 qualification path, using `with_q1_vec4_mha(..., true)`.
+
+The default therefore remains the historical Q4 vec4 MHA baseline. M59 sets the route explicitly in its workflow, and the benchmark emits `flat_route=<route>` before the unchanged CSV schema so existing M28 result consumers remain compatible.
+
+The two measured implementations execute on one `WgpuContext`:
 
 1. SciRust resident multi-dispatch attention: `Q·K^T`, scale/causal mask, row softmax, probability·V;
-2. FLAT `WgpuGroupedForwardPipeline::with_q1_vec4_mha(..., true)` with a reused resident output buffer, plus a separately reported fresh-output scope.
+2. the selected FLAT fused grouped-forward pipeline with a reused resident output buffer, plus a separately reported fresh-output scope.
 
 Both paths receive independent resident buffers populated from identical deterministic bytes. H2D upload and D2H readback are outside timing. Both outputs are checked against `forward_reference_grouped` before any timing sample is accepted.
 
-The benchmark also verifies that FLAT actually selected `GroupedForwardKernelVariant::Q1Vec4Mha`; an unexpected fallback fails the run before timing.
+For `q1_vec4_mha`, the benchmark also inspects `kernel_variant_for_shape` and fails before timing unless the selected debug identity is exactly `Q1Vec4Mha`; an unexpected fallback is therefore not accepted as M59 evidence.
 
 ## Qualified geometry
 
@@ -45,7 +52,7 @@ The three measured scopes (SciRust naive, FLAT fresh-output, FLAT reused-output)
 - 300 seconds of continuous verified empty compute occupancy before timing;
 - continuous rejection of `cuda_pretrain` contamination during timing;
 - fail-closed handling when GPU occupancy cannot be queried;
-- exactly two `q1_vec4_mha` CSV rows per `(seq_len, head_dim)` geometry;
+- exact `flat_route=q1_vec4_mha` provenance and exactly two CSV timing rows per `(seq_len, head_dim)` geometry;
 - empty post-run compute occupancy.
 
 No software Vulkan timing is accepted as M59 physical evidence.
