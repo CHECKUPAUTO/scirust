@@ -19,15 +19,19 @@
 //! values fail closed (`BridgeError::UnknownValue`) rather than broadening
 //! privileges.
 
+use super::approval_request::ApprovalRequestId;
 use super::approval_service::{
     ApprovalAnswer, ApprovalRequestWire, ApprovalService, ApprovalServiceRequest, CancellationToken,
 };
+use super::enterprise::EnterpriseIdentity;
+use super::enterprise_audit::EnterpriseAuditSink;
 use super::permission::ApprovalPolicy;
 use super::sandbox_approval::SandboxPermission;
 use super::tool_runtime::{ToolCall, ToolRuntime, ToolRuntimeError};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Wire schema version of the bridge contract.
 pub const BRIDGE_SCHEMA_VERSION: u16 = 1;
@@ -178,11 +182,36 @@ impl From<ToolRuntimeError> for BridgeError {
 pub struct DeepSeekBridge<P> {
     runtime: ToolRuntime<P>,
     approval: ApprovalService,
+    enterprise_audit: Option<Arc<dyn EnterpriseAuditSink>>,
+    identity: Option<EnterpriseIdentity>,
+    session_id: String,
 }
 
 impl<P: super::tool_runtime::ToolPolicy> DeepSeekBridge<P> {
     pub fn new(runtime: ToolRuntime<P>, approval: ApprovalService) -> Self {
-        Self { runtime, approval }
+        Self {
+            runtime,
+            approval,
+            enterprise_audit: None,
+            identity: None,
+            session_id: String::new(),
+        }
+    }
+
+    /// Automatically emit one correlated enterprise audit event per executed
+    /// call. Fail-closed: when the sink refuses the record, a successful
+    /// execution is reported as failed instead of returning an unaudited
+    /// result to the model.
+    pub fn with_enterprise_audit(
+        mut self,
+        sink: Arc<dyn EnterpriseAuditSink>,
+        identity: EnterpriseIdentity,
+        session_id: impl Into<String>,
+    ) -> Self {
+        self.enterprise_audit = Some(sink);
+        self.identity = Some(identity);
+        self.session_id = session_id.into();
+        self
     }
 
     /// Export the tool definitions of the underlying runtime.
@@ -258,21 +287,32 @@ impl<P: super::tool_runtime::ToolPolicy> DeepSeekBridge<P> {
         });
 
         // Resolve sandbox metadata into the approval input before execution.
-        // The ApprovalRequested event itself is emitted only after the
-        // ApprovalService has generated the authoritative request id.
-        let (configured, requested) = match wire.sandbox_permissions.as_deref()
+        // Also resolve the effective permission for the durable audit trail:
+        // configured mode normally, approved one-shot request on escalation.
+        let configured = if super::sandbox::tool_supports_sandbox(&call.tool)
+            || wire.sandbox_permissions.is_some()
         {
-            None => (None, None),
-            Some(requested) =>
-            {
-                let requested_perm = SandboxPermission::parse(requested).map_err(|_| {
-                    BridgeError::UnknownValue(format!("sandbox permission {requested:?}"))
-                })?;
-                let configured_perm = super::sandbox::configured_permission()
-                    .map_err(BridgeError::SandboxEscalationDenied)?;
-                (Some(configured_perm), Some(requested_perm))
-            },
+            Some(
+                super::sandbox::configured_permission()
+                    .map_err(BridgeError::SandboxEscalationDenied)?,
+            )
+        }
+        else
+        {
+            None
         };
+        let requested =
+            match wire.sandbox_permissions.as_deref()
+            {
+                None => None,
+                Some(value) => Some(SandboxPermission::parse(value).map_err(|_| {
+                    BridgeError::UnknownValue(format!("sandbox permission {value:?}"))
+                })?),
+            };
+        let effective_sandbox = requested
+            .or(configured)
+            .map(SandboxPermission::label)
+            .unwrap_or("not-applicable");
 
         // ApprovalService (id generation, policy, answerer, cancellation).
         let mut input = ApprovalServiceRequest::new(call.clone())
@@ -350,11 +390,19 @@ impl<P: super::tool_runtime::ToolPolicy> DeepSeekBridge<P> {
 
                 if resolved.answer == ApprovalAnswer::Rejected
                 {
+                    self.audit_execution(
+                        &call,
+                        effective_sandbox,
+                        Some(&resolved.request_id),
+                        "rejected",
+                        "",
+                    )?;
                     return Err(BridgeError::PolicyDenied(
                         "approval rejected by the user".to_string(),
                     ));
                 }
 
+                let approved_request_id = resolved.request_id.clone();
                 events(BridgeEvent::ExecutionStarted {
                     call_id: call.id.clone(),
                 });
@@ -363,6 +411,16 @@ impl<P: super::tool_runtime::ToolPolicy> DeepSeekBridge<P> {
                 {
                     Ok(output) =>
                     {
+                        // No unaudited success leaves the bridge: a refusing
+                        // sink turns the executed call into an error even
+                        // though side effects already happened.
+                        self.audit_execution(
+                            &call,
+                            effective_sandbox,
+                            Some(&approved_request_id),
+                            "executed",
+                            &crate::sha256::sha256_hex(output.as_bytes()),
+                        )?;
                         events(BridgeEvent::ExecutionEnded {
                             call_id: call.id.clone(),
                             output: output.clone(),
@@ -371,6 +429,15 @@ impl<P: super::tool_runtime::ToolPolicy> DeepSeekBridge<P> {
                     },
                     Err(error) =>
                     {
+                        // The execution already failed; auditing its failure
+                        // is best-effort and never masks the original error.
+                        let _ = self.audit_execution(
+                            &call,
+                            effective_sandbox,
+                            Some(&approved_request_id),
+                            "failed",
+                            "",
+                        );
                         let bridge_error = BridgeError::from(error);
                         events(BridgeEvent::ExecutionError {
                             call_id: call.id.clone(),
@@ -381,6 +448,43 @@ impl<P: super::tool_runtime::ToolPolicy> DeepSeekBridge<P> {
                 }
             },
         }
+    }
+
+    /// Emit one correlated enterprise event per executed (or refused) call
+    /// when [`DeepSeekBridge::with_enterprise_audit`] wired a sink.
+    fn audit_execution(
+        &self,
+        call: &ToolCall,
+        sandbox: &str,
+        request_id: Option<&ApprovalRequestId>,
+        decision: &str,
+        output_digest: &str,
+    ) -> Result<(), BridgeError> {
+        let (Some(sink), Some(identity)) = (&self.enterprise_audit, &self.identity)
+        else
+        {
+            return Ok(());
+        };
+        if self.session_id.is_empty()
+        {
+            return Err(BridgeError::ExecutionFailed(
+                "enterprise audit is wired but the session id is empty".to_string(),
+            ));
+        }
+        sink.record_execution(
+            &identity.tenant,
+            &identity.subject,
+            &self.session_id,
+            request_id,
+            &call.id,
+            &call.tool,
+            sandbox,
+            decision,
+            output_digest,
+        )
+        .map_err(|error| {
+            BridgeError::ExecutionFailed(format!("enterprise audit unavailable: {error}"))
+        })
     }
 }
 
@@ -444,6 +548,30 @@ mod tests {
 
     fn test_bridge() -> DeepSeekBridge<SandboxPermissionGate> {
         test_bridge_with_answer(ApprovalAnswer::AllowedOnce)
+    }
+
+    fn enterprise_identity() -> crate::agentic::enterprise::EnterpriseIdentity {
+        use crate::agentic::enterprise::{OrgId, ProjectId, TenantId, WorkspaceId};
+        crate::agentic::enterprise::EnterpriseIdentity::new(
+            TenantId::parse("acme").unwrap(),
+            OrgId::parse("org-1").unwrap(),
+            ProjectId::parse("proj-1").unwrap(),
+            WorkspaceId::parse("ws-1").unwrap(),
+            "alice",
+        )
+    }
+
+    fn temp_enterprise_log() -> std::path::PathBuf {
+        let mut path = std::env::temp_dir();
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        path.push(format!(
+            "scirust-bridge-audit-{}-{unique}.jsonl",
+            std::process::id()
+        ));
+        path
     }
 
     #[test]
@@ -733,5 +861,128 @@ mod tests {
         assert!(parsed.is_ok());
         let bad = r#"{"event":"unknown_event"}"#;
         assert!(serde_json::from_str::<BridgeEvent>(bad).is_err());
+    }
+
+    // -- Automatic enterprise audit emission --------------------------------
+
+    fn read_wire(call_id: &str) -> ToolCallWire {
+        let mut params = HashMap::new();
+        params.insert("path".to_string(), "Cargo.toml".to_string());
+        ToolCallWire {
+            call_id: call_id.to_string(),
+            tool: "read".to_string(),
+            params,
+            sandbox_permissions: None,
+            justification: None,
+        }
+    }
+
+    #[test]
+    fn every_executed_call_is_audited_with_full_correlation() {
+        use crate::agentic::enterprise_audit::FileEnterpriseAuditTrail;
+
+        let path = temp_enterprise_log();
+        let bridge = test_bridge().with_enterprise_audit(
+            Arc::new(FileEnterpriseAuditTrail::new(&path)),
+            enterprise_identity(),
+            "session-77",
+        );
+        let output = bridge
+            .execute(
+                read_wire("call-audit-1"),
+                &CancellationToken::new(),
+                &|_| {},
+            )
+            .expect("read must execute");
+        let store = FileEnterpriseAuditTrail::new(&path);
+        let events = store.replay().unwrap();
+        assert_eq!(events.len(), 1, "exactly one correlated event");
+        let event = &events[0];
+        assert_eq!(event.tenant.as_str(), "acme");
+        assert_eq!(event.subject, "alice");
+        assert_eq!(event.session_id, "session-77");
+        assert_eq!(event.call_id.as_deref(), Some("call-audit-1"));
+        assert_eq!(event.tool.as_deref(), Some("read"));
+        assert_eq!(event.sandbox.as_deref(), Some("not-applicable"));
+        assert_eq!(event.decision.as_deref(), Some("executed"));
+        assert_eq!(
+            event.execution_digest.as_deref(),
+            Some(crate::sha256::sha256_hex(output.as_bytes()).as_str())
+        );
+        assert!(event.request_id.is_some(), "approval id must correlate");
+        assert_eq!(
+            event.prev_hash,
+            crate::agentic::enterprise_audit::ENTERPRISE_AUDIT_GENESIS
+        );
+        store.verify().unwrap();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn sandboxed_call_records_configured_effective_permission() {
+        use crate::agentic::enterprise_audit::FileEnterpriseAuditTrail;
+        let path = temp_enterprise_log();
+        let bridge = test_bridge().with_enterprise_audit(
+            Arc::new(FileEnterpriseAuditTrail::new(&path)),
+            enterprise_identity(),
+            "session-sandbox",
+        );
+        let wire = ToolCallWire {
+            call_id: "call-audit-sandbox".to_string(),
+            tool: "status".to_string(),
+            params: HashMap::new(),
+            sandbox_permissions: None,
+            justification: None,
+        };
+        bridge
+            .execute(wire, &CancellationToken::new(), &|_| {})
+            .expect("status must execute");
+        let events = FileEnterpriseAuditTrail::new(&path).replay().unwrap();
+        assert_eq!(events.len(), 1);
+        let expected = super::super::sandbox::configured_permission()
+            .unwrap()
+            .label();
+        assert_eq!(events[0].sandbox.as_deref(), Some(expected));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn refusing_audit_sink_fails_closed_after_execution() {
+        use crate::agentic::enterprise_audit::FileEnterpriseAuditTrail;
+
+        // A directory cannot serve as an append-only log: the sink refuses.
+        let dir = temp_enterprise_log();
+        std::fs::create_dir_all(&dir).unwrap();
+        let bridge = test_bridge().with_enterprise_audit(
+            Arc::new(FileEnterpriseAuditTrail::new(&dir)),
+            enterprise_identity(),
+            "session-77",
+        );
+        let error = bridge
+            .execute(
+                read_wire("call-audit-2"),
+                &CancellationToken::new(),
+                &|_| {},
+            )
+            .expect_err("an unaudited success must not reach the model");
+        assert!(
+            matches!(error, BridgeError::ExecutionFailed(ref reason)
+                if reason.contains("enterprise audit unavailable")),
+            "{error}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn without_wired_sink_behaviour_is_unchanged() {
+        let bridge = test_bridge();
+        let output = bridge
+            .execute(
+                read_wire("call-noaudit"),
+                &CancellationToken::new(),
+                &|_| {},
+            )
+            .expect("no sink wired: execution must behave as before");
+        assert!(output.contains("[package]"));
     }
 }
