@@ -6,24 +6,25 @@
 //! behaviour — a limit that cannot be enforced denies the call instead of
 //! running unbounded.
 //!
-//! What this backend enforces on Linux, per spawned process tree:
+//! What this backend can currently enforce without overstating process-tree
+//! isolation:
 //!
-//! | Declared limit              | Kernel mechanism                        |
-//! |-----------------------------|-----------------------------------------|
-//! | `max_memory_bytes`          | `RLIMIT_AS` (`prlimit64`)               |
-//! | `max_processes`             | `RLIMIT_NPROC` (`prlimit64`)            |
-//! | `max_file_size_bytes`       | `RLIMIT_FSIZE` (`prlimit64`)            |
-//! | `wall_time_seconds`         | runtime kill deadline + `RLIMIT_CPU`    |
-//! | `max_cpus`                  | `sched_setaffinity` pinning             |
-//! | deny-all egress             | seccomp-BPF: `socket(AF_INET/INET6)` → `EPERM` |
+//! | Declared limit          | Kernel mechanism |
+//! |-------------------------|------------------|
+//! | `max_file_size_bytes`   | inherited `RLIMIT_FSIZE` (`prlimit64`) |
+//! | deny-all egress         | inherited seccomp-BPF deny of INET sockets, plus bwrap `--unshare-net` |
 //!
-//! What it deliberately refuses instead of faking: GPU memory caps (needs a
-//! cgroup or driver hook), and per-host egress allow-lists (socket-level
-//! filtering can only deny whole address families; host filtering needs a
-//! network namespace plus proxy or nftables). Requesting either fails closed.
+//! Tree-wide memory, process-count, CPU-count and wall-time budgets are
+//! deliberately refused: per-process rlimits, affinity and process-group kills
+//! do not provide non-escapable accounting/lifecycle control for arbitrary
+//! descendants. Those require cgroup/PID-namespace-class enforcement.
+//! GPU memory caps and per-host egress allow-lists are likewise refused rather
+//! than simulated.
 
 use super::budgets::{EgressPolicy, ResourceBackend, ResourceLimits};
 use std::time::Duration;
+
+pub(super) const GOVERNANCE_FAILURE_PREFIX: &str = "[GOVERNANCE_UNAVAILABLE]";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionConstraints {
@@ -145,6 +146,7 @@ pub fn apply_to_command(
     command: &mut std::process::Command,
     constraints: &ExecutionConstraints,
 ) -> Result<(), String> {
+    constraints.ensure_enforceable(probed_backend())?;
     imp::apply_to_command(command, constraints)
 }
 
@@ -438,17 +440,20 @@ mod imp {
     }
 
     impl ResourceBackend for RealLinuxBackend {
+        // Honest fail-closed gaps: these limits need non-resettable,
+        // execution-tree-wide accounting/lifecycle control. Per-process
+        // rlimits, sched affinity and process-group kills are insufficient.
         fn supports_memory_limit(&self, _bytes: u64) -> bool {
-            true
+            false
         }
-        fn supports_cpu_limit(&self, cpus: u32) -> bool {
-            (1..=MAX_PINNABLE_CPUS).contains(&cpus)
+        fn supports_cpu_limit(&self, _cpus: u32) -> bool {
+            false
         }
         fn supports_wall_time(&self, _seconds: u64) -> bool {
-            true
+            false
         }
         fn supports_process_limit(&self, _processes: u32) -> bool {
-            true
+            false
         }
         fn supports_file_size_limit(&self, _bytes: u64) -> bool {
             true
@@ -486,7 +491,14 @@ mod imp {
     ) -> Result<(), String> {
         let constraints = constraints.clone();
         unsafe {
-            command.pre_exec(move || apply(&constraints));
+            command.pre_exec(move || {
+                apply(&constraints).map_err(|error| {
+                    io::Error::new(
+                        error.kind(),
+                        format!("{} {error}", super::GOVERNANCE_FAILURE_PREFIX),
+                    )
+                })
+            });
         }
         Ok(())
     }
@@ -529,14 +541,16 @@ mod imp {
         }
 
         #[test]
-        fn cpu_limits_beyond_the_mask_width_fail_closed() {
+        fn tree_wide_limits_fail_closed_without_tree_wide_backend() {
             let backend = RealLinuxBackend {
                 seccomp_available: true,
             };
-            assert!(backend.supports_cpu_limit(1));
-            assert!(backend.supports_cpu_limit(MAX_PINNABLE_CPUS));
-            assert!(!backend.supports_cpu_limit(0));
-            assert!(!backend.supports_cpu_limit(MAX_PINNABLE_CPUS + 1));
+
+            assert!(!backend.supports_memory_limit(1 << 20));
+            assert!(!backend.supports_process_limit(2));
+            assert!(!backend.supports_cpu_limit(1));
+            assert!(!backend.supports_wall_time(1));
+            assert!(backend.supports_file_size_limit(4096));
         }
 
         #[test]
@@ -589,50 +603,6 @@ mod imp {
                 "kernel must stop the write close past the cap"
             );
             std::fs::remove_dir_all(&base).unwrap();
-        }
-
-        #[test]
-        fn live_address_space_limit_still_runs_small_children() {
-            let mut command = Command::new("sh");
-            command.args(["-c", "echo enforced"]);
-            let constraints = ExecutionConstraints {
-                limits: ResourceLimits {
-                    max_memory_bytes: Some(256 << 20),
-                    ..ResourceLimits::default()
-                },
-                ..ExecutionConstraints::default()
-            };
-            apply_to_command(&mut command, &constraints).unwrap();
-            let output = command.output().unwrap();
-            assert!(output.status.success());
-            assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "enforced");
-        }
-
-        #[test]
-        fn live_cpu_pinning_bounds_visible_parallelism() {
-            let available = std::thread::available_parallelism().unwrap().get() as u32;
-            if available < 2
-            {
-                return;
-            }
-            let pinned = available - 1;
-            let mut command = Command::new("nproc");
-            let constraints = ExecutionConstraints {
-                limits: ResourceLimits {
-                    max_cpus: Some(pinned),
-                    ..ResourceLimits::default()
-                },
-                ..ExecutionConstraints::default()
-            };
-            apply_to_command(&mut command, &constraints).unwrap();
-            let output = command.output().unwrap();
-            assert!(output.status.success(), "nproc must exist in the test env");
-            let visible: u32 = String::from_utf8_lossy(&output.stdout)
-                .trim()
-                .parse()
-                .expect("nproc prints a number");
-            assert!(visible >= 1);
-            assert!(visible <= pinned, "{visible} cores visible after pinning");
         }
 
         #[test]

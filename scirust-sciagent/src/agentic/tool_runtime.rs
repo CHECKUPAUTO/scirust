@@ -1,4 +1,4 @@
-use super::enforcement::{ExecutionConstraints, probed_backend};
+use super::enforcement::{ExecutionConstraints, GOVERNANCE_FAILURE_PREFIX, probed_backend};
 use super::sandbox_approval::SandboxApprovalRequest;
 use super::tools::{Tool, ToolParam};
 use std::collections::{HashMap, HashSet};
@@ -184,10 +184,11 @@ impl<P: ToolPolicy> ToolRuntime<P> {
     ///
     /// The constraints travel as reserved call metadata, are checked for
     /// enforceability against the probed kernel backend BEFORE the policy
-    /// hook runs, and reach the sandboxed spawn path where they become real
-    /// rlimits, CPU pinning and a seccomp deny-all socket filter. A tool
-    /// that does not execute through that path refuses governance instead
-    /// of silently running unbounded.
+    /// hook runs, and reach the sandboxed spawn path where supported limits
+    /// become kernel enforcement. Tree-wide constraints without a non-escapable
+    /// backend are refused rather than approximated. A tool that does not
+    /// execute through that path refuses governance instead of silently running
+    /// unbounded.
     pub fn execute_governed(
         &self,
         call: &ToolCall,
@@ -265,6 +266,18 @@ impl<P: ToolPolicy> ToolRuntime<P> {
         }
 
         let output = (tool.execute)(params);
+
+        if constraints.is_some() && output.starts_with(GOVERNANCE_FAILURE_PREFIX)
+        {
+            return Err(ToolRuntimeError::GovernanceDenied {
+                tool: call.tool.clone(),
+                reason: output
+                    .trim_start_matches(GOVERNANCE_FAILURE_PREFIX)
+                    .trim()
+                    .to_string(),
+            });
+        }
+
         self.policy.after_execute(call, tool, &output);
         Ok(output)
     }
@@ -625,6 +638,19 @@ mod tests {
         }
     }
 
+    fn failed_pre_exec_status_tool(_params: HashMap<String, String>) -> String {
+        format!("{GOVERNANCE_FAILURE_PREFIX} simulated pre-exec enforcement failure")
+    }
+
+    fn failed_pre_exec_status_tool_tool() -> Tool {
+        Tool {
+            name: "status",
+            description: "governance failure propagation probe",
+            parameters: Vec::new(),
+            execute: failed_pre_exec_status_tool,
+        }
+    }
+
     fn file_size_constraints() -> crate::agentic::ExecutionConstraints {
         use crate::agentic::ExecutionConstraints;
         use crate::agentic::budgets::{EgressPolicy, ResourceLimits};
@@ -653,6 +679,33 @@ mod tests {
             .expect("enforceable governance must run");
         assert_eq!(output, "ran");
         assert_eq!(GOVERNED_RUNS.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn post_gate_pre_exec_failure_remains_a_typed_governance_denial() {
+        if !crate::agentic::enforcement::probed_backend().supports_egress_deny_all()
+        {
+            return;
+        }
+
+        let runtime =
+            ToolRuntime::new(vec![failed_pre_exec_status_tool_tool()], AllowAllPolicy).unwrap();
+
+        let error = runtime
+            .execute_governed(
+                &ToolCall::new("g-pre-exec", "status", HashMap::new()),
+                &file_size_constraints(),
+            )
+            .expect_err("post-gate pre-exec failure must not become successful tool output");
+
+        assert!(
+            matches!(
+                error,
+                ToolRuntimeError::GovernanceDenied { ref reason, .. }
+                    if reason.contains("pre-exec enforcement failure")
+            ),
+            "{error}"
+        );
     }
 
     #[test]
