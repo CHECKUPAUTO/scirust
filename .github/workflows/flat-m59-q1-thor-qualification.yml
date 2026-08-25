@@ -226,9 +226,10 @@ jobs:
             for dim in 64 128; do
               echo "=== geometry seq_len=$seq head_dim=$dim ==="
               out="$RUNNER_TEMP/flat-m59-thor-${seq}-${dim}.csv"
+              route_meta="$RUNNER_TEMP/flat-m59-thor-${seq}-${dim}.route.txt"
               SCIRUST_M28_SEQ_LEN="$seq" \
               SCIRUST_M28_HEAD_DIM="$dim" \
-              "$benchmark" | tee "$out"
+              "$benchmark" 2> >(tee "$route_meta" >&2) | tee "$out"
 
               if [[ -s "$contamination" ]]; then
                 echo "::error::SciAgent training appeared during the measured M59 window; all timing evidence from this run is invalid"
@@ -241,9 +242,9 @@ jobs:
                 exit 1
               fi
 
-              grep -Fx "flat_route=q1_vec4_mha" "$out" >/dev/null || {
+              grep -Fx "flat_route=q1_vec4_mha" "$route_meta" >/dev/null || {
                 echo "::error::M59 benchmark did not select the requested Q1 route"
-                cat "$out"
+                cat "$route_meta"
                 exit 1
               }
               grep -F "NVIDIA Tegra NVIDIA Thor,Vulkan," "$out" >/dev/null || {
