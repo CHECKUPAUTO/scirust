@@ -31,7 +31,7 @@ use core::fmt;
 
 use scirust_compute::{DType, Shape};
 
-use crate::{Graph, NodeId, TensorType};
+use crate::{Graph, NodeId, Operation, TensorType};
 
 /// Stable identifier of one representation declared in a
 /// [`RepresentationPlan`].
@@ -403,6 +403,40 @@ fn dense_storage_bits(
     Ok(StorageBits::new(bits))
 }
 
+/// Compare canonical operations for representation-plan graph anchoring.
+///
+/// Input names are user-facing labels rather than tensor semantics, so renaming
+/// an input does not invalidate a representation plan. Every other operation
+/// uses its bit-exact structural equality, including constant identifiers,
+/// scalar attributes, shapes and permutations.
+fn graph_anchor_operations_equal(expected: &Operation, actual: &Operation) -> bool {
+    match (expected, actual)
+    {
+        (Operation::Input { .. }, Operation::Input { .. }) => true,
+        _ => expected == actual,
+    }
+}
+
+/// Return whether two graphs denote the same representation-plan anchor.
+///
+/// This deliberately follows the same semantic policy as
+/// [`RepresentationPlan::ensure_compatible_with`]: canonical node order,
+/// operations, inputs, tensor types and graph outputs matter, while Input names
+/// do not.
+fn graph_anchors_equal(expected: &Graph, actual: &Graph) -> bool {
+    expected.nodes().len() == actual.nodes().len()
+        && expected.outputs() == actual.outputs()
+        && expected
+            .nodes()
+            .iter()
+            .zip(actual.nodes())
+            .all(|(expected, actual)| {
+                expected.output == actual.output
+                    && graph_anchor_operations_equal(&expected.operation, &actual.operation)
+                    && expected.inputs == actual.inputs
+            })
+}
+
 /// Failure while constructing a representation plan.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -507,6 +541,32 @@ pub enum RepresentationError {
         expected: TensorType,
         /// Canonical tensor type declared by the presented graph.
         actual: TensorType,
+    },
+    /// A canonical node now performs a different operation or carries
+    /// different operation attributes.
+    GraphNodeOperationMismatch {
+        /// Identifier of the drifted node.
+        node: NodeId,
+        /// Operation recorded when the plan was seeded.
+        expected: Operation,
+        /// Operation declared by the presented graph.
+        actual: Operation,
+    },
+    /// A canonical node now consumes different canonical inputs.
+    GraphNodeInputsMismatch {
+        /// Identifier of the drifted node.
+        node: NodeId,
+        /// Input identifiers recorded when the plan was seeded.
+        expected: Vec<NodeId>,
+        /// Input identifiers declared by the presented graph.
+        actual: Vec<NodeId>,
+    },
+    /// The canonical graph now declares a different ordered output set.
+    GraphOutputsMismatch {
+        /// Output identifiers recorded when the plan was seeded.
+        expected: Vec<NodeId>,
+        /// Output identifiers declared by the presented graph.
+        actual: Vec<NodeId>,
     },
 }
 
@@ -616,6 +676,37 @@ impl fmt::Display for RepresentationError {
                     node.get()
                 )
             },
+            Self::GraphNodeOperationMismatch {
+                node,
+                expected,
+                actual,
+            } =>
+            {
+                write!(
+                    formatter,
+                    "node {} operation changed from {expected:?} to {actual:?}",
+                    node.get()
+                )
+            },
+            Self::GraphNodeInputsMismatch {
+                node,
+                expected,
+                actual,
+            } =>
+            {
+                write!(
+                    formatter,
+                    "node {} inputs changed from {expected:?} to {actual:?}",
+                    node.get()
+                )
+            },
+            Self::GraphOutputsMismatch { expected, actual } =>
+            {
+                write!(
+                    formatter,
+                    "graph outputs changed from {expected:?} to {actual:?}"
+                )
+            },
         }
     }
 }
@@ -628,16 +719,28 @@ impl std::error::Error for RepresentationError {}
 /// The canonical [`Graph`] remains unchanged. Node identifiers are used only as
 /// stable keys into this table; representation planning does not alter logical
 /// dtype, shape, operation identity or graph topology.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct RepresentationPlan {
     representations: Vec<PrimitiveRepresentation>,
     assignments: Vec<RepresentationId>,
-    /// Canonical tensor type each node carried when the plan was seeded. This
-    /// anchors graph compatibility: a plan only describes graphs whose nodes
-    /// still declare the same logical values, so rewritten or retyped graphs
-    /// are rejected instead of silently mis-planned.
-    seeded_types: Vec<TensorType>,
+    /// Canonical graph snapshot this plan was seeded from.
+    ///
+    /// Representation assignments are keyed by canonical [`NodeId`], so the
+    /// meaning of each position must remain stable. Semantic comparison includes
+    /// operation identity and attributes, input edges, output tensor types and
+    /// declared graph outputs. Input display names are deliberately ignored.
+    seeded_graph: Graph,
 }
+
+impl PartialEq for RepresentationPlan {
+    fn eq(&self, other: &Self) -> bool {
+        self.representations == other.representations
+            && self.assignments == other.assignments
+            && graph_anchors_equal(&self.seeded_graph, &other.seeded_graph)
+    }
+}
+
+impl Eq for RepresentationPlan {}
 
 impl RepresentationPlan {
     /// Build the identity representation plan for a canonical graph.
@@ -646,14 +749,15 @@ impl RepresentationPlan {
     /// Equal dense representations are interned deterministically, so nodes with
     /// the same dtype share one [`RepresentationId`].
     ///
-    /// The graph's canonical node types anchor compatibility: every later call
-    /// pairing this plan with a graph verifies that nodes still declare the
-    /// same logical values (see [`RepresentationPlan::ensure_compatible_with`]).
+    /// The graph's canonical structure anchors compatibility: later calls
+    /// verify semantic operations, ordered inputs, output tensor types and graph
+    /// outputs. Input display names are ignored (see
+    /// [`RepresentationPlan::ensure_compatible_with`]).
     pub fn dense(graph: &Graph) -> Result<Self, RepresentationError> {
         let mut plan = Self {
             representations: Vec::new(),
             assignments: Vec::with_capacity(graph.nodes().len()),
-            seeded_types: Vec::with_capacity(graph.nodes().len()),
+            seeded_graph: graph.clone(),
         };
 
         for node in graph.nodes()
@@ -661,7 +765,6 @@ impl RepresentationPlan {
             let representation = PrimitiveRepresentation::dense(node.output.dtype);
             let id = plan.declare(representation)?;
             plan.assignments.push(id);
-            plan.seeded_types.push(node.output.clone());
         }
 
         Ok(plan)
@@ -1007,33 +1110,69 @@ impl RepresentationPlan {
             .ok_or(RepresentationError::UnknownAssignmentNode { node })
     }
 
-    /// Verify that `graph` still declares the canonical node types this plan
+    /// Verify that `graph` still has the exact canonical structure this plan
     /// was seeded from.
     ///
-    /// Plans are keyed by canonical node identifiers: reusing one against a
-    /// rewritten, truncated or retyped graph would silently mis-plan values.
-    /// Node names and topology are irrelevant; only the count and the logical
-    /// type declared per position matter, so an identically rebuilt graph
-    /// remains compatible.
+    /// Representation assignments are keyed by canonical [`NodeId`]. Reusing a
+    /// plan against another graph is therefore safe only when each identifier
+    /// still denotes the same canonical value: same semantic operation and
+    /// bit-exact attributes, same ordered inputs and same output tensor type.
+    /// Input display names are deliberately ignored. The ordered graph output
+    /// set is anchored as well.
+    ///
+    /// Equality is structural and deterministic; no address, random identity or
+    /// probabilistic hash participates. A graph rebuilt with identical
+    /// canonical semantics remains compatible.
     pub fn ensure_compatible_with(&self, graph: &Graph) -> Result<(), RepresentationError> {
-        if graph.nodes().len() != self.seeded_types.len()
+        let seeded_nodes = self.seeded_graph.nodes();
+
+        if graph.nodes().len() != seeded_nodes.len()
         {
             return Err(RepresentationError::GraphNodeCountMismatch {
-                expected: self.seeded_types.len(),
+                expected: seeded_nodes.len(),
                 actual: graph.nodes().len(),
             });
         }
 
-        for (index, (seeded, node)) in self.seeded_types.iter().zip(graph.nodes()).enumerate()
+        for (index, (seeded, node)) in seeded_nodes.iter().zip(graph.nodes()).enumerate()
         {
-            if *seeded != node.output
+            let node_id = NodeId::new(index as u32);
+
+            // Preserve the historically precise type diagnostic first.
+            if seeded.output != node.output
             {
                 return Err(RepresentationError::GraphNodeTypeMismatch {
-                    node: NodeId::new(index as u32),
-                    expected: seeded.clone(),
+                    node: node_id,
+                    expected: seeded.output.clone(),
                     actual: node.output.clone(),
                 });
             }
+
+            if !graph_anchor_operations_equal(&seeded.operation, &node.operation)
+            {
+                return Err(RepresentationError::GraphNodeOperationMismatch {
+                    node: node_id,
+                    expected: seeded.operation.clone(),
+                    actual: node.operation.clone(),
+                });
+            }
+
+            if seeded.inputs != node.inputs
+            {
+                return Err(RepresentationError::GraphNodeInputsMismatch {
+                    node: node_id,
+                    expected: seeded.inputs.clone(),
+                    actual: node.inputs.clone(),
+                });
+            }
+        }
+
+        if self.seeded_graph.outputs() != graph.outputs()
+        {
+            return Err(RepresentationError::GraphOutputsMismatch {
+                expected: self.seeded_graph.outputs().to_vec(),
+                actual: graph.outputs().to_vec(),
+            });
         }
 
         Ok(())
@@ -1067,6 +1206,50 @@ mod tests {
             plan.representation_for(input),
             Some(&PrimitiveRepresentation::dense(DType::F32))
         );
+    }
+
+    #[test]
+    fn plan_equality_ignores_input_display_names() {
+        let mut first = Graph::new();
+        let first_input = first
+            .add_input("original", tensor_type(DType::F32))
+            .unwrap();
+        first.set_outputs(vec![first_input]).unwrap();
+
+        let mut renamed = Graph::new();
+        let renamed_input = renamed
+            .add_input("renamed", tensor_type(DType::F32))
+            .unwrap();
+        renamed.set_outputs(vec![renamed_input]).unwrap();
+
+        let first_plan = RepresentationPlan::dense(&first).unwrap();
+        let renamed_plan = RepresentationPlan::dense(&renamed).unwrap();
+
+        assert_eq!(first_plan, renamed_plan);
+    }
+
+    #[test]
+    fn plan_equality_detects_semantic_graph_drift() {
+        let ty = tensor_type(DType::F32);
+
+        let mut relu_graph = Graph::new();
+        let relu_input = relu_graph.add_input("x", ty.clone()).unwrap();
+        let relu = relu_graph
+            .add_node(Operation::Relu, vec![relu_input], ty.clone())
+            .unwrap();
+        relu_graph.set_outputs(vec![relu]).unwrap();
+
+        let mut exp_graph = Graph::new();
+        let exp_input = exp_graph.add_input("x", ty.clone()).unwrap();
+        let exp = exp_graph
+            .add_node(Operation::Exp, vec![exp_input], ty)
+            .unwrap();
+        exp_graph.set_outputs(vec![exp]).unwrap();
+
+        let relu_plan = RepresentationPlan::dense(&relu_graph).unwrap();
+        let exp_plan = RepresentationPlan::dense(&exp_graph).unwrap();
+
+        assert_ne!(relu_plan, exp_plan);
     }
 
     #[test]
@@ -1256,7 +1439,7 @@ mod tests {
         RepresentationPlan {
             representations: Vec::new(),
             assignments: Vec::new(),
-            seeded_types: Vec::new(),
+            seeded_graph: Graph::new(),
         }
     }
 
@@ -2179,10 +2362,10 @@ mod tests {
         let node = graph.add_input("x", tensor_type(DType::F32)).unwrap();
         graph.set_outputs(vec![node]).unwrap();
 
-        // A plan seeded for a different node set is rejected before any
-        // assignment lookup.
-        let mut plan = empty_plan();
-        plan.seeded_types = vec![tensor_type(DType::F32)];
+        // Preserve a valid graph anchor while deliberately removing the
+        // representation assignment. Whole-plan accounting must diagnose the
+        // missing assignment rather than confusing it with graph drift.
+        let mut plan = RepresentationPlan::dense(&graph).unwrap();
         plan.assignments.clear();
 
         assert_eq!(
@@ -2209,8 +2392,10 @@ mod tests {
         // The identical graph passes.
         assert!(plan.ensure_compatible_with(&graph).is_ok());
 
-        // A rebuilt graph declaring the same canonical values stays
-        // compatible: names and topology are not part of the anchor.
+        // A rebuilt graph declaring the same canonical value stays
+        // compatible when only an Input display name changes. Input labels are
+        // metadata; operation semantics, topology, types and graph outputs are
+        // part of the anchor.
         let mut rebuilt = Graph::new();
         let clone = rebuilt
             .add_input(
