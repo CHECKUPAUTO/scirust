@@ -245,7 +245,7 @@ impl ApprovalService {
     }
 
     /// Bind this service to a shared policy cell (typically
-    /// [`PermissionGate::shared_approval_policy`]).
+    /// [`crate::agentic::permission::PermissionGate::shared_approval_policy`]).
     ///
     /// From this point the gate and the service observe ONE authoritative
     /// policy: a switch through either side is enforced by both and shown
