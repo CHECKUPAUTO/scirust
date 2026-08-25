@@ -10,22 +10,28 @@
 //! therefore impossible by construction, mirroring how the canonical
 //! [`Graph`] only permits inputs referring to previously created nodes.
 //!
-//! Dense storage remains the identity representation. The composite families
-//! are [`PrimitiveRepresentation::Factorized`] (two contracted matrix factors),
-//! [`PrimitiveRepresentation::Quantized`] (discrete codes corrected by
-//! continuous scales) and [`PrimitiveRepresentation::Sparse`] (integer
-//! positions plus numeric nonzero magnitudes). Storage is accounted as the
-//! exact sum of declared components, aggregatable per graph through
-//! [`RepresentationPlan::total_storage_bits`]. Codebook layouts, block
-//! geometry, packed/sub-bit payloads, storage formats, cost models and
-//! backend-specific materialization remain intentionally out of scope.
+//! Dense storage remains the identity representation.
+//! [`PrimitiveRepresentation::Factorized`] is the first composite family whose
+//! reconstruction contract is complete enough to bind to a logical tensor:
+//! two matrix factors must contract exactly to the logical matrix shape.
+//!
+//! [`PrimitiveRepresentation::Quantized`] and [`PrimitiveRepresentation::Sparse`]
+//! are retained as declaration skeletons only. Their typed components and
+//! declaration invariants can be explored and interned internally, but they are
+//! not valid logical-tensor representations until their layout and reconstruction
+//! geometry are explicitly defined. In particular, no storage saving is claimed
+//! merely from the sizes of codes/scales or indices/values.
+//!
+//! Codebook layouts, block geometry, packed/sub-bit payloads, sparse formats,
+//! cost models and backend-specific materialization remain intentionally out of
+//! scope.
 
 use alloc::vec::Vec;
 use core::fmt;
 
 use scirust_compute::{DType, Shape};
 
-use crate::{Graph, NodeId, TensorType};
+use crate::{Graph, NodeId, Operation, TensorType};
 
 /// Stable identifier of one representation declared in a
 /// [`RepresentationPlan`].
@@ -76,9 +82,10 @@ impl StorageBits {
 /// representations may contain factors, packed payloads, scales, indices or
 /// other typed tensor components with different shapes and dtypes.
 ///
-/// Instances are constructed through [`RepresentationPlan::component`], which
-/// validates that the identifier exists and is compatible with the component's
-/// own tensor type.
+/// Instances are constructed internally by [`RepresentationPlan`] declaration
+/// methods. Public callers provide tensor types and representation identifiers;
+/// the target plan resolves those identifiers itself, so a component created
+/// against one plan cannot be transplanted into another plan by accident.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepresentationComponent {
     tensor_type: TensorType,
@@ -142,8 +149,9 @@ pub enum PrimitiveRepresentation {
     /// once at declaration time: codes must be integer-valued (discrete
     /// payload) and scales floating-point (continuous correction). Block
     /// layouts, group sizes, zero-points and codebook geometry belong to
-    /// concrete schemes and stay out of scope; no shape relationship binds the
-    /// components to each other or to the logical tensor type.
+    /// concrete schemes and stay out of scope. Because those relationships are
+    /// required to prove that the components reconstruct a logical tensor, this
+    /// skeleton cannot currently be bound to one.
     Quantized {
         /// Discrete code payload with an integer dtype.
         codes: RepresentationComponent,
@@ -158,8 +166,9 @@ pub enum PrimitiveRepresentation {
     /// positions) and values must be numeric (magnitudes of any integer or
     /// floating dtype; boolean masks are predicates, not payloads). Storage
     /// formats, nnz layout and compression schemes belong to concrete formats
-    /// and stay out of scope; no shape relationship binds the components to
-    /// each other or to the logical tensor type.
+    /// and stay out of scope. Because those relationships are required to prove
+    /// how indices and values reconstruct the logical tensor, this skeleton
+    /// cannot currently be bound to one.
     Sparse {
         /// Nonzero positions with an integer dtype.
         indices: RepresentationComponent,
@@ -276,7 +285,8 @@ impl PrimitiveRepresentation {
                     }),
                 }
             },
-            Self::Quantized { .. } | Self::Sparse { .. } => Ok(()),
+            Self::Quantized { .. } => Err(RepresentationError::QuantizedLayoutUndefined),
+            Self::Sparse { .. } => Err(RepresentationError::SparseLayoutUndefined),
         }
     }
 
@@ -393,6 +403,40 @@ fn dense_storage_bits(
     Ok(StorageBits::new(bits))
 }
 
+/// Compare canonical operations for representation-plan graph anchoring.
+///
+/// Input names are user-facing labels rather than tensor semantics, so renaming
+/// an input does not invalidate a representation plan. Every other operation
+/// uses its bit-exact structural equality, including constant identifiers,
+/// scalar attributes, shapes and permutations.
+fn graph_anchor_operations_equal(expected: &Operation, actual: &Operation) -> bool {
+    match (expected, actual)
+    {
+        (Operation::Input { .. }, Operation::Input { .. }) => true,
+        _ => expected == actual,
+    }
+}
+
+/// Return whether two graphs denote the same representation-plan anchor.
+///
+/// This deliberately follows the same semantic policy as
+/// [`RepresentationPlan::ensure_compatible_with`]: canonical node order,
+/// operations, inputs, tensor types and graph outputs matter, while Input names
+/// do not.
+fn graph_anchors_equal(expected: &Graph, actual: &Graph) -> bool {
+    expected.nodes().len() == actual.nodes().len()
+        && expected.outputs() == actual.outputs()
+        && expected
+            .nodes()
+            .iter()
+            .zip(actual.nodes())
+            .all(|(expected, actual)| {
+                expected.output == actual.output
+                    && graph_anchor_operations_equal(&expected.operation, &actual.operation)
+                    && expected.inputs == actual.inputs
+            })
+}
+
 /// Failure while constructing a representation plan.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -451,6 +495,12 @@ pub enum RepresentationError {
         /// Dtype carried by the values component.
         values: DType,
     },
+    /// Quantized components have been declared, but no layout/reconstruction
+    /// geometry currently proves that they represent a logical tensor.
+    QuantizedLayoutUndefined,
+    /// Sparse components have been declared, but no sparse layout/reconstruction
+    /// contract currently proves that they represent a logical tensor.
+    SparseLayoutUndefined,
     /// The node is outside the plan's assignment scope.
     ///
     /// Assignments are indexed by canonical node identifiers; the plan only
@@ -491,6 +541,32 @@ pub enum RepresentationError {
         expected: TensorType,
         /// Canonical tensor type declared by the presented graph.
         actual: TensorType,
+    },
+    /// A canonical node now performs a different operation or carries
+    /// different operation attributes.
+    GraphNodeOperationMismatch {
+        /// Identifier of the drifted node.
+        node: NodeId,
+        /// Operation recorded when the plan was seeded.
+        expected: Operation,
+        /// Operation declared by the presented graph.
+        actual: Operation,
+    },
+    /// A canonical node now consumes different canonical inputs.
+    GraphNodeInputsMismatch {
+        /// Identifier of the drifted node.
+        node: NodeId,
+        /// Input identifiers recorded when the plan was seeded.
+        expected: Vec<NodeId>,
+        /// Input identifiers declared by the presented graph.
+        actual: Vec<NodeId>,
+    },
+    /// The canonical graph now declares a different ordered output set.
+    GraphOutputsMismatch {
+        /// Output identifiers recorded when the plan was seeded.
+        expected: Vec<NodeId>,
+        /// Output identifiers declared by the presented graph.
+        actual: Vec<NodeId>,
     },
 }
 
@@ -550,6 +626,20 @@ impl fmt::Display for RepresentationError {
                     "sparse indices dtype {indices:?} must be integer-valued and values dtype {values:?} numeric"
                 )
             },
+            Self::QuantizedLayoutUndefined =>
+            {
+                write!(
+                    formatter,
+                    "quantized representation has no defined logical reconstruction layout"
+                )
+            },
+            Self::SparseLayoutUndefined =>
+            {
+                write!(
+                    formatter,
+                    "sparse representation has no defined logical reconstruction layout"
+                )
+            },
             Self::UnknownAssignmentNode { node } =>
             {
                 write!(
@@ -586,6 +676,37 @@ impl fmt::Display for RepresentationError {
                     node.get()
                 )
             },
+            Self::GraphNodeOperationMismatch {
+                node,
+                expected,
+                actual,
+            } =>
+            {
+                write!(
+                    formatter,
+                    "node {} operation changed from {expected:?} to {actual:?}",
+                    node.get()
+                )
+            },
+            Self::GraphNodeInputsMismatch {
+                node,
+                expected,
+                actual,
+            } =>
+            {
+                write!(
+                    formatter,
+                    "node {} inputs changed from {expected:?} to {actual:?}",
+                    node.get()
+                )
+            },
+            Self::GraphOutputsMismatch { expected, actual } =>
+            {
+                write!(
+                    formatter,
+                    "graph outputs changed from {expected:?} to {actual:?}"
+                )
+            },
         }
     }
 }
@@ -598,16 +719,28 @@ impl std::error::Error for RepresentationError {}
 /// The canonical [`Graph`] remains unchanged. Node identifiers are used only as
 /// stable keys into this table; representation planning does not alter logical
 /// dtype, shape, operation identity or graph topology.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct RepresentationPlan {
     representations: Vec<PrimitiveRepresentation>,
     assignments: Vec<RepresentationId>,
-    /// Canonical tensor type each node carried when the plan was seeded. This
-    /// anchors graph compatibility: a plan only describes graphs whose nodes
-    /// still declare the same logical values, so rewritten or retyped graphs
-    /// are rejected instead of silently mis-planned.
-    seeded_types: Vec<TensorType>,
+    /// Canonical graph snapshot this plan was seeded from.
+    ///
+    /// Representation assignments are keyed by canonical [`NodeId`], so the
+    /// meaning of each position must remain stable. Semantic comparison includes
+    /// operation identity and attributes, input edges, output tensor types and
+    /// declared graph outputs. Input display names are deliberately ignored.
+    seeded_graph: Graph,
 }
+
+impl PartialEq for RepresentationPlan {
+    fn eq(&self, other: &Self) -> bool {
+        self.representations == other.representations
+            && self.assignments == other.assignments
+            && graph_anchors_equal(&self.seeded_graph, &other.seeded_graph)
+    }
+}
+
+impl Eq for RepresentationPlan {}
 
 impl RepresentationPlan {
     /// Build the identity representation plan for a canonical graph.
@@ -616,14 +749,15 @@ impl RepresentationPlan {
     /// Equal dense representations are interned deterministically, so nodes with
     /// the same dtype share one [`RepresentationId`].
     ///
-    /// The graph's canonical node types anchor compatibility: every later call
-    /// pairing this plan with a graph verifies that nodes still declare the
-    /// same logical values (see [`RepresentationPlan::ensure_compatible_with`]).
+    /// The graph's canonical structure anchors compatibility: later calls
+    /// verify semantic operations, ordered inputs, output tensor types and graph
+    /// outputs. Input display names are ignored (see
+    /// [`RepresentationPlan::ensure_compatible_with`]).
     pub fn dense(graph: &Graph) -> Result<Self, RepresentationError> {
         let mut plan = Self {
             representations: Vec::new(),
             assignments: Vec::with_capacity(graph.nodes().len()),
-            seeded_types: Vec::with_capacity(graph.nodes().len()),
+            seeded_graph: graph.clone(),
         };
 
         for node in graph.nodes()
@@ -631,7 +765,6 @@ impl RepresentationPlan {
             let representation = PrimitiveRepresentation::dense(node.output.dtype);
             let id = plan.declare(representation)?;
             plan.assignments.push(id);
-            plan.seeded_types.push(node.output.clone());
         }
 
         Ok(plan)
@@ -640,6 +773,35 @@ impl RepresentationPlan {
     /// Return all interned representation declarations in canonical ID order.
     pub fn representations(&self) -> &[PrimitiveRepresentation] {
         &self.representations
+    }
+
+    /// Declare and intern dense scalar storage.
+    ///
+    /// Dense declarations carry no component dependencies.
+    pub fn declare_dense(
+        &mut self,
+        storage_dtype: DType,
+    ) -> Result<RepresentationId, RepresentationError> {
+        self.declare(PrimitiveRepresentation::dense(storage_dtype))
+    }
+
+    /// Declare and intern a two-factor matrix representation.
+    ///
+    /// Component identifiers are resolved against this plan before the
+    /// representation is constructed. This deliberately prevents callers from
+    /// transporting a validated [`RepresentationComponent`] from another plan
+    /// and having its numeric identifier silently reinterpreted here.
+    pub fn declare_factorized(
+        &mut self,
+        left_type: TensorType,
+        left_representation: RepresentationId,
+        right_type: TensorType,
+        right_representation: RepresentationId,
+    ) -> Result<RepresentationId, RepresentationError> {
+        let left = self.component(left_type, left_representation)?;
+        let right = self.component(right_type, right_representation)?;
+
+        self.declare(PrimitiveRepresentation::factorized(left, right))
     }
 
     /// Declare and intern one representation.
@@ -655,9 +817,9 @@ impl RepresentationPlan {
     /// Redeclaring an equal representation returns the existing identifier, so
     /// interning stays deterministic.
     ///
-    /// This is the extension point representation-aware lowering uses to
-    /// register composite declarations built from validated components.
-    pub fn declare(
+    /// Internal insertion kernel shared by the public family-specific
+    /// declaration methods.
+    fn declare(
         &mut self,
         primitive: PrimitiveRepresentation,
     ) -> Result<RepresentationId, RepresentationError> {
@@ -722,11 +884,15 @@ impl RepresentationPlan {
     /// Return the exact physical storage required to represent `logical` with
     /// the declared representation `id`.
     ///
-    /// Dense storage counts `elements × dtype size × 8` bits. Composite
-    /// families validate their structure against `logical`, then sum the exact
-    /// storage of their declared components, resolving nested references
-    /// recursively (references point strictly backwards, so recursion
-    /// terminates). All arithmetic is checked and never uses floating-point.
+    /// Dense storage counts `elements × dtype size × 8` bits. Factorized
+    /// storage validates its contraction against `logical`, then sums the exact
+    /// storage of its declared factors recursively (references point strictly
+    /// backwards, so recursion terminates).
+    ///
+    /// Quantized and sparse declaration skeletons deliberately return a typed
+    /// error here: component byte counts alone do not prove that those
+    /// components reconstruct the requested logical tensor. All successful
+    /// accounting uses checked integer arithmetic and never floating-point.
     pub fn storage_bits(
         &self,
         id: RepresentationId,
@@ -818,8 +984,8 @@ impl RepresentationPlan {
     /// This validates both identifier membership and compatibility between the
     /// physical representation and the component's own tensor type. Composite
     /// representations name their dependencies through such validated
-    /// components when calling `RepresentationPlan::declare`.
-    pub fn component(
+    /// components before the internal declaration kernel is invoked.
+    fn component(
         &self,
         tensor_type: TensorType,
         representation: RepresentationId,
@@ -944,33 +1110,69 @@ impl RepresentationPlan {
             .ok_or(RepresentationError::UnknownAssignmentNode { node })
     }
 
-    /// Verify that `graph` still declares the canonical node types this plan
+    /// Verify that `graph` still has the exact canonical structure this plan
     /// was seeded from.
     ///
-    /// Plans are keyed by canonical node identifiers: reusing one against a
-    /// rewritten, truncated or retyped graph would silently mis-plan values.
-    /// Node names and topology are irrelevant; only the count and the logical
-    /// type declared per position matter, so an identically rebuilt graph
-    /// remains compatible.
+    /// Representation assignments are keyed by canonical [`NodeId`]. Reusing a
+    /// plan against another graph is therefore safe only when each identifier
+    /// still denotes the same canonical value: same semantic operation and
+    /// bit-exact attributes, same ordered inputs and same output tensor type.
+    /// Input display names are deliberately ignored. The ordered graph output
+    /// set is anchored as well.
+    ///
+    /// Equality is structural and deterministic; no address, random identity or
+    /// probabilistic hash participates. A graph rebuilt with identical
+    /// canonical semantics remains compatible.
     pub fn ensure_compatible_with(&self, graph: &Graph) -> Result<(), RepresentationError> {
-        if graph.nodes().len() != self.seeded_types.len()
+        let seeded_nodes = self.seeded_graph.nodes();
+
+        if graph.nodes().len() != seeded_nodes.len()
         {
             return Err(RepresentationError::GraphNodeCountMismatch {
-                expected: self.seeded_types.len(),
+                expected: seeded_nodes.len(),
                 actual: graph.nodes().len(),
             });
         }
 
-        for (index, (seeded, node)) in self.seeded_types.iter().zip(graph.nodes()).enumerate()
+        for (index, (seeded, node)) in seeded_nodes.iter().zip(graph.nodes()).enumerate()
         {
-            if *seeded != node.output
+            let node_id = NodeId::new(index as u32);
+
+            // Preserve the historically precise type diagnostic first.
+            if seeded.output != node.output
             {
                 return Err(RepresentationError::GraphNodeTypeMismatch {
-                    node: NodeId::new(index as u32),
-                    expected: seeded.clone(),
+                    node: node_id,
+                    expected: seeded.output.clone(),
                     actual: node.output.clone(),
                 });
             }
+
+            if !graph_anchor_operations_equal(&seeded.operation, &node.operation)
+            {
+                return Err(RepresentationError::GraphNodeOperationMismatch {
+                    node: node_id,
+                    expected: seeded.operation.clone(),
+                    actual: node.operation.clone(),
+                });
+            }
+
+            if seeded.inputs != node.inputs
+            {
+                return Err(RepresentationError::GraphNodeInputsMismatch {
+                    node: node_id,
+                    expected: seeded.inputs.clone(),
+                    actual: node.inputs.clone(),
+                });
+            }
+        }
+
+        if self.seeded_graph.outputs() != graph.outputs()
+        {
+            return Err(RepresentationError::GraphOutputsMismatch {
+                expected: self.seeded_graph.outputs().to_vec(),
+                actual: graph.outputs().to_vec(),
+            });
         }
 
         Ok(())
@@ -1004,6 +1206,50 @@ mod tests {
             plan.representation_for(input),
             Some(&PrimitiveRepresentation::dense(DType::F32))
         );
+    }
+
+    #[test]
+    fn plan_equality_ignores_input_display_names() {
+        let mut first = Graph::new();
+        let first_input = first
+            .add_input("original", tensor_type(DType::F32))
+            .unwrap();
+        first.set_outputs(vec![first_input]).unwrap();
+
+        let mut renamed = Graph::new();
+        let renamed_input = renamed
+            .add_input("renamed", tensor_type(DType::F32))
+            .unwrap();
+        renamed.set_outputs(vec![renamed_input]).unwrap();
+
+        let first_plan = RepresentationPlan::dense(&first).unwrap();
+        let renamed_plan = RepresentationPlan::dense(&renamed).unwrap();
+
+        assert_eq!(first_plan, renamed_plan);
+    }
+
+    #[test]
+    fn plan_equality_detects_semantic_graph_drift() {
+        let ty = tensor_type(DType::F32);
+
+        let mut relu_graph = Graph::new();
+        let relu_input = relu_graph.add_input("x", ty.clone()).unwrap();
+        let relu = relu_graph
+            .add_node(Operation::Relu, vec![relu_input], ty.clone())
+            .unwrap();
+        relu_graph.set_outputs(vec![relu]).unwrap();
+
+        let mut exp_graph = Graph::new();
+        let exp_input = exp_graph.add_input("x", ty.clone()).unwrap();
+        let exp = exp_graph
+            .add_node(Operation::Exp, vec![exp_input], ty)
+            .unwrap();
+        exp_graph.set_outputs(vec![exp]).unwrap();
+
+        let relu_plan = RepresentationPlan::dense(&relu_graph).unwrap();
+        let exp_plan = RepresentationPlan::dense(&exp_graph).unwrap();
+
+        assert_ne!(relu_plan, exp_plan);
     }
 
     #[test]
@@ -1193,7 +1439,7 @@ mod tests {
         RepresentationPlan {
             representations: Vec::new(),
             assignments: Vec::new(),
-            seeded_types: Vec::new(),
+            seeded_graph: Graph::new(),
         }
     }
 
@@ -1644,7 +1890,7 @@ mod tests {
     }
 
     #[test]
-    fn quantized_storage_bits_sum_component_storage_exactly() {
+    fn quantized_storage_requires_a_defined_reconstruction_layout() {
         let mut plan = empty_plan();
         let dense_u8 = plan
             .declare(PrimitiveRepresentation::dense(DType::U8))
@@ -1659,17 +1905,16 @@ mod tests {
         let scales = plan
             .component(TensorType::new(DType::F32, Shape::new(vec![4])), dense_f32)
             .unwrap();
+
         let quantized = plan
             .declare(PrimitiveRepresentation::quantized(codes, scales))
             .unwrap();
 
-        // The parent dtype is irrelevant to a converting representation.
         let logical = TensorType::new(DType::F32, Shape::new(vec![4, 2]));
 
-        // 4*2 code bytes * 8 bits + 4 scale words * 4 bytes * 8 bits.
         assert_eq!(
             plan.storage_bits(quantized, &logical),
-            Ok(StorageBits::new(64 + 128))
+            Err(RepresentationError::QuantizedLayoutUndefined)
         );
     }
 
@@ -1742,7 +1987,7 @@ mod tests {
     }
 
     #[test]
-    fn quantized_binds_to_logical_types_without_structural_constraints() {
+    fn quantized_rejects_logical_binding_until_layout_is_defined() {
         let mut plan = empty_plan();
         let dense_u8 = plan
             .declare(PrimitiveRepresentation::dense(DType::U8))
@@ -1757,18 +2002,20 @@ mod tests {
         let scales = plan
             .component(TensorType::new(DType::F16, Shape::new(vec![8])), dense_f16)
             .unwrap();
+
         let quantized = plan
             .declare(PrimitiveRepresentation::quantized(codes, scales))
             .unwrap();
 
-        // Block geometry is scheme-specific and out of IR scope: any logical
-        // type binds as long as components were declared validly.
+        // Equal-sized or differently shaped logical tensors are all rejected:
+        // no block/group/padding relationship has been declared.
         for dims in [vec![64], vec![8, 8], vec![2, 4, 8]]
         {
             let logical = TensorType::new(DType::F32, Shape::new(dims));
+
             assert_eq!(
                 plan.storage_bits(quantized, &logical),
-                Ok(StorageBits::new(64 * 8 + 8 * 2 * 8))
+                Err(RepresentationError::QuantizedLayoutUndefined)
             );
         }
     }
@@ -1882,7 +2129,7 @@ mod tests {
     }
 
     #[test]
-    fn sparse_storage_bits_sum_component_storage_exactly() {
+    fn sparse_storage_requires_a_defined_reconstruction_layout() {
         let mut plan = empty_plan();
         let dense_u16 = plan
             .declare(PrimitiveRepresentation::dense(DType::U16))
@@ -1897,17 +2144,16 @@ mod tests {
         let values = plan
             .component(TensorType::new(DType::F32, Shape::new(vec![12])), dense_f32)
             .unwrap();
+
         let sparse = plan
             .declare(PrimitiveRepresentation::sparse(indices, values))
             .unwrap();
 
-        // The parent dtype is irrelevant to a converting representation.
         let logical = TensorType::new(DType::F32, Shape::new(vec![4, 3]));
 
-        // 12 index words * 2 bytes * 8 bits + 12 value words * 4 bytes * 8 bits.
         assert_eq!(
             plan.storage_bits(sparse, &logical),
-            Ok(StorageBits::new(192 + 384))
+            Err(RepresentationError::SparseLayoutUndefined)
         );
     }
 
@@ -2008,7 +2254,7 @@ mod tests {
     }
 
     #[test]
-    fn quantized_assignments_bind_without_structural_match() {
+    fn quantized_assignment_is_rejected_until_layout_is_defined() {
         let mut graph = Graph::new();
         let weight = graph
             .add_input(
@@ -2019,6 +2265,8 @@ mod tests {
         graph.set_outputs(vec![weight]).unwrap();
 
         let mut plan = RepresentationPlan::dense(&graph).unwrap();
+        let dense_default = plan.assignment(weight).unwrap();
+
         let dense_u8 = plan
             .declare(PrimitiveRepresentation::dense(DType::U8))
             .unwrap();
@@ -2032,18 +2280,21 @@ mod tests {
         let scales = plan
             .component(TensorType::new(DType::F16, Shape::new(vec![8])), dense_f16)
             .unwrap();
+
         let quantized = plan
             .declare(PrimitiveRepresentation::quantized(codes, scales))
             .unwrap();
 
-        plan.assign(&graph, weight, quantized).unwrap();
-        assert_eq!(plan.assignment(weight), Some(quantized));
         assert_eq!(
-            plan.storage_bits(
-                quantized,
-                &TensorType::new(DType::F32, Shape::new(vec![8, 8]))
-            ),
-            Ok(StorageBits::new(8 * 8 * 8 + 8 * 2 * 8))
+            plan.assign(&graph, weight, quantized),
+            Err(RepresentationError::QuantizedLayoutUndefined)
+        );
+
+        // Rejected assignment is atomic: dense identity remains bound.
+        assert_eq!(plan.assignment(weight), Some(dense_default));
+        assert_eq!(
+            plan.node_storage_bits(&graph, weight),
+            Ok(StorageBits::new(8 * 8 * 32))
         );
     }
 
@@ -2111,10 +2362,10 @@ mod tests {
         let node = graph.add_input("x", tensor_type(DType::F32)).unwrap();
         graph.set_outputs(vec![node]).unwrap();
 
-        // A plan seeded for a different node set is rejected before any
-        // assignment lookup.
-        let mut plan = empty_plan();
-        plan.seeded_types = vec![tensor_type(DType::F32)];
+        // Preserve a valid graph anchor while deliberately removing the
+        // representation assignment. Whole-plan accounting must diagnose the
+        // missing assignment rather than confusing it with graph drift.
+        let mut plan = RepresentationPlan::dense(&graph).unwrap();
         plan.assignments.clear();
 
         assert_eq!(
@@ -2141,8 +2392,10 @@ mod tests {
         // The identical graph passes.
         assert!(plan.ensure_compatible_with(&graph).is_ok());
 
-        // A rebuilt graph declaring the same canonical values stays
-        // compatible: names and topology are not part of the anchor.
+        // A rebuilt graph declaring the same canonical value stays
+        // compatible when only an Input display name changes. Input labels are
+        // metadata; operation semantics, topology, types and graph outputs are
+        // part of the anchor.
         let mut rebuilt = Graph::new();
         let clone = rebuilt
             .add_input(
@@ -2259,31 +2512,19 @@ mod tests {
         graph.set_outputs(vec![weight, bias]).unwrap();
 
         let mut plan = RepresentationPlan::dense(&graph).unwrap();
+
         assert_eq!(
             plan.total_storage_bits(&graph),
             Ok(StorageBits::new(256 + 128))
         );
 
-        // Factorized weight [4,3]x[3,2] F16 and quantized bias: codes U8[4] +
-        // scales F16[2].
-        let (left, right) = factorized_components(&mut plan, DType::F16, 4, 3, 2);
+        let dense_bias = plan.assignment(bias).unwrap();
+
+        // A rank-1 F16 factorization represents the matrix exactly at the
+        // representation-contract level: [4,1] x [1,2] -> [4,2].
+        let (left, right) = factorized_components(&mut plan, DType::F16, 4, 1, 2);
         let factored = plan
             .declare(PrimitiveRepresentation::factorized(left, right))
-            .unwrap();
-        let dense_u8 = plan
-            .declare(PrimitiveRepresentation::dense(DType::U8))
-            .unwrap();
-        let dense_f16 = plan
-            .declare(PrimitiveRepresentation::dense(DType::F16))
-            .unwrap();
-        let codes = plan
-            .component(TensorType::new(DType::U8, Shape::new(vec![4])), dense_u8)
-            .unwrap();
-        let scales = plan
-            .component(TensorType::new(DType::F16, Shape::new(vec![2])), dense_f16)
-            .unwrap();
-        let quantized = plan
-            .declare(PrimitiveRepresentation::quantized(codes, scales))
             .unwrap();
 
         plan.replan(
@@ -2295,20 +2536,21 @@ mod tests {
                 },
                 Rebinding {
                     node: bias,
-                    representation: quantized,
+                    representation: dense_bias,
                 },
             ],
         )
         .unwrap();
 
-        assert_eq!(plan.assignments(), &[factored, quantized]);
+        assert_eq!(plan.assignments(), &[factored, dense_bias]);
 
-        // Weight: (12 + 6) halves * 16 bits; bias: 4 bytes * 8 + 2 halves * 16.
+        // Weight factors: (4*1 + 1*2) F16 values = 6 * 16 = 96 bits.
+        // Bias remains dense F32[4] = 128 bits.
         assert_eq!(
             plan.total_storage_bits(&graph),
-            Ok(StorageBits::new(288 + 64))
+            Ok(StorageBits::new(96 + 128))
         );
-        // The canonical graph stays untouched.
+
         assert_eq!(
             graph.nodes()[weight.get() as usize].output.dtype,
             DType::F32
