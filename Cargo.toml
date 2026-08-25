@@ -197,6 +197,7 @@ members = [
     "scirust-scaffold",
     "scirust-sciagent",
     "scirust-rsi",
+    "scirust-hashsig",
     "scirust-license",
     "scirust-provenance",
     "scirust-digest",
