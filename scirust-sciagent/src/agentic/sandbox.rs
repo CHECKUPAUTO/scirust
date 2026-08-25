@@ -362,6 +362,17 @@ fn valid_crate_name(name: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
 }
 
+fn contextualize_tool_error(context: &str, error: String) -> String {
+    if error.starts_with(GOVERNANCE_FAILURE_PREFIX)
+    {
+        error
+    }
+    else
+    {
+        format!("{context}{error}")
+    }
+}
+
 fn sandboxed_search(mut params: HashMap<String, String>) -> String {
     let requested = match take_one_shot_override(&mut params)
     {
@@ -434,6 +445,7 @@ fn search_workspace(
     {
         Ok(output) if output.timed_out => "Search timed out after 30 seconds".to_string(),
         Ok(output) if output.success => String::from_utf8_lossy(&output.stdout).into_owned(),
+        Err(error) if error.starts_with(GOVERNANCE_FAILURE_PREFIX) => error,
         _ =>
         {
             let grep_args = vec![
@@ -453,7 +465,7 @@ fn search_workspace(
                     String::from_utf8_lossy(&output.stdout).into_owned()
                 },
                 Ok(output) => format!("No matches: {}", String::from_utf8_lossy(&output.stderr)),
-                Err(error) => format!("Failed to run search: {error}"),
+                Err(error) => contextualize_tool_error("Failed to run search: ", error),
             }
         },
     }
@@ -495,7 +507,7 @@ fn sandboxed_build(mut params: HashMap<String, String>) -> String {
         Ok(output) if output.timed_out => "Build timed out after 30 seconds".to_string(),
         Ok(output) if output.success => format!("{crate_name} builds successfully"),
         Ok(output) => format!("Build errors:\n{}", String::from_utf8_lossy(&output.stderr)),
-        Err(error) => format!("Failed to run cargo: {error}"),
+        Err(error) => contextualize_tool_error("Failed to run cargo: ", error),
     }
 }
 
@@ -552,7 +564,7 @@ fn sandboxed_test(mut params: HashMap<String, String>) -> String {
             "Test failures:\n{}",
             String::from_utf8_lossy(&output.stderr)
         ),
-        Err(error) => format!("Failed to run tests: {error}"),
+        Err(error) => contextualize_tool_error("Failed to run tests: ", error),
     }
 }
 
@@ -577,7 +589,7 @@ fn sandboxed_status(mut params: HashMap<String, String>) -> String {
     {
         Ok(output) if output.timed_out => "Git status timed out after 30 seconds".to_string(),
         Ok(output) => String::from_utf8_lossy(&output.stdout).into_owned(),
-        Err(error) => format!("Git error: {error}"),
+        Err(error) => contextualize_tool_error("Git error: ", error),
     }
 }
 
@@ -648,6 +660,31 @@ fn spawn_process_group(command: &mut Command) -> std::io::Result<GroupChild> {
     #[cfg(not(windows))]
     {
         command.group_spawn()
+    }
+}
+
+fn classify_spawn_failure(
+    error: &std::io::Error,
+    mode: SandboxMode,
+    backend_label: &str,
+    confined_mode: bool,
+    governed: bool,
+) -> String {
+    let message = error.to_string();
+
+    if governed
+    {
+        format!(
+            "{GOVERNANCE_FAILURE_PREFIX} governed {backend_label} spawn failed before command execution; refusing to treat a potentially failed child pre-exec enforcement hook as ordinary tool output. {message}"
+        )
+    }
+    else if confined_mode
+    {
+        sandbox_unavailable(mode, format!("{backend_label} spawn failed: {message}"))
+    }
+    else
+    {
+        message
     }
 }
 
@@ -794,23 +831,13 @@ fn run_sandboxed_with_config(
     }
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = spawn_process_group(&mut command).map_err(|error| {
-        let message = error.to_string();
-
-        if message.contains(GOVERNANCE_FAILURE_PREFIX)
-        {
-            message
-        }
-        else if confined_mode
-        {
-            sandbox_unavailable(
-                config.mode,
-                format!("{backend_label} spawn failed: {message}"),
-            )
-        }
-        else
-        {
-            message
-        }
+        classify_spawn_failure(
+            &error,
+            config.mode,
+            backend_label,
+            confined_mode,
+            constraints.is_some(),
+        )
     })?;
     let stdout = drain_pipe(child.inner().stdout.take().expect("stdout was piped"));
     let stderr = drain_pipe(child.inner().stderr.take().expect("stderr was piped"));
@@ -1152,6 +1179,38 @@ mod tests {
         assert!(!bwrap_runner_failed(
             format!("touch: /etc/x: {BWRAP_DENIAL_SIGNATURE}\n").as_bytes()
         ));
+    }
+
+    #[test]
+    fn wrapper_context_preserves_governance_failure_prefix() {
+        let marked = format!("{GOVERNANCE_FAILURE_PREFIX} opaque child pre-exec failure");
+        assert_eq!(
+            contextualize_tool_error("Git error: ", marked.clone()),
+            marked
+        );
+        assert_eq!(
+            contextualize_tool_error("Git error: ", "ordinary failure".to_string()),
+            "Git error: ordinary failure"
+        );
+    }
+
+    #[test]
+    fn governed_spawn_failure_is_classified_without_child_error_text() {
+        let opaque = std::io::Error::other("Invalid argument (os error 22)");
+        let message = classify_spawn_failure(
+            &opaque,
+            SandboxMode::DangerFullAccess,
+            "direct",
+            false,
+            true,
+        );
+
+        assert!(message.starts_with(GOVERNANCE_FAILURE_PREFIX), "{message}");
+        assert!(
+            message.contains("spawn failed before command execution"),
+            "{message}"
+        );
+        assert!(message.contains("Invalid argument"), "{message}");
     }
 
     #[test]
