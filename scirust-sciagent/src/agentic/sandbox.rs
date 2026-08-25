@@ -1,6 +1,6 @@
 mod landlock;
 
-use super::enforcement::{ExecutionConstraints, apply_to_command};
+use super::enforcement::{ExecutionConstraints, GOVERNANCE_FAILURE_PREFIX, apply_to_command};
 use super::sandbox_approval::SandboxPermission;
 use super::tools::Tool;
 use command_group::{CommandGroup, GroupChild};
@@ -18,7 +18,6 @@ const BWRAP_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 const REAP_GRACE: Duration = Duration::from_secs(2);
 const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const SANDBOX_UNAVAILABLE: &str = "SANDBOX_UNAVAILABLE";
-const GOVERNANCE_UNAVAILABLE: &str = "GOVERNANCE_UNAVAILABLE";
 const BWRAP_RUNNER_FAILURE_SIGNATURE: &str = "bwrap: ";
 const INTERNAL_SANDBOX_OVERRIDE: &str = "__sciagent_sandbox_override";
 #[cfg(test)]
@@ -784,7 +783,7 @@ fn run_sandboxed_with_config(
     {
         apply_to_command(&mut command, constraints).map_err(|error| {
             format!(
-                "[{GOVERNANCE_UNAVAILABLE}] declared resource limits could not be installed on                  the {backend_label} spawn path; refusing to run unbounded. {error}"
+                "{GOVERNANCE_FAILURE_PREFIX} declared resource limits could not be installed on the {backend_label} spawn path; refusing to run unbounded. {error}"
             )
         })?;
     }
@@ -795,16 +794,22 @@ fn run_sandboxed_with_config(
     }
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = spawn_process_group(&mut command).map_err(|error| {
-        if confined_mode
+        let message = error.to_string();
+
+        if message.contains(GOVERNANCE_FAILURE_PREFIX)
+        {
+            message
+        }
+        else if confined_mode
         {
             sandbox_unavailable(
                 config.mode,
-                format!("{backend_label} spawn or pre-exec enforcement failed: {error}"),
+                format!("{backend_label} spawn failed: {message}"),
             )
         }
         else
         {
-            error.to_string()
+            message
         }
     })?;
     let stdout = drain_pipe(child.inner().stdout.take().expect("stdout was piped"));
@@ -1200,21 +1205,7 @@ mod tests {
     }
 
     #[test]
-    fn governed_wall_time_narrows_the_kill_deadline() {
-        if !cfg!(target_os = "linux")
-        {
-            return;
-        }
-        let root = match canonical_workspace_root()
-        {
-            Ok(root) => root,
-            Err(_) => return,
-        };
-        let config = match SandboxConfig::from_env_with_override(None)
-        {
-            Ok(config) => config,
-            Err(_) => return,
-        };
+    fn governed_wall_time_fails_closed_without_tree_lifecycle_enforcement() {
         let constraints = ExecutionConstraints {
             limits: super::super::budgets::ResourceLimits {
                 wall_time_seconds: Some(1),
@@ -1222,29 +1213,11 @@ mod tests {
             },
             ..ExecutionConstraints::default()
         };
-        let started = Instant::now();
-        let output = run_sandboxed_with_config(
-            "sleep",
-            &[OsString::from("30")],
-            &root,
-            config,
-            TOOL_TIMEOUT,
-            Some(&constraints),
-        );
-        let elapsed = started.elapsed();
-        match output
-        {
-            Ok(output) =>
-            {
-                assert!(output.timed_out, "sleep 30 must hit the governed deadline");
-                assert!(
-                    elapsed < Duration::from_secs(10),
-                    "governed deadline must fire near 1s, took {elapsed:?}"
-                );
-            },
-            // Confined modes without a backend (no bwrap, no Landlock) refuse
-            // at spawn; that is fail-closed behaviour, not a governance bug.
-            Err(error) => assert!(error.contains(SANDBOX_UNAVAILABLE), "{error}"),
-        }
+
+        let error = constraints
+            .ensure_enforceable(crate::agentic::enforcement::probed_backend())
+            .expect_err("wall-time must refuse until descendants cannot escape lifecycle control");
+
+        assert!(error.contains("wall-time"), "{error}");
     }
 }
