@@ -3335,6 +3335,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-hashsig"
+version = "0.1.0"
+dependencies = [
+ "sha2",
+]
+
+[[package]]
 name = "scirust-hvac"
 version = "0.1.0"
 dependencies = [
@@ -3425,6 +3432,7 @@ dependencies = [
 name = "scirust-license"
 version = "0.1.0"
 dependencies = [
+ "scirust-hashsig",
  "serde",
  "serde_json",
  "sha2",
