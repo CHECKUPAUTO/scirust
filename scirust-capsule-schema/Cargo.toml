@@ -1,0 +1,16 @@
+[package]
+name = "scirust-capsule-schema"
+version = "0.1.0"
+edition = "2024"
+publish = false
+rust-version = "1.89"
+description = "Versioned, validation-first schema types for SciRust .scicap portable execution capsules"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"
+
+[lints]
+workspace = true
