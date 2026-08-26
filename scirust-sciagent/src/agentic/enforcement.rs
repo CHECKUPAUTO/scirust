@@ -42,7 +42,16 @@ impl CgroupLease {
         {
             #[cfg(target_os = "linux")]
             Self::V2(group) => group.attach_to_command(command),
+            #[cfg(target_os = "linux")]
             Self::None => Ok(()),
+            // Off Linux no lease is ever handed out; the parameter exists
+            // for signature parity and is intentionally untouched.
+            #[cfg(not(target_os = "linux"))]
+            Self::None =>
+            {
+                let _ = command;
+                Ok(())
+            },
         }
     }
 }
@@ -202,7 +211,7 @@ pub fn apply_to_command(
 mod imp {
     /// Highest CPU count representable by the affinity mask used for pinning.
     const MAX_PINNABLE_CPUS: u32 = 64;
-    use super::super::budgets::{NoResourceBackend, ResourceBackend};
+    use super::super::budgets::ResourceBackend;
     use super::ExecutionConstraints;
     use std::io;
     use std::os::raw::{c_int, c_long, c_uint, c_ulong, c_void};
