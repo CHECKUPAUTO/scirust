@@ -24,6 +24,7 @@
 use super::budgets::{EgressPolicy, ResourceBackend, ResourceLimits};
 use std::time::Duration;
 
+#[cfg(target_os = "linux")]
 pub mod cgroup;
 
 /// A prepared cgroup lease for one governed execution, when the host
