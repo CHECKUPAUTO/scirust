@@ -1,0 +1,40 @@
+name: FLAT Elastic contextual advisory
+
+on:
+  push:
+    branches: [master, main, develop]
+  pull_request:
+    branches: [master, main, develop]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  contextual-advisory:
+    name: Host-only contextual planner
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install pinned nightly toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: nightly-2026-07-02
+          components: clippy
+      - name: Verify committed lockfile is current
+        run: |
+          cargo +nightly-2026-07-02 metadata --format-version 1 >/dev/null
+          git diff --exit-code -- Cargo.lock
+      - name: Reject WGPU 30 on the SciRust contextual facade
+        run: |
+          if cargo +nightly-2026-07-02 tree -p scirust --features flat-autotune --locked | grep -q '^.*wgpu v30\.'; then
+            echo 'error: FLAT contextual advisory must remain host-only; wgpu 30 entered the active graph' >&2
+            exit 1
+          fi
+      - name: Clippy contextual feature
+        run: cargo +nightly-2026-07-02 clippy -p scirust --features flat-autotune --all-targets --locked -- -D warnings
+      - name: Test contextual planner facade
+        run: cargo +nightly-2026-07-02 test -p scirust --features flat-autotune --locked flat_autotune::contextual
