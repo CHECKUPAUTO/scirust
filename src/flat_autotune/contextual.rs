@@ -342,7 +342,7 @@ mod tests {
 
     #[test]
     fn manifest_pins_match_reviewed_revisions() {
-        let manifest = include_str!("../Cargo.toml");
+        let manifest = include_str!("../../Cargo.toml");
         assert!(manifest.contains(&format!("rev = \"{CONTEXTUAL_FLAT_REVISION}\"")));
         assert!(manifest.contains(&format!("rev = \"{CONTEXTUAL_ELASTICXXX_REVISION}\"")));
     }
