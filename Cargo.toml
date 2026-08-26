@@ -12,6 +12,11 @@ repository = "https://github.com/Memorithm/scirust"
 scirust-core = { path = "scirust-core" }
 scirust-simd = { path = "scirust-simd" }
 elastic-autotuner = { path = "elastic-autotuner", optional = true }
+# Host-only ElasticWorld planner rail. These exact revisions are reviewed merge
+# commits; no WGPU feature is enabled on the new FLAT dependency.
+elastic-core = { git = "https://github.com/Memorithm/ElasticXxx.git", rev = "9130a412857335cc5120b013b91552dd0808f9f1", package = "elastic-core", optional = true }
+flat-attention-planner = { git = "https://github.com/Memorithm/FLAT-ATTENTION", rev = "75d3bd684643aedb98f55a892f93d727a8187cea", package = "flat-attention", default-features = false, optional = true }
+flat-elastic-kernel = { git = "https://github.com/Memorithm/FLAT-ATTENTION", rev = "75d3bd684643aedb98f55a892f93d727a8187cea", package = "flat-elastic-kernel", optional = true }
 scirust-symbolic = { path = "scirust-symbolic" }
 scirust-learning = { path = "scirust-learning" }
 scirust-solvers = { path = "scirust-solvers" }
@@ -45,8 +50,18 @@ scirust-gpu = { path = "scirust-gpu", optional = true }
 [features]
 default = []
 autotune = ["dep:elastic-autotuner", "dep:scirust-compute"]
-# FLAT attention planning through the universal ElasticAutoTuner. Still opt-in: this composes the existing WGPU/FLAT bridge with the tuner.
-flat-autotune = ["autotune", "dep:scirust-gpu", "scirust-gpu/flat-autotune"]
+# FLAT attention planning through the legacy production ElasticAutoTuner plus
+# the new host-only FLAT/ElasticXxx contextual advisory rail. The existing
+# scirust-gpu runtime stays on its reviewed WGPU-0.20-compatible FLAT revision;
+# the newer FLAT revision is never enabled with WGPU here.
+flat-autotune = [
+    "autotune",
+    "dep:scirust-gpu",
+    "scirust-gpu/flat-autotune",
+    "dep:elastic-core",
+    "dep:flat-attention-planner",
+    "dep:flat-elastic-kernel",
+]
 openclaw = ["dep:tokio", "dep:serde", "dep:serde_json", "dep:chrono", "dep:rand", "dep:sha2"]
 # The canonical tensor facade with a backend the caller supplies:
 # `scirust::tensor_canonical::{CanonicalProgram, TensorND, ReferencePlanRuntime, …}`.
