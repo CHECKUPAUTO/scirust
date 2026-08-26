@@ -583,23 +583,23 @@ mod imp {
     /// rlimit claims stay deliberately false (see `RealLinuxBackend`);
     /// tree-wide claims come exclusively from a usable cgroup v2 hierarchy.
     pub(super) struct CombinedBackend {
-        pub linux: Option<RealLinuxBackend>,
-        pub cgroup: CgroupCapabilities,
+        linux: Option<RealLinuxBackend>,
+        cgroup: CgroupCapabilities,
     }
 
     impl ResourceBackend for CombinedBackend {
-        fn supports_memory_limit(&self, bytes: u64) -> bool {
+        fn supports_memory_limit(&self, _bytes: u64) -> bool {
             self.cgroup.memory
         }
-        fn supports_cpu_limit(&self, cpus: u32) -> bool {
-            self.cgroup.cpu && (1..=MAX_PINNABLE_CPUS).contains(&cpus)
+        fn supports_cpu_limit(&self, _cpus: u32) -> bool {
+            self.cgroup.cpu
         }
         fn supports_wall_time(&self, seconds: u64) -> bool {
             self.linux
                 .as_ref()
                 .is_some_and(|linux| linux.supports_wall_time(seconds))
         }
-        fn supports_process_limit(&self, processes: u32) -> bool {
+        fn supports_process_limit(&self, _processes: u32) -> bool {
             self.cgroup.pids
         }
         fn supports_file_size_limit(&self, bytes: u64) -> bool {
@@ -607,7 +607,7 @@ mod imp {
                 .as_ref()
                 .is_some_and(|linux| linux.supports_file_size_limit(bytes))
         }
-        fn supports_gpu_memory_limit(&self, bytes: u64) -> bool {
+        fn supports_gpu_memory_limit(&self, _bytes: u64) -> bool {
             false
         }
         fn supports_egress_allow_list(&self) -> bool {
