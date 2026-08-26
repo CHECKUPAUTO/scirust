@@ -1,6 +1,11 @@
-//! Public SciRust facade for the reusable FLAT + ElasticAutoTuner planner.
+//! Public SciRust facade for FLAT attention planning.
 //!
-//! The implementation lives in `scirust-gpu` so SciAgent and other model runtimes
-//! can consume the same contract without depending back on the root `scirust` crate.
+//! The existing exports remain the production `scirust-gpu` +
+//! `ElasticAutoTuner` path. [`contextual`] is a separate host-only advisory rail
+//! through the reviewed FLAT Kernel IR and ElasticXxx freshness contracts; it
+//! deliberately exposes no execution method while SciRust and current FLAT use
+//! different WGPU major versions.
 
 pub use scirust_gpu::flat_autotune::*;
+
+pub mod contextual;
