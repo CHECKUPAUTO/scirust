@@ -870,6 +870,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "elastic-core"
+version = "0.1.0"
+source = "git+https://github.com/Memorithm/ElasticXxx.git?rev=9130a412857335cc5120b013b91552dd0808f9f1#9130a412857335cc5120b013b91552dd0808f9f1"
+
+[[package]]
+name = "elastic-eir"
+version = "0.1.0"
+source = "git+https://github.com/Memorithm/ElasticXxx.git?rev=9130a412857335cc5120b013b91552dd0808f9f1#9130a412857335cc5120b013b91552dd0808f9f1"
+dependencies = [
+ "elastic-core",
+]
+
+[[package]]
+name = "elastic-kernel"
+version = "0.1.0"
+source = "git+https://github.com/Memorithm/ElasticXxx.git?rev=9130a412857335cc5120b013b91552dd0808f9f1#9130a412857335cc5120b013b91552dd0808f9f1"
+dependencies = [
+ "elastic-core",
+ "elastic-eir",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -910,10 +932,29 @@ checksum = "d45db016d36b838f563236e9193d0ee6ce38f3f68b6c94e914b4929c96bbb890"
 [[package]]
 name = "flat-attention"
 version = "0.1.0"
+source = "git+https://github.com/Memorithm/FLAT-ATTENTION?rev=75d3bd684643aedb98f55a892f93d727a8187cea#75d3bd684643aedb98f55a892f93d727a8187cea"
+dependencies = [
+ "ordered-float",
+]
+
+[[package]]
+name = "flat-attention"
+version = "0.1.0"
 source = "git+https://github.com/Memorithm/FLAT-ATTENTION?rev=c74a3806f8cfe621671694692fc14adfe08116f0#c74a3806f8cfe621671694692fc14adfe08116f0"
 dependencies = [
  "pollster",
  "wgpu",
+]
+
+[[package]]
+name = "flat-elastic-kernel"
+version = "0.1.0"
+source = "git+https://github.com/Memorithm/FLAT-ATTENTION?rev=75d3bd684643aedb98f55a892f93d727a8187cea#75d3bd684643aedb98f55a892f93d727a8187cea"
+dependencies = [
+ "elastic-core",
+ "elastic-eir",
+ "elastic-kernel",
+ "flat-attention 0.1.0 (git+https://github.com/Memorithm/FLAT-ATTENTION?rev=75d3bd684643aedb98f55a892f93d727a8187cea)",
 ]
 
 [[package]]
@@ -2095,6 +2136,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
+name = "ordered-float"
+version = "5.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7d950ca161dc355eaf28f82b11345ed76c6e1f6eb1f4f4479e0323b9e2fbd0e"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "parking_lot"
 version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2862,6 +2912,9 @@ version = "0.14.0"
 dependencies = [
  "chrono",
  "elastic-autotuner",
+ "elastic-core",
+ "flat-attention 0.1.0 (git+https://github.com/Memorithm/FLAT-ATTENTION?rev=75d3bd684643aedb98f55a892f93d727a8187cea)",
+ "flat-elastic-kernel",
  "rand 0.8.7",
  "scirust-compute",
  "scirust-core",
@@ -3300,7 +3353,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "elastic-autotuner",
- "flat-attention",
+ "flat-attention 0.1.0 (git+https://github.com/Memorithm/FLAT-ATTENTION?rev=c74a3806f8cfe621671694692fc14adfe08116f0)",
  "pollster",
  "scirust-compute",
  "scirust-core",
