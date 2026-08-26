@@ -1,0 +1,38 @@
+name: Temporary FLAT contextual lock sync
+
+on:
+  push:
+    branches: [feat/flat-elastic-contextual-advisory]
+
+permissions:
+  contents: write
+
+jobs:
+  sync-lock:
+    if: github.actor == 'CHECKUPAUTO'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: feat/flat-elastic-contextual-advisory
+          fetch-depth: 0
+      - name: Install pinned nightly
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: nightly-2026-07-02
+      - name: Generate and commit only Cargo.lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo +nightly-2026-07-02 metadata --format-version 1 >/dev/null
+          if git diff --quiet -- Cargo.lock; then
+            echo 'Cargo.lock already synchronized'
+            exit 0
+          fi
+          git diff -- Cargo.lock
+          git config user.name MEMOPERF
+          git config user.email contact@checkupauto.fr
+          git add Cargo.lock
+          test "$(git diff --cached --name-only)" = "Cargo.lock"
+          git commit -m 'build(flat): synchronize contextual planner lockfile'
+          git push origin HEAD:feat/flat-elastic-contextual-advisory
