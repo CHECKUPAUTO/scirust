@@ -18,16 +18,16 @@
 
 use core::fmt;
 
+use elastic_core::LogicalResourceId;
 pub use elastic_core::{
     FreshnessSnapshot, ObservationEpoch, PlannerEpoch, RecommendationContext,
     RecommendationFreshnessError, ResourceGeneration,
 };
-use elastic_core::LogicalResourceId;
 pub use flat_attention_planner::RuntimeDeviceCapabilities;
 pub use flat_attention_planner::kernel_autotune::SelectionRecord as FlatTuningRecord;
-pub use flat_elastic_kernel::contextual::ContextualAdapterPlan;
 use flat_attention_planner::kernel_candidates::SelectionPolicy as FlatSelectionPolicy;
 use flat_attention_planner::kernel_ir::{AttentionProblem, KERNEL_MAX_HEAD_DIM};
+pub use flat_elastic_kernel::contextual::ContextualAdapterPlan;
 use flat_elastic_kernel::contextual::generate_and_plan_with_context;
 use flat_elastic_kernel::{AdapterError, latency_policy};
 
@@ -60,19 +60,24 @@ pub struct DenseAttentionSpec {
 impl DenseAttentionSpec {
     /// Validate and lower the SciRust semantic request to FLAT's dense Kernel IR.
     pub fn to_flat_problem(self) -> Result<AttentionProblem, ContextualPlanningError> {
-        if self.batch == 0 {
+        if self.batch == 0
+        {
             return Err(ContextualPlanningError::ZeroDimension("batch"));
         }
-        if self.heads == 0 {
+        if self.heads == 0
+        {
             return Err(ContextualPlanningError::ZeroDimension("heads"));
         }
-        if self.seq_len == 0 {
+        if self.seq_len == 0
+        {
             return Err(ContextualPlanningError::ZeroDimension("seq_len"));
         }
-        if self.head_dim == 0 {
+        if self.head_dim == 0
+        {
             return Err(ContextualPlanningError::ZeroDimension("head_dim"));
         }
-        if self.head_dim > KERNEL_MAX_HEAD_DIM as usize {
+        if self.head_dim > KERNEL_MAX_HEAD_DIM as usize
+        {
             return Err(ContextualPlanningError::HeadDimensionTooLarge {
                 head_dim: self.head_dim,
                 max: KERNEL_MAX_HEAD_DIM,
@@ -121,18 +126,24 @@ pub enum ContextualPlanningError {
 
 impl fmt::Display for ContextualPlanningError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self
+        {
             Self::ZeroDimension(field) => write!(f, "dense attention dimension `{field}` is zero"),
             Self::HeadDimensionTooLarge { head_dim, max } => write!(
                 f,
                 "dense attention head_dim {head_dim} exceeds FLAT qualified maximum {max}"
             ),
-            Self::IndexSpaceOverflow(field) => {
-                write!(f, "dense attention dimension `{field}` exceeds FLAT u32 index space")
-            }
-            Self::InvalidResourceIdentity => {
+            Self::IndexSpaceOverflow(field) =>
+            {
+                write!(
+                    f,
+                    "dense attention dimension `{field}` exceeds FLAT u32 index space"
+                )
+            },
+            Self::InvalidResourceIdentity =>
+            {
                 write!(f, "SciRust contextual planner resource identity is invalid")
-            }
+            },
             Self::Adapter(error) => write!(f, "FLAT contextual planner failed: {error}"),
         }
     }
@@ -165,10 +176,8 @@ pub fn recommendation_context(
     observation_epoch: ObservationEpoch,
     resource_generation: ResourceGeneration,
 ) -> Result<RecommendationContext, ContextualPlanningError> {
-    Ok(RecommendationContext::new(planner_epoch, observation_epoch).with_resource_generation(
-        semantic_resource_id(spec)?,
-        resource_generation,
-    ))
+    Ok(RecommendationContext::new(planner_epoch, observation_epoch)
+        .with_resource_generation(semantic_resource_id(spec)?, resource_generation))
 }
 
 /// Build a trusted current snapshot for revalidating a recommendation before
@@ -179,10 +188,8 @@ pub fn freshness_snapshot(
     observation_epoch: ObservationEpoch,
     resource_generation: ResourceGeneration,
 ) -> Result<FreshnessSnapshot, ContextualPlanningError> {
-    Ok(FreshnessSnapshot::new(planner_epoch, observation_epoch).with_resource_generation(
-        semantic_resource_id(spec)?,
-        resource_generation,
-    ))
+    Ok(FreshnessSnapshot::new(planner_epoch, observation_epoch)
+        .with_resource_generation(semantic_resource_id(spec)?, resource_generation))
 }
 
 /// Produce an advisory contextual plan for one SciRust dense-attention request.
@@ -207,12 +214,8 @@ pub fn plan_contextual(
     accept_uncontested_fallback: bool,
 ) -> Result<ContextualAdapterPlan, ContextualPlanningError> {
     let problem = spec.to_flat_problem()?;
-    let context = recommendation_context(
-        spec,
-        planner_epoch,
-        observation_epoch,
-        resource_generation,
-    )?;
+    let context =
+        recommendation_context(spec, planner_epoch, observation_epoch, resource_generation)?;
     let elastic_policy = latency_policy(accept_uncontested_fallback)?;
     Ok(generate_and_plan_with_context(
         &problem,
@@ -327,13 +330,14 @@ mod tests {
         )
         .expect("host-only contextual planning must succeed");
         assert!(!plan.flat_candidates.is_empty());
-        assert!(plan
-            .flat_candidates
-            .iter()
-            .all(|candidate| candidate.static_requirements().iter().all(|requirement| !matches!(
-                requirement,
-                flat_attention_planner::kernel_ir::CapabilityRequirement::SubgroupOperations
-            ))));
+        assert!(plan.flat_candidates.iter().all(|candidate| {
+            candidate.static_requirements().iter().all(|requirement| {
+                !matches!(
+                    requirement,
+                    flat_attention_planner::kernel_ir::CapabilityRequirement::SubgroupOperations
+                )
+            })
+        }));
     }
 
     #[test]
