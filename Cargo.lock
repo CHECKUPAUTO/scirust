@@ -2923,6 +2923,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-attention-intent"
+version = "0.1.0"
+dependencies = [
+ "scirust-compute",
+ "scirust-tensor-ir",
+]
+
+[[package]]
 name = "scirust-audio"
 version = "0.1.0"
 dependencies = [
