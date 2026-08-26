@@ -249,6 +249,7 @@ members = [
     "scirust-studio-store",
     "scirust-studio-worker",
     "scirust-studio-app-service",
+    "scirust-attention-intent",
 ]
 exclude = [
     # The desktop application is its own Cargo workspace. Keeping it out of
