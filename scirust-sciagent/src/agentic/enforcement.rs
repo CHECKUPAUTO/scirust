@@ -24,6 +24,51 @@
 use super::budgets::{EgressPolicy, ResourceBackend, ResourceLimits};
 use std::time::Duration;
 
+pub mod cgroup;
+
+/// A prepared cgroup lease for one governed execution, when the host
+/// provides a writable cgroup v2 hierarchy. Dropping the lease removes the
+/// subgroup (best effort).
+pub enum CgroupLease {
+    #[cfg(target_os = "linux")]
+    V2(Box<cgroup::V2Group>),
+    None,
+}
+
+impl CgroupLease {
+    /// Place the future child process into the leased group.
+    pub fn attach_to_command(&self, command: &mut std::process::Command) -> Result<(), String> {
+        match self
+        {
+            #[cfg(target_os = "linux")]
+            Self::V2(group) => group.attach_to_command(command),
+            Self::None => Ok(()),
+        }
+    }
+}
+
+/// Prepare a cgroup enforcing the tree-wide subset of the declared limits.
+///
+/// Returns [`CgroupLease::None`] when the platform or hierarchy cannot host
+/// one — per-process rlimits still apply — and an error when the hierarchy
+/// exists but refuses the declared limits (fail closed, mirroring every
+/// other seam in this module).
+pub fn prepare_cgroup(limits: &ResourceLimits) -> Result<CgroupLease, String> {
+    #[cfg(target_os = "linux")]
+    {
+        match cgroup::V2Group::prepare(limits)?
+        {
+            Some(group) => Ok(CgroupLease::V2(Box::new(group))),
+            None => Ok(CgroupLease::None),
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = limits;
+        Ok(CgroupLease::None)
+    }
+}
+
 pub(super) const GOVERNANCE_FAILURE_PREFIX: &str = "[GOVERNANCE_UNAVAILABLE]";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -471,18 +516,109 @@ mod imp {
         }
     }
 
+    /// What the machine's cgroup v2 hierarchy adds on top of per-process
+    /// mechanisms, probed once. Tree-wide `memory.max`/`pids.max`/`cpu.max`
+    /// are non-escapable for an unprivileged child, which is exactly the
+    /// bar the honest gaps demand.
+    #[derive(Clone, Copy)]
+    pub(super) struct CgroupCapabilities {
+        pub memory: bool,
+        pub pids: bool,
+        pub cpu: bool,
+    }
+
+    pub(super) fn cgroup_capabilities() -> CgroupCapabilities {
+        static PROBE: OnceLock<CgroupCapabilities> = OnceLock::new();
+        *PROBE.get_or_init(|| {
+            let root = std::path::Path::new("/sys/fs/cgroup");
+            let is_v2 = std::fs::metadata(root)
+                .map(|meta| meta.is_dir())
+                .unwrap_or(false)
+                && std::fs::read_to_string(root.join("cgroup.controllers"))
+                    .map(|content| !content.is_empty())
+                    .unwrap_or(false);
+            let has = |name: &str| {
+                std::fs::read_to_string(root.join("cgroup.controllers"))
+                    .map(|content| content.split_whitespace().any(|c| c == name))
+                    .unwrap_or(false)
+            };
+            if !is_v2
+            {
+                return CgroupCapabilities {
+                    memory: false,
+                    pids: false,
+                    cpu: false,
+                };
+            }
+            // A group this process could not even create would make every
+            // later write fail at spawn time; require writability up front.
+            let scratch = root.join(format!(
+                "{}-probe-{}",
+                super::cgroup::GROUP_PREFIX,
+                std::process::id()
+            ));
+            let writable = std::fs::create_dir_all(&scratch).is_ok();
+            if writable
+            {
+                let _ = std::fs::remove_dir(&scratch);
+            }
+            CgroupCapabilities {
+                memory: writable && has("memory"),
+                pids: writable && has("pids"),
+                cpu: writable && has("cpu"),
+            }
+        })
+    }
+
+    /// Union of the kernel mechanisms available on this host. Per-process
+    /// rlimit claims stay deliberately false (see `RealLinuxBackend`);
+    /// tree-wide claims come exclusively from a usable cgroup v2 hierarchy.
+    pub(super) struct CombinedBackend {
+        pub linux: Option<RealLinuxBackend>,
+        pub cgroup: CgroupCapabilities,
+    }
+
+    impl ResourceBackend for CombinedBackend {
+        fn supports_memory_limit(&self, bytes: u64) -> bool {
+            self.cgroup.memory
+        }
+        fn supports_cpu_limit(&self, cpus: u32) -> bool {
+            self.cgroup.cpu && (1..=MAX_PINNABLE_CPUS).contains(&cpus)
+        }
+        fn supports_wall_time(&self, seconds: u64) -> bool {
+            self.linux
+                .as_ref()
+                .is_some_and(|linux| linux.supports_wall_time(seconds))
+        }
+        fn supports_process_limit(&self, processes: u32) -> bool {
+            self.cgroup.pids
+        }
+        fn supports_file_size_limit(&self, bytes: u64) -> bool {
+            self.linux
+                .as_ref()
+                .is_some_and(|linux| linux.supports_file_size_limit(bytes))
+        }
+        fn supports_gpu_memory_limit(&self, bytes: u64) -> bool {
+            false
+        }
+        fn supports_egress_allow_list(&self) -> bool {
+            false
+        }
+        fn supports_egress_deny_all(&self) -> bool {
+            self.linux
+                .as_ref()
+                .is_some_and(|linux| linux.supports_egress_deny_all())
+        }
+    }
+
     pub(super) fn probed_backend() -> &'static dyn ResourceBackend {
-        static BACKEND: OnceLock<Option<RealLinuxBackend>> = OnceLock::new();
-        static FALLBACK: NoResourceBackend = NoResourceBackend;
-        BACKEND
-            .get_or_init(|| {
-                seccomp_available().then_some(RealLinuxBackend {
-                    seccomp_available: true,
-                })
-            })
-            .as_ref()
-            .map(|backend| backend as &dyn ResourceBackend)
-            .unwrap_or(&FALLBACK)
+        static BACKEND: OnceLock<CombinedBackend> = OnceLock::new();
+        BACKEND.get_or_init(|| CombinedBackend {
+            linux: seccomp_available().then_some(RealLinuxBackend {
+                seccomp_available: true,
+            }),
+            cgroup: cgroup_capabilities(),
+        })
     }
 
     pub(super) fn apply_to_command(
@@ -551,6 +687,29 @@ mod imp {
             assert!(!backend.supports_cpu_limit(1));
             assert!(!backend.supports_wall_time(1));
             assert!(backend.supports_file_size_limit(4096));
+        }
+
+        #[test]
+        fn cgroup_backs_the_tree_wide_trio_when_available() {
+            let backend = super::super::probed_backend();
+            let caps = cgroup_capabilities();
+            // Whatever the host provides, claims and capabilities agree.
+            assert_eq!(
+                backend.supports_memory_limit(1 << 20),
+                caps.memory,
+                "memory claim must mirror the probed hierarchy"
+            );
+            assert_eq!(
+                backend.supports_process_limit(8),
+                caps.pids,
+                "process claim must mirror the probed hierarchy"
+            );
+            assert_eq!(
+                backend.supports_cpu_limit(2),
+                caps.cpu && (1..=MAX_PINNABLE_CPUS).contains(&2)
+            );
+            // Wall time stays kill-deadline based, never claimed as cgroup.
+            assert!(!backend.supports_wall_time(60));
         }
 
         #[test]
