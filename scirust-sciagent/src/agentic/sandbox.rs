@@ -818,6 +818,20 @@ fn run_sandboxed_with_config(
     };
     if let Some(constraints) = constraints
     {
+        // Tree-wide aggregate ceiling first: the cgroup bounds every
+        // descendant the child may fork, where rlimits stay per-process.
+        // A hierarchy that exists but refuses the declared limits fails
+        // closed; an absent hierarchy simply leaves rlimits in charge.
+        let lease = super::enforcement::prepare_cgroup(&constraints.limits).map_err(|error| {
+            format!(
+                "{GOVERNANCE_FAILURE_PREFIX} declared resource limits could not be projected onto a cgroup for the {backend_label} spawn path; refusing to run unbounded. {error}"
+            )
+        })?;
+        lease.attach_to_command(&mut command).map_err(|error| {
+            format!(
+                "{GOVERNANCE_FAILURE_PREFIX} child could not join its governing cgroup on the {backend_label} spawn path; refusing to run unbounded. {error}"
+            )
+        })?;
         apply_to_command(&mut command, constraints).map_err(|error| {
             format!(
                 "{GOVERNANCE_FAILURE_PREFIX} declared resource limits could not be installed on the {backend_label} spawn path; refusing to run unbounded. {error}"
