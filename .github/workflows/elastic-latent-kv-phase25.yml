@@ -76,6 +76,9 @@ jobs:
       - jetson-thor
       - internal
     timeout-minutes: 45
+    concurrency:
+      group: elastic-latent-kv-phase25-thor
+      cancel-in-progress: false
     defaults:
       run:
         working-directory: phase25-checkout
@@ -86,7 +89,6 @@ jobs:
       SCIRUST_SAMPLER_COMPARE_TOP_KS: 5,50,200
       SCIRUST_SAMPLER_COMPARE_REPEATS: 7
       SCIRUST_SAMPLER_COMPARE_WARMUP: 3
-      SCIRUST_THOR_GPU_LOCK: /tmp/scirust-thor-gpu-ci.lock
       CARGO_INCREMENTAL: 0
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -114,10 +116,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          command -v flock >/dev/null
-          exec 9>"$SCIRUST_THOR_GPU_LOCK"
-          flock -x 9
-
           if ! compute_apps="$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null)"; then
             echo "::error::Phase 25 cannot verify Thor occupancy."
             exit 1
@@ -195,8 +193,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          exec 9>"$SCIRUST_THOR_GPU_LOCK"
-          flock -x 9
           if ! compute_apps="$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null)"; then
             echo "::error::Phase 25 cannot verify the Thor remained idle."
             exit 1
