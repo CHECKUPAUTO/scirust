@@ -86,7 +86,7 @@ jobs:
       SCIRUST_SAMPLER_COMPARE_TOP_KS: 5,50,200
       SCIRUST_SAMPLER_COMPARE_REPEATS: 7
       SCIRUST_SAMPLER_COMPARE_WARMUP: 3
-      SCIRUST_THOR_GPU_LOCK: /tmp/scirust-thor-gpu.lock
+      SCIRUST_THOR_GPU_LOCK: /tmp/scirust-thor-gpu-ci.lock
       CARGO_INCREMENTAL: 0
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -115,8 +115,6 @@ jobs:
         run: |
           set -euo pipefail
           command -v flock >/dev/null
-          sudo touch -- "$SCIRUST_THOR_GPU_LOCK"
-          sudo chmod 0666 -- "$SCIRUST_THOR_GPU_LOCK"
           exec 9>"$SCIRUST_THOR_GPU_LOCK"
           flock -x 9
 
