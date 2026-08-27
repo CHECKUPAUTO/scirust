@@ -76,6 +76,9 @@ jobs:
       - jetson-thor
       - internal
     timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: phase25-checkout
     env:
       WGPU_BACKEND: vulkan
       SCIRUST_REQUIRE_WGPU: "1"
@@ -89,6 +92,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           fetch-depth: 1
+          path: phase25-checkout
       - name: Detect a real WGPU-capable Thor
         id: thor
         shell: bash
@@ -181,6 +185,7 @@ jobs:
         with:
           shared-key: phase25-wgpu-thor
           cache-targets: false
+          workspaces: phase25-checkout
       - name: Report WGPU/Vulkan environment
         if: steps.thor.outputs.available == 'true' && steps.occupancy.outputs.run_benchmark == 'true'
         run: |
