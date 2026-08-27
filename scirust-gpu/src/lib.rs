@@ -55,6 +55,8 @@ mod compute_dispatch;
 mod cpu_reference;
 #[cfg(feature = "flat-autotune")]
 pub mod flat_autotune;
+#[cfg(feature = "attention-intent")]
+pub mod flat_intent;
 #[cfg(feature = "flat-attention")]
 mod flat_m11;
 #[cfg(feature = "flat-attention")]
