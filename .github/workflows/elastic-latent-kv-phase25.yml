@@ -111,6 +111,8 @@ jobs:
         run: |
           set -euo pipefail
           command -v flock >/dev/null
+          sudo touch -- "$SCIRUST_THOR_GPU_LOCK"
+          sudo chmod 0666 -- "$SCIRUST_THOR_GPU_LOCK"
           exec 9>"$SCIRUST_THOR_GPU_LOCK"
           flock -x 9
 
