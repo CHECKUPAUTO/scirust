@@ -1,0 +1,13 @@
+[package]
+name = "scirust-attention-intent"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89"
+publish = false
+description = "SciRust execution intent bridge: derives a backend-neutral attention intent from tensor semantics and representation plans"
+repository = "https://github.com/Memorithm/scirust"
+license-file = "../LICENSE.md"
+
+[dependencies]
+scirust-tensor-ir = { path = "../scirust-tensor-ir" }
+scirust-compute = { path = "../scirust-compute" }
