@@ -3403,6 +3403,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-history"
+version = "0.1.0"
+
+[[package]]
 name = "scirust-hvac"
 version = "0.1.0"
 dependencies = [
