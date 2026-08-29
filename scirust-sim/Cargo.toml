@@ -6,7 +6,7 @@ publish = false
 description = "Multi-domain simulation environments: a deterministic time-stepping engine (RK4, adaptive Dormand-Prince 5(4), symplectic Euler), a gym-style Environment trait for agent-in-the-loop simulation, and oracle-tested ready-made models across mechanics, orbital dynamics, epidemiology, ecology, chemistry, thermal, electrical, stochastic processes, queueing, pharmacokinetics and rigid-body dynamics. Pure Rust, no unsafe, no dependencies by default."
 
 [features]
-# Off by default: the core crate stays zero-dependency (and Miri-clean). With
+# Off by default: the core crate stays free of third-party dependencies (and Miri-clean). With
 # `rl` enabled, `scirust-sim`'s environments can be driven by the agents in
 # `scirust-learning::rl` through the `rl_bridge::RlEnv` adapter. `rand` is
 # pulled only for the feature's Q-learning test.
@@ -18,6 +18,7 @@ rl = ["dep:scirust-learning", "dep:rand"]
 stiff = ["dep:scirust-stiff"]
 
 [dependencies]
+scirust-adaptive-control = { path = "../scirust-adaptive-control" }
 scirust-learning = { path = "../scirust-learning", optional = true }
 scirust-stiff = { path = "../scirust-stiff", optional = true }
 rand = { version = "0.8", optional = true }

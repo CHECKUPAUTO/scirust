@@ -7,6 +7,7 @@ description = "Experimental fractional-memory test-particle worldline dynamics o
 readme = "README.md"
 
 [dependencies]
+scirust-adaptive-control = { path = "../scirust-adaptive-control" }
 scirust-fractional = { path = "../scirust-fractional" }
 scirust-history = { path = "../scirust-history" }
 scirust-relativity = { path = "../scirust-relativity" }
