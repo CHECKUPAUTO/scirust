@@ -3324,6 +3324,7 @@ version = "0.1.0"
 name = "scirust-fractional"
 version = "0.1.0"
 dependencies = [
+ "scirust-history",
  "scirust-special",
 ]
 
