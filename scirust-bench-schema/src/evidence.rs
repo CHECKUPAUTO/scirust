@@ -69,7 +69,8 @@ impl ScientificEvidence {
         statement: impl Into<String>,
     ) -> Result<Self, String> {
         let statement = statement.into();
-        if statement.trim().is_empty() {
+        if statement.trim().is_empty()
+        {
             return Err("scientific evidence statement must not be empty".to_owned());
         }
         Ok(Self {
@@ -101,7 +102,8 @@ mod tests {
             ScientificEvidenceKind::RejectionCriterion,
         ];
 
-        for kind in kinds {
+        for kind in kinds
+        {
             let evidence = ScientificEvidence::new(
                 kind,
                 EvidenceDisposition::NotApplicable,
@@ -131,11 +133,13 @@ mod tests {
 
     #[test]
     fn empty_statement_fails_closed() {
-        assert!(ScientificEvidence::new(
-            ScientificEvidenceKind::SpeculativeModel,
-            EvidenceDisposition::Inconclusive,
-            "   ",
-        )
-        .is_err());
+        assert!(
+            ScientificEvidence::new(
+                ScientificEvidenceKind::SpeculativeModel,
+                EvidenceDisposition::Inconclusive,
+                "   ",
+            )
+            .is_err()
+        );
     }
 }
