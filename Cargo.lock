@@ -3641,6 +3641,7 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "scirust-fractional",
+ "scirust-history",
  "scirust-relativity",
 ]
 
