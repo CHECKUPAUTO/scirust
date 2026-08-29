@@ -213,7 +213,7 @@ jobs:
           "$CARGO_TARGET_DIR/release/tokenizer-model-select" \
             --report "$ELASTIC_SELECTION_TMP/stability-raw.json" \
             --output "$ELASTIC_SELECTION_TMP/stability.json"
-          test "$(jq '.stability_protocol_valid' "$ELASTIC_SELECTION_TMP/stability.json)" = "true"
+          test "$(jq '.stability_protocol_valid' "$ELASTIC_SELECTION_TMP/stability.json")" = "true"
           test "$(jq '.rejected_semantic_measurements' "$ELASTIC_SELECTION_TMP/stability.json")" = "0"
       - name: Publish Thor selection and stability tables
         shell: bash
