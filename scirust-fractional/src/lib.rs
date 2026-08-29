@@ -38,6 +38,7 @@ mod caputo;
 mod caputo_nonuniform;
 mod error;
 mod grunwald_letnikov;
+mod history_kernel;
 mod order;
 mod validation;
 
@@ -45,4 +46,5 @@ pub use caputo::caputo_l1_uniform;
 pub use caputo_nonuniform::caputo_l1_nonuniform;
 pub use error::FractionalError;
 pub use grunwald_letnikov::{grunwald_letnikov_weights, riemann_liouville_gl_uniform};
+pub use history_kernel::CaputoL1HistoryKernel;
 pub use order::FractionalOrder;

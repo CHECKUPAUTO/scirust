@@ -32,6 +32,9 @@
 
 extern crate alloc;
 
+mod kernel;
+pub use kernel::HistoryKernel;
+
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
 use core::cmp::Ordering;
