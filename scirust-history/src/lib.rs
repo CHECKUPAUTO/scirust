@@ -102,7 +102,8 @@ impl RetentionPolicy {
     /// Return the scientific fidelity classification implied by this policy.
     #[must_use]
     pub const fn fidelity(self) -> HistoryFidelity {
-        match self {
+        match self
+        {
             Self::Complete => HistoryFidelity::Reference,
             Self::Bounded(_) => HistoryFidelity::Approximation,
         }
@@ -111,7 +112,8 @@ impl RetentionPolicy {
     /// Return the maximum retained sample count, or `None` for complete retention.
     #[must_use]
     pub const fn capacity(self) -> Option<usize> {
-        match self {
+        match self
+        {
             Self::Complete => None,
             Self::Bounded(capacity) => Some(capacity.get()),
         }
@@ -142,8 +144,12 @@ pub enum HistoryError {
 
 impl fmt::Display for HistoryError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ZeroCapacity => formatter.write_str("history retention capacity must be non-zero"),
+        match self
+        {
+            Self::ZeroCapacity =>
+            {
+                formatter.write_str("history retention capacity must be non-zero")
+            },
             Self::DuplicatePosition { observed_samples } => write!(
                 formatter,
                 "history position duplicates the latest accepted position after {observed_samples} samples"
@@ -350,7 +356,11 @@ where
         let observed_samples = self.entries.len();
         validate_next_position(&self.entries, entry.position(), observed_samples)?;
         self.entries.push(entry);
-        Ok(PushOutcome::new(None, self.entries.len(), self.entries.len()))
+        Ok(PushOutcome::new(
+            None,
+            self.entries.len(),
+            self.entries.len(),
+        ))
     }
 }
 
@@ -409,9 +419,12 @@ where
     ) -> Result<PushOutcome<Value, Position>, HistoryError> {
         validate_next_position(&self.entries, entry.position(), self.observed_samples)?;
 
-        let evicted = if self.entries.len() == self.capacity.get() {
+        let evicted = if self.entries.len() == self.capacity.get()
+        {
             Some(self.entries.remove(0))
-        } else {
+        }
+        else
+        {
             None
         };
         self.entries.push(entry);
@@ -433,15 +446,19 @@ fn validate_next_position<Value, Position>(
 where
     Position: PartialOrd,
 {
-    if position.partial_cmp(position).is_none() {
+    if position.partial_cmp(position).is_none()
+    {
         return Err(HistoryError::IncomparablePosition { observed_samples });
     }
 
-    let Some(latest) = entries.last() else {
+    let Some(latest) = entries.last()
+    else
+    {
         return Ok(());
     };
 
-    match latest.position().partial_cmp(position) {
+    match latest.position().partial_cmp(position)
+    {
         Some(Ordering::Less) => Ok(()),
         Some(Ordering::Equal) => Err(HistoryError::DuplicatePosition { observed_samples }),
         Some(Ordering::Greater) => Err(HistoryError::OutOfOrderPosition { observed_samples }),
@@ -512,7 +529,8 @@ mod tests {
         let mut complete = CompleteHistory::new();
         let mut bounded = BoundedHistory::new(samples.len()).unwrap();
 
-        for (value, position) in samples {
+        for (value, position) in samples
+        {
             complete.push(HistoryEntry::new(value, position)).unwrap();
             let outcome = bounded.push(HistoryEntry::new(value, position)).unwrap();
             assert!(outcome.evicted().is_none());
@@ -584,7 +602,8 @@ mod tests {
         let mut left = CompleteHistory::new();
         let mut right = CompleteHistory::new();
 
-        for (value, position) in samples {
+        for (value, position) in samples
+        {
             left.push(HistoryEntry::new(value, position)).unwrap();
             right.push(HistoryEntry::new(value, position)).unwrap();
         }
