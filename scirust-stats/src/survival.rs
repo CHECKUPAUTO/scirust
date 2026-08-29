@@ -23,7 +23,8 @@ impl RightCensoredObservation {
     /// Construct an observation. `event == true` denotes an observed event;
     /// `false` denotes right censoring.
     pub fn new(time: f64, event: bool) -> Result<Self, SurvivalError> {
-        if !time.is_finite() || time < 0.0 {
+        if !time.is_finite() || time < 0.0
+        {
             return Err(SurvivalError::InvalidTime(time));
         }
         Ok(Self { time, event })
@@ -57,7 +58,8 @@ pub enum SurvivalError {
 
 impl fmt::Display for SurvivalError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self
+        {
             Self::InvalidTime(t) => write!(f, "survival time must be finite and >= 0, got {t}"),
             Self::EmptySample => write!(f, "survival sample must not be empty"),
             Self::EmptyGroup => write!(f, "log-rank test requires two non-empty groups"),
@@ -117,11 +119,14 @@ pub struct LogRankResult {
 fn sorted_observations(
     observations: &[RightCensoredObservation],
 ) -> Result<Vec<RightCensoredObservation>, SurvivalError> {
-    if observations.is_empty() {
+    if observations.is_empty()
+    {
         return Err(SurvivalError::EmptySample);
     }
-    for obs in observations {
-        if !obs.time.is_finite() || obs.time < 0.0 {
+    for obs in observations
+    {
+        if !obs.time.is_finite() || obs.time < 0.0
+        {
             return Err(SurvivalError::InvalidTime(obs.time));
         }
     }
@@ -145,21 +150,27 @@ pub fn kaplan_meier(
     let mut out = Vec::new();
     let mut i = 0;
 
-    while i < sorted.len() {
+    while i < sorted.len()
+    {
         let time = sorted[i].time;
         let mut events = 0usize;
         let mut censored = 0usize;
         let mut j = i;
-        while j < sorted.len() && sorted[j].time == time {
-            if sorted[j].event {
+        while j < sorted.len() && sorted[j].time == time
+        {
+            if sorted[j].event
+            {
                 events += 1;
-            } else {
+            }
+            else
+            {
                 censored += 1;
             }
             j += 1;
         }
 
-        if events > 0 {
+        if events > 0
+        {
             survival *= 1.0 - events as f64 / at_risk as f64;
         }
         out.push(KaplanMeierPoint {
@@ -189,21 +200,27 @@ pub fn nelson_aalen(
     let mut out = Vec::new();
     let mut i = 0;
 
-    while i < sorted.len() {
+    while i < sorted.len()
+    {
         let time = sorted[i].time;
         let mut events = 0usize;
         let mut censored = 0usize;
         let mut j = i;
-        while j < sorted.len() && sorted[j].time == time {
-            if sorted[j].event {
+        while j < sorted.len() && sorted[j].time == time
+        {
+            if sorted[j].event
+            {
                 events += 1;
-            } else {
+            }
+            else
+            {
                 censored += 1;
             }
             j += 1;
         }
 
-        if events > 0 {
+        if events > 0
+        {
             cumulative_hazard += events as f64 / at_risk as f64;
         }
         out.push(NelsonAalenPoint {
@@ -230,11 +247,14 @@ pub fn log_rank(
     group_a: &[RightCensoredObservation],
     group_b: &[RightCensoredObservation],
 ) -> Result<LogRankResult, SurvivalError> {
-    if group_a.is_empty() || group_b.is_empty() {
+    if group_a.is_empty() || group_b.is_empty()
+    {
         return Err(SurvivalError::EmptyGroup);
     }
-    for obs in group_a.iter().chain(group_b) {
-        if !obs.time.is_finite() || obs.time < 0.0 {
+    for obs in group_a.iter().chain(group_b)
+    {
+        if !obs.time.is_finite() || obs.time < 0.0
+        {
             return Err(SurvivalError::InvalidTime(obs.time));
         }
     }
@@ -252,7 +272,8 @@ pub fn log_rank(
     let mut expected_a = 0.0;
     let mut variance = 0.0;
 
-    for time in event_times {
+    for time in event_times
+    {
         let n_a = group_a.iter().filter(|obs| obs.time >= time).count();
         let n_b = group_b.iter().filter(|obs| obs.time >= time).count();
         let d_a = group_a
@@ -265,19 +286,21 @@ pub fn log_rank(
             .count();
         let n = n_a + n_b;
         let d = d_a + d_b;
-        if n == 0 || d == 0 {
+        if n == 0 || d == 0
+        {
             continue;
         }
 
         observed_a += d_a as f64;
         expected_a += d as f64 * n_a as f64 / n as f64;
-        if n > 1 {
-            variance += (n_a * n_b * d * (n - d)) as f64
-                / ((n * n * (n - 1)) as f64);
+        if n > 1
+        {
+            variance += (n_a * n_b * d * (n - d)) as f64 / ((n * n * (n - 1)) as f64);
         }
     }
 
-    if variance <= 0.0 {
+    if variance <= 0.0
+    {
         return Err(SurvivalError::ZeroVariance);
     }
     let delta = observed_a - expected_a;
