@@ -62,7 +62,7 @@
 //!      gain as oracles.
 //!
 //! Everything is self-contained: the integrators, the [`SplitMix64`] random
-//! generator and every model are implemented here. There are no dependencies,
+//! generator and every model are implemented here. There are no third-party dependencies in the core path,
 //! no `unsafe`, no global state and no ambient randomness — stochastic models
 //! take an explicit `seed`, so a simulation is a pure function of its inputs
 //! and identical runs yield bit-identical results.
