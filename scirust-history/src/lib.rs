@@ -167,6 +167,12 @@ impl fmt::Display for HistoryError {
     }
 }
 
+/// Two physical slices forming one oldest-to-newest logical history sequence.
+pub type HistorySlices<'a, Value, Position> = (
+    &'a [HistoryEntry<Value, Position>],
+    &'a [HistoryEntry<Value, Position>],
+);
+
 /// Immutable oldest-to-newest view of entries retained by one backend.
 ///
 /// A circular backend can expose two physical slices while preserving one
@@ -204,12 +210,7 @@ impl<'a, Value, Position> HistoryView<'a, Value, Position> {
 
     /// Return the physical slices that form this oldest-to-newest logical view.
     #[must_use]
-    pub const fn as_slices(
-        &self,
-    ) -> (
-        &'a [HistoryEntry<Value, Position>],
-        &'a [HistoryEntry<Value, Position>],
-    ) {
+    pub const fn as_slices(&self) -> HistorySlices<'a, Value, Position> {
         (self.first, self.second)
     }
 
