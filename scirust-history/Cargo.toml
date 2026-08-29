@@ -1,0 +1,9 @@
+[package]
+name = "scirust-history"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89"
+publish = false
+description = "Deterministic domain-neutral retained-history primitives with explicit positions and approximation semantics for SciRust."
+
+[dependencies]

@@ -235,6 +235,7 @@ members = [
     "scirust-sigma",
     "scirust-special",
     "scirust-fractional",
+    "scirust-history",
     "scirust-relativity",
     "scirust-nonlocal-relativity",
     "experiments/nonlocal-relativity-v2",
