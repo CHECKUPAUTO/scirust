@@ -2934,6 +2934,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-adaptive-control"
+version = "0.1.0"
+
+[[package]]
 name = "scirust-agent-protocol"
 version = "0.1.0"
 dependencies = [
@@ -3641,6 +3645,7 @@ name = "scirust-nonlocal-relativity"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "scirust-adaptive-control",
  "scirust-fractional",
  "scirust-history",
  "scirust-relativity",
@@ -3854,6 +3859,7 @@ name = "scirust-sim"
 version = "0.1.0"
 dependencies = [
  "rand 0.8.7",
+ "scirust-adaptive-control",
  "scirust-learning",
  "scirust-stiff",
 ]

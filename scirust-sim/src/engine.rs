@@ -2,6 +2,7 @@
 //! [`SecondOrderSystem`] traits, the fixed-step integrators and the
 //! [`Trajectory`] they produce.
 
+use scirust_adaptive_control::{IController, StepDecision};
 use std::error::Error;
 use std::fmt;
 
@@ -621,20 +622,14 @@ pub fn simulate_adaptive<S: System>(
         }
 
         // Elementary I-controller; the estimator has order 4, hence the 1/5
-        // exponent. Safety and clamp factors are the textbook defaults.
-        const SAFETY: f64 = 0.9;
-        const MIN_SCALE: f64 = 0.2;
-        const MAX_SCALE: f64 = 5.0;
-        let scale = if err_norm == 0.0
-        {
-            MAX_SCALE
-        }
-        else
-        {
-            (SAFETY * err_norm.powf(-0.2)).clamp(MIN_SCALE, MAX_SCALE)
-        };
+        // exponent. Parameters preserve this integrator's historical textbook defaults.
+        let control = IController::new(0.9, 0.2, 5.0, 0.2)
+            .expect("Dormand-Prince adaptive-controller constants are valid")
+            .evaluate(err_norm)
+            .expect("finite non-negative Dormand-Prince error norm");
+        let scale = control.scale();
 
-        if err_norm <= 1.0
+        if control.decision() == StepDecision::Accept
         {
             t += h;
             // Erase float rounding on the final shortened step.
