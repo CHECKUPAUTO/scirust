@@ -33,7 +33,12 @@
 extern crate alloc;
 
 mod kernel;
+mod transform;
 pub use kernel::HistoryKernel;
+pub use transform::{
+    HistoryTransform, HistoryWeight, HistoryWeightError, IdentityHistoryTransform,
+    IdentityHistoryWeight, validate_history_weight,
+};
 
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
