@@ -32,6 +32,7 @@
 
 extern crate alloc;
 
+use alloc::collections::VecDeque;
 use alloc::vec::Vec;
 use core::cmp::Ordering;
 use core::fmt;
@@ -166,37 +167,74 @@ impl fmt::Display for HistoryError {
     }
 }
 
-/// Immutable view of the entries retained by one backend.
+/// Immutable oldest-to-newest view of entries retained by one backend.
+///
+/// A circular backend can expose two physical slices while preserving one
+/// logical sequence. Consumers should normally use [`Self::iter`] or
+/// [`Self::get`] rather than assuming contiguous storage.
 #[derive(Debug, Clone, Copy)]
 pub struct HistoryView<'a, Value, Position> {
-    entries: &'a [HistoryEntry<Value, Position>],
+    first: &'a [HistoryEntry<Value, Position>],
+    second: &'a [HistoryEntry<Value, Position>],
     policy: RetentionPolicy,
     observed_samples: usize,
 }
 
 impl<'a, Value, Position> HistoryView<'a, Value, Position> {
-    const fn new(
-        entries: &'a [HistoryEntry<Value, Position>],
+    /// Construct a view from up to two oldest-to-newest physical slices.
+    ///
+    /// This is public so downstream crates can implement [`HistoryBackend`]
+    /// without delegating storage to SciRust's built-in backends. The caller is
+    /// responsible for supplying slices in logical order and accounting that is
+    /// consistent with the backend's retention policy.
+    #[must_use]
+    pub const fn from_slices(
+        first: &'a [HistoryEntry<Value, Position>],
+        second: &'a [HistoryEntry<Value, Position>],
         policy: RetentionPolicy,
         observed_samples: usize,
     ) -> Self {
         Self {
-            entries,
+            first,
+            second,
             policy,
             observed_samples,
         }
     }
 
-    /// Return retained entries from oldest retained position to newest.
+    /// Return the physical slices that form this oldest-to-newest logical view.
     #[must_use]
-    pub const fn entries(&self) -> &'a [HistoryEntry<Value, Position>] {
-        self.entries
+    pub const fn as_slices(
+        &self,
+    ) -> (
+        &'a [HistoryEntry<Value, Position>],
+        &'a [HistoryEntry<Value, Position>],
+    ) {
+        (self.first, self.second)
+    }
+
+    /// Iterate retained entries from oldest logical position to newest.
+    pub fn iter(&self) -> impl Iterator<Item = &HistoryEntry<Value, Position>> {
+        self.first.iter().chain(self.second.iter())
+    }
+
+    /// Return one retained entry by oldest-to-newest logical index.
+    #[must_use]
+    pub fn get(&self, index: usize) -> Option<&HistoryEntry<Value, Position>> {
+        if index < self.first.len()
+        {
+            self.first.get(index)
+        }
+        else
+        {
+            self.second.get(index - self.first.len())
+        }
     }
 
     /// Return the number of entries currently retained.
     #[must_use]
     pub const fn retained_samples(&self) -> usize {
-        self.entries.len()
+        self.first.len() + self.second.len()
     }
 
     /// Return the number of entries successfully accepted during this backend lifetime.
@@ -223,13 +261,13 @@ impl<'a, Value, Position> HistoryView<'a, Value, Position> {
     /// approximation policy even before its capacity has caused an eviction.
     #[must_use]
     pub const fn retains_all_observed(&self) -> bool {
-        self.entries.len() == self.observed_samples
+        self.retained_samples() == self.observed_samples
     }
 
     /// Return whether no entries are currently retained.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.first.is_empty() && self.second.is_empty()
     }
 }
 
@@ -242,7 +280,13 @@ pub struct PushOutcome<Value, Position> {
 }
 
 impl<Value, Position> PushOutcome<Value, Position> {
-    const fn new(
+    /// Construct a successful insertion outcome.
+    ///
+    /// This is public so downstream implementations of [`HistoryBackend`] can
+    /// report observable eviction and accounting without delegating to a built-in
+    /// backend. The implementor is responsible for supplying consistent counts.
+    #[must_use]
+    pub const fn new(
         evicted: Option<HistoryEntry<Value, Position>>,
         retained_samples: usize,
         observed_samples: usize,
@@ -346,7 +390,12 @@ where
     }
 
     fn view(&self) -> HistoryView<'_, Value, Position> {
-        HistoryView::new(&self.entries, RetentionPolicy::Complete, self.entries.len())
+        HistoryView::from_slices(
+            &self.entries,
+            &[],
+            RetentionPolicy::Complete,
+            self.entries.len(),
+        )
     }
 
     fn push(
@@ -354,7 +403,7 @@ where
         entry: HistoryEntry<Value, Position>,
     ) -> Result<PushOutcome<Value, Position>, HistoryError> {
         let observed_samples = self.entries.len();
-        validate_next_position(&self.entries, entry.position(), observed_samples)?;
+        validate_next_position(self.entries.last(), entry.position(), observed_samples)?;
         self.entries.push(entry);
         Ok(PushOutcome::new(
             None,
@@ -368,7 +417,7 @@ where
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BoundedHistory<Value, Position> {
     capacity: NonZeroUsize,
-    entries: Vec<HistoryEntry<Value, Position>>,
+    entries: VecDeque<HistoryEntry<Value, Position>>,
     observed_samples: usize,
 }
 
@@ -381,7 +430,7 @@ impl<Value, Position> BoundedHistory<Value, Position> {
         let capacity = NonZeroUsize::new(capacity).ok_or(HistoryError::ZeroCapacity)?;
         Ok(Self {
             capacity,
-            entries: Vec::with_capacity(capacity.get()),
+            entries: VecDeque::with_capacity(capacity.get()),
             observed_samples: 0,
         })
     }
@@ -406,8 +455,10 @@ where
     }
 
     fn view(&self) -> HistoryView<'_, Value, Position> {
-        HistoryView::new(
-            &self.entries,
+        let (first, second) = self.entries.as_slices();
+        HistoryView::from_slices(
+            first,
+            second,
             RetentionPolicy::Bounded(self.capacity),
             self.observed_samples,
         )
@@ -417,17 +468,17 @@ where
         &mut self,
         entry: HistoryEntry<Value, Position>,
     ) -> Result<PushOutcome<Value, Position>, HistoryError> {
-        validate_next_position(&self.entries, entry.position(), self.observed_samples)?;
+        validate_next_position(self.entries.back(), entry.position(), self.observed_samples)?;
 
         let evicted = if self.entries.len() == self.capacity.get()
         {
-            Some(self.entries.remove(0))
+            self.entries.pop_front()
         }
         else
         {
             None
         };
-        self.entries.push(entry);
+        self.entries.push_back(entry);
         self.observed_samples += 1;
 
         Ok(PushOutcome::new(
@@ -439,7 +490,7 @@ where
 }
 
 fn validate_next_position<Value, Position>(
-    entries: &[HistoryEntry<Value, Position>],
+    latest: Option<&HistoryEntry<Value, Position>>,
     position: &Position,
     observed_samples: usize,
 ) -> Result<(), HistoryError>
@@ -451,7 +502,7 @@ where
         return Err(HistoryError::IncomparablePosition { observed_samples });
     }
 
-    let Some(latest) = entries.last()
+    let Some(latest) = latest
     else
     {
         return Ok(());
@@ -470,7 +521,7 @@ where
 mod tests {
     use super::{
         BoundedHistory, CompleteHistory, HistoryBackend, HistoryEntry, HistoryError,
-        HistoryFidelity, RetentionPolicy,
+        HistoryFidelity, HistoryView, PushOutcome, RetentionPolicy,
     };
 
     #[test]
@@ -486,9 +537,9 @@ mod tests {
         assert_eq!(view.retained_samples(), 3);
         assert_eq!(view.observed_samples(), 3);
         assert!(view.retains_all_observed());
-        assert_eq!(*view.entries()[0].position(), 1);
-        assert_eq!(*view.entries()[1].position(), 3);
-        assert_eq!(*view.entries()[2].position(), 9);
+        assert_eq!(*view.get(0).unwrap().position(), 1);
+        assert_eq!(*view.get(1).unwrap().position(), 3);
+        assert_eq!(*view.get(2).unwrap().position(), 9);
     }
 
     #[test]
@@ -515,12 +566,31 @@ mod tests {
         assert_eq!(outcome.retained_samples(), 2);
         assert_eq!(outcome.observed_samples(), 3);
 
-        let positions: [u64; 2] = [
-            *history.view().entries()[0].position(),
-            *history.view().entries()[1].position(),
-        ];
+        let positions: Vec<u64> = history
+            .view()
+            .iter()
+            .map(|entry| *entry.position())
+            .collect();
         assert_eq!(positions, [8, 32]);
         assert!(!history.view().retains_all_observed());
+    }
+
+    #[test]
+    fn bounded_wraparound_keeps_oldest_to_newest_iteration() {
+        let mut history = BoundedHistory::new(3).unwrap();
+        for position in 1_u64..=8
+        {
+            history.push(HistoryEntry::new(position * 10, position)).unwrap();
+        }
+
+        let positions: Vec<u64> = history
+            .view()
+            .iter()
+            .map(|entry| *entry.position())
+            .collect();
+        assert_eq!(positions, [6, 7, 8]);
+        assert_eq!(history.view().retained_samples(), 3);
+        assert_eq!(history.view().observed_samples(), 8);
     }
 
     #[test]
@@ -536,9 +606,21 @@ mod tests {
             assert!(outcome.evicted().is_none());
         }
 
-        assert_eq!(bounded.view().entries(), complete.view().entries());
+        assert!(bounded.view().iter().eq(complete.view().iter()));
         assert!(bounded.view().retains_all_observed());
         assert_eq!(bounded.view().fidelity(), HistoryFidelity::Approximation);
+    }
+
+    #[test]
+    fn public_constructors_support_external_backend_implementors() {
+        let entries = [HistoryEntry::new(7_u8, 11_u64)];
+        let view = HistoryView::from_slices(&entries, &[], RetentionPolicy::Complete, 1);
+        let outcome = PushOutcome::new(None::<HistoryEntry<u8, u64>>, 1, 1);
+
+        assert_eq!(view.retained_samples(), 1);
+        assert_eq!(*view.get(0).unwrap().value(), 7);
+        assert_eq!(outcome.retained_samples(), 1);
+        assert_eq!(outcome.observed_samples(), 1);
     }
 
     #[test]
@@ -608,11 +690,7 @@ mod tests {
             right.push(HistoryEntry::new(value, position)).unwrap();
         }
 
-        for (left_entry, right_entry) in left
-            .view()
-            .entries()
-            .iter()
-            .zip(right.view().entries().iter())
+        for (left_entry, right_entry) in left.view().iter().zip(right.view().iter())
         {
             assert_eq!(left_entry.value().to_bits(), right_entry.value().to_bits());
             assert_eq!(
