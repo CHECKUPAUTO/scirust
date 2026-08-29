@@ -45,6 +45,7 @@ mod adaptive_stepper;
 mod charts;
 mod curved_transport;
 mod geometric_error;
+mod history_adapter;
 mod modulation;
 mod nonuniform_kernel;
 mod nonuniform_memory;
@@ -73,6 +74,10 @@ pub use curved_transport::{
 pub use geometric_error::{
     OrthonormalTetrad, TetradStateError, TimelikeStateError, build_orthonormal_tetrad,
     tetrad_state_error, timelike_state_error,
+};
+pub use history_adapter::{
+    PositionedVelocity, approximation_from_fidelity, fidelity_from_approximation,
+    positioned_velocity,
 };
 pub use modulation::{
     HistoryModulator, IdentityHistoryModulator, ModulatedCaputoCoordinateMemory,
