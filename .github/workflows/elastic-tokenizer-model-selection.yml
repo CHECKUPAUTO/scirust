@@ -120,13 +120,18 @@ jobs:
     timeout-minutes: 110
     env:
       CARGO_INCREMENTAL: 0
+    defaults:
+      run:
+        working-directory: .ci-elastic-tokenizer
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          path: .ci-elastic-tokenizer
       - name: Prepare isolated build directory
         shell: bash
         run: |
           set -euo pipefail
-          tmpdir="$(mktemp -d "$GITHUB_WORKSPACE/.elastic-selection.XXXXXX")"
+          tmpdir="$(mktemp -d "$RUNNER_TEMP/elastic-selection.XXXXXX")"
           chmod 700 "$tmpdir"
           mkdir -p "$tmpdir/tmp"
           chmod 700 "$tmpdir/tmp"
