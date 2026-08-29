@@ -122,6 +122,11 @@ jobs:
       CARGO_INCREMENTAL: 0
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          # This runner has a persistent work directory. Do not let checkout
+          # fail before the isolated CARGO_TARGET_DIR is created just because
+          # an old untracked target/ entry was produced by another UID.
+          clean: false
       - name: Prepare isolated build directory
         shell: bash
         run: |
