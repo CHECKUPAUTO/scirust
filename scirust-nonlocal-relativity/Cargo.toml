@@ -8,6 +8,7 @@ readme = "README.md"
 
 [dependencies]
 scirust-fractional = { path = "../scirust-fractional" }
+scirust-history = { path = "../scirust-history" }
 scirust-relativity = { path = "../scirust-relativity" }
 
 [dev-dependencies]
