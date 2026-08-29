@@ -35,6 +35,9 @@
 //!   `chi2_gof_discrete` that bins a fitted discrete distribution, pools thin
 //!   bins, and adjusts the dof for estimated parameters), one-sample
 //!   Kolmogorov–Smirnov.
+//! - **Survival analysis** ([`survival`]): validated right-censored observations,
+//!   Kaplan-Meier product-limit curves, Nelson-Aalen cumulative hazards, and the
+//!   two-sample log-rank test.
 //! - **Honest lottery mathematics** ([`lottery`]): exact odds of any
 //!   `k`-of-`n` (+ bonus) game via the hypergeometric law, ticket expected
 //!   value, and a χ² draw-fairness audit. Draws are independent and uniform:
@@ -77,6 +80,7 @@ pub mod htest;
 pub mod lottery;
 pub mod rng;
 pub mod robust;
+pub mod survival;
 
 pub use discrete::{
     BetaBinomial, Binomial, Boltzmann, DirichletMultinomial, DiscreteDistribution, DiscreteLaplace,
@@ -96,6 +100,10 @@ pub use robust::{
     MadConsistency, MedianOfMeansConfig, MedianOfMeansPartition, RobustStatsError,
     interquartile_range, median_absolute_deviation, median_of_means, trimmed_mean, weighted_median,
     winsorized_mean,
+};
+pub use survival::{
+    KaplanMeierPoint, LogRankResult, NelsonAalenPoint, RightCensoredObservation, SurvivalError,
+    kaplan_meier, log_rank, nelson_aalen,
 };
 
 /// One-import surface for the common statistics workflow.
@@ -123,5 +131,9 @@ pub mod prelude {
         MadConsistency, MedianOfMeansConfig, MedianOfMeansPartition, RobustStatsError,
         interquartile_range, median_absolute_deviation, median_of_means, trimmed_mean,
         weighted_median, winsorized_mean,
+    };
+    pub use crate::survival::{
+        KaplanMeierPoint, LogRankResult, NelsonAalenPoint, RightCensoredObservation, SurvivalError,
+        kaplan_meier, log_rank, nelson_aalen,
     };
 }
