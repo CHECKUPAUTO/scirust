@@ -519,6 +519,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec::Vec;
+
     use super::{
         BoundedHistory, CompleteHistory, HistoryBackend, HistoryEntry, HistoryError,
         HistoryFidelity, HistoryView, PushOutcome, RetentionPolicy,
@@ -580,7 +582,9 @@ mod tests {
         let mut history = BoundedHistory::new(3).unwrap();
         for position in 1_u64..=8
         {
-            history.push(HistoryEntry::new(position * 10, position)).unwrap();
+            history
+                .push(HistoryEntry::new(position * 10, position))
+                .unwrap();
         }
 
         let positions: Vec<u64> = history
