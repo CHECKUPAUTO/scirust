@@ -621,9 +621,6 @@ mod tests {
 
     #[test]
     fn untied_one_covariate_fit_has_hand_solved_log_two_coefficient() {
-        // The score equation for this six-subject data set reduces to a root at
-        // exp(beta) = 2, so beta_hat = ln(2). At that root the observed
-        // information is 2/3 and the standard error is sqrt(3/2).
         let data = [
             row(1.0, true, 1.0),
             row(2.0, false, 0.0),
@@ -718,10 +715,6 @@ mod tests {
         close(a.coefficients[0], b.coefficients[0], 2.0e-9);
         close(a.standard_errors[0], b.standard_errors[0], 1.0e-9);
         close(a.variance_covariance[0], b.variance_covariance[0], 1.0e-9);
-        close(
-            a.log_partial_likelihood,
-            b.log_partial_likelihood,
-            4.0e-15,
-        );
+        close(a.log_partial_likelihood, b.log_partial_likelihood, 4.0e-15);
     }
 }
