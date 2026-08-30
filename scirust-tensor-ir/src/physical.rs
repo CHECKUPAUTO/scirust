@@ -196,10 +196,12 @@ impl PhysicalSegment {
         resident_materializations: Vec<ResidentMaterialization>,
     ) -> Result<Self, PhysicalAccountingError> {
         validate_alignment(serialized_alignment_bits)?;
-        if serialized_bits.get() < raw_bits.get() {
+        if serialized_bits.get() < raw_bits.get()
+        {
             return Err(PhysicalAccountingError::SerializedBelowRaw { id });
         }
-        if serialized_bits.get() == 0 && reconstruction_role != ReconstructionRole::ImplicitZero {
+        if serialized_bits.get() == 0 && reconstruction_role != ReconstructionRole::ImplicitZero
+        {
             return Err(PhysicalAccountingError::ZeroBitWithoutReconstruction { id });
         }
         if reconstruction_role == ReconstructionRole::ImplicitZero
@@ -209,14 +211,17 @@ impl PhysicalSegment {
         }
 
         let mut seen = BTreeMap::new();
-        for materialization in &resident_materializations {
-            if materialization.bits.get() < raw_bits.get() {
+        for materialization in &resident_materializations
+        {
+            if materialization.bits.get() < raw_bits.get()
+            {
                 return Err(PhysicalAccountingError::ResidentBelowRaw {
                     id,
                     class: materialization.class,
                 });
             }
-            if seen.insert(materialization.class, ()).is_some() {
+            if seen.insert(materialization.class, ()).is_some()
+            {
                 return Err(PhysicalAccountingError::DuplicateMaterialization {
                     id,
                     class: materialization.class,
@@ -296,10 +301,7 @@ impl PhysicalSegment {
             .iter()
             .find(|materialization| materialization.class == class)
             .map(|materialization| materialization.bits)
-            .ok_or(PhysicalAccountingError::UnavailableMaterialization {
-                id: self.id,
-                class,
-            })
+            .ok_or(PhysicalAccountingError::UnavailableMaterialization { id: self.id, class })
     }
 }
 
@@ -392,7 +394,8 @@ impl PhysicalAccountingScope {
     ) -> Result<StorageBits, PhysicalAccountingError> {
         let owners = self.owners()?;
         let mut total = 0u64;
-        for segment in owners.values() {
+        for segment in owners.values()
+        {
             total = total
                 .checked_add(segment.resident_bits(class)?.get())
                 .ok_or(PhysicalAccountingError::StorageSizeOverflow)?;
@@ -421,16 +424,22 @@ impl PhysicalAccountingScope {
         &self,
     ) -> Result<BTreeMap<PhysicalSegmentId, &PhysicalSegment>, PhysicalAccountingError> {
         let mut owners = BTreeMap::new();
-        for usage in &self.uses {
-            if let SegmentUse::Own(segment) = usage {
-                if owners.insert(segment.id, segment).is_some() {
+        for usage in &self.uses
+        {
+            if let SegmentUse::Own(segment) = usage
+            {
+                if owners.insert(segment.id, segment).is_some()
+                {
                     return Err(PhysicalAccountingError::DuplicateOwner { id: segment.id });
                 }
             }
         }
 
-        for usage in &self.uses {
-            let SegmentUse::Reference(reference) = usage else {
+        for usage in &self.uses
+        {
+            let SegmentUse::Reference(reference) = usage
+            else
+            {
                 continue;
             };
             let owner = owners
@@ -440,9 +449,7 @@ impl PhysicalAccountingScope {
                 || owner.layout_identity != reference.layout_identity
                 || owner.lifetime != reference.lifetime
             {
-                return Err(PhysicalAccountingError::SharedSegmentMismatch {
-                    id: reference.id,
-                });
+                return Err(PhysicalAccountingError::SharedSegmentMismatch { id: reference.id });
             }
         }
 
@@ -459,11 +466,9 @@ pub struct EffectiveBitsRate {
 
 impl EffectiveBitsRate {
     /// Construct an exact rate. A zero denominator is rejected.
-    pub fn new(
-        bits: StorageBits,
-        logical_values: u64,
-    ) -> Result<Self, PhysicalAccountingError> {
-        if logical_values == 0 {
+    pub fn new(bits: StorageBits, logical_values: u64) -> Result<Self, PhysicalAccountingError> {
+        if logical_values == 0
+        {
             return Err(PhysicalAccountingError::ZeroLogicalValueCount);
         }
         Ok(Self {
@@ -525,10 +530,15 @@ pub enum PhysicalAccountingError {
 
 impl fmt::Display for PhysicalAccountingError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidAlignment { alignment_bits } => {
-                write!(formatter, "alignment {alignment_bits} bits is not a non-zero power of two")
-            }
+        match self
+        {
+            Self::InvalidAlignment { alignment_bits } =>
+            {
+                write!(
+                    formatter,
+                    "alignment {alignment_bits} bits is not a non-zero power of two"
+                )
+            },
             Self::SerializedBelowRaw { id } => write!(
                 formatter,
                 "segment {} serialized extent is below raw encoded extent",
@@ -556,12 +566,18 @@ impl fmt::Display for PhysicalAccountingError {
                 "implicit-zero segment {} must not own physical storage",
                 id.get()
             ),
-            Self::DuplicateOwner { id } => {
+            Self::DuplicateOwner { id } =>
+            {
                 write!(formatter, "segment {} has more than one owner", id.get())
-            }
-            Self::MissingOwner { id } => {
-                write!(formatter, "segment {} is referenced without an owner", id.get())
-            }
+            },
+            Self::MissingOwner { id } =>
+            {
+                write!(
+                    formatter,
+                    "segment {} is referenced without an owner",
+                    id.get()
+                )
+            },
             Self::SharedSegmentMismatch { id } => write!(
                 formatter,
                 "segment {} reference does not match the owner's content/layout/lifetime",
@@ -573,10 +589,17 @@ impl fmt::Display for PhysicalAccountingError {
                 id.get(),
                 class.get()
             ),
-            Self::StorageSizeOverflow => write!(formatter, "physical storage size overflows u64 bits"),
-            Self::ZeroLogicalValueCount => {
-                write!(formatter, "effective bits/value denominator must be non-zero")
-            }
+            Self::StorageSizeOverflow =>
+            {
+                write!(formatter, "physical storage size overflows u64 bits")
+            },
+            Self::ZeroLogicalValueCount =>
+            {
+                write!(
+                    formatter,
+                    "effective bits/value denominator must be non-zero"
+                )
+            },
         }
     }
 }
@@ -585,7 +608,8 @@ impl fmt::Display for PhysicalAccountingError {
 impl std::error::Error for PhysicalAccountingError {}
 
 fn validate_alignment(alignment_bits: u64) -> Result<(), PhysicalAccountingError> {
-    if alignment_bits == 0 || !alignment_bits.is_power_of_two() {
+    if alignment_bits == 0 || !alignment_bits.is_power_of_two()
+    {
         return Err(PhysicalAccountingError::InvalidAlignment { alignment_bits });
     }
     Ok(())
@@ -593,7 +617,8 @@ fn validate_alignment(alignment_bits: u64) -> Result<(), PhysicalAccountingError
 
 fn checked_sum(values: impl Iterator<Item = u64>) -> Result<StorageBits, PhysicalAccountingError> {
     let mut total = 0u64;
-    for value in values {
+    for value in values
+    {
         total = total
             .checked_add(value)
             .ok_or(PhysicalAccountingError::StorageSizeOverflow)?;
@@ -616,12 +641,8 @@ mod tests {
         serialized_bits: u64,
         resident_bits: u64,
     ) -> PhysicalSegment {
-        let resident = ResidentMaterialization::new(
-            HOST,
-            StorageBits::new(resident_bits),
-            512,
-        )
-        .unwrap();
+        let resident =
+            ResidentMaterialization::new(HOST, StorageBits::new(resident_bits), 512).unwrap();
         PhysicalSegment::new(
             PhysicalSegmentId::new(id),
             role,
@@ -686,15 +707,7 @@ mod tests {
             4096,
             4096,
         ));
-        let codebook = stored_segment(
-            2,
-            PhysicalSegmentRole::Codebook,
-            500,
-            900,
-            4096,
-            4096,
-            4096,
-        );
+        let codebook = stored_segment(2, PhysicalSegmentRole::Codebook, 500, 900, 4096, 4096, 4096);
         scope.own(codebook.clone());
         let shared = PhysicalSegmentReference::new(
             codebook.id(),
@@ -727,15 +740,7 @@ mod tests {
             })
         );
 
-        let owner = stored_segment(
-            0,
-            PhysicalSegmentRole::Codebook,
-            1,
-            2,
-            64,
-            64,
-            64,
-        );
+        let owner = stored_segment(0, PhysicalSegmentRole::Codebook, 1, 2, 64, 64, 64);
         let mut mismatch = PhysicalAccountingScope::new();
         mismatch.own(owner.clone());
         mismatch.reference(PhysicalSegmentReference::new(
@@ -752,15 +757,7 @@ mod tests {
 
     #[test]
     fn duplicate_owner_is_rejected_even_when_definition_matches() {
-        let segment = stored_segment(
-            0,
-            PhysicalSegmentRole::Payload,
-            1,
-            2,
-            64,
-            64,
-            64,
-        );
+        let segment = stored_segment(0, PhysicalSegmentRole::Payload, 1, 2, 64, 64, 64);
         let mut scope = PhysicalAccountingScope::new();
         scope.own(segment.clone());
         scope.own(segment);
