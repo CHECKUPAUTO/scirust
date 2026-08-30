@@ -35,9 +35,11 @@
 //!   `chi2_gof_discrete` that bins a fitted discrete distribution, pools thin
 //!   bins, and adjusts the dof for estimated parameters), one-sample
 //!   Kolmogorov–Smirnov.
-//! - **Survival analysis** ([`survival`]): validated right-censored observations,
-//!   Kaplan-Meier product-limit curves, Nelson-Aalen cumulative hazards, and the
-//!   two-sample log-rank test.
+//! - **Survival analysis** ([`survival`], [`cox`]): validated right-censored
+//!   observations, Kaplan-Meier product-limit curves, Nelson-Aalen cumulative
+//!   hazards, the two-sample log-rank test, and Cox proportional-hazards
+//!   regression with Breslow/Efron tie handling and explicit convergence
+//!   diagnostics.
 //! - **Honest lottery mathematics** ([`lottery`]): exact odds of any
 //!   `k`-of-`n` (+ bonus) game via the hypergeometric law, ticket expected
 //!   value, and a χ² draw-fairness audit. Draws are independent and uniform:
@@ -73,6 +75,7 @@
 #![deny(missing_docs)]
 
 pub mod comb;
+pub mod cox;
 pub mod describe;
 pub mod discrete;
 pub mod dist;
@@ -82,6 +85,9 @@ pub mod rng;
 pub mod robust;
 pub mod survival;
 
+pub use cox::{
+    CoxError, CoxFitOptions, CoxFitResult, CoxObservation, CoxTieMethod, cox_proportional_hazards,
+};
 pub use discrete::{
     BetaBinomial, Binomial, Boltzmann, DirichletMultinomial, DiscreteDistribution, DiscreteLaplace,
     Geometric, Hypergeometric, Logarithmic, Multinomial, MultivariateHypergeometric,
@@ -110,6 +116,10 @@ pub use survival::{
 pub mod prelude {
     pub use crate::comb::{
         binomial, factorial, ln_binomial, ln_factorial, multichoose, permutations,
+    };
+    pub use crate::cox::{
+        CoxError, CoxFitOptions, CoxFitResult, CoxObservation, CoxTieMethod,
+        cox_proportional_hazards,
     };
     pub use crate::describe::{mean, median, quantile, std_dev, std_error, variance};
     pub use crate::discrete::{
