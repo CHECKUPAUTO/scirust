@@ -28,6 +28,9 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Linux, ARM64, scirust-arm64, jetson-thor, internal]
     timeout-minutes: 360
+    defaults:
+      run:
+        working-directory: _checkout
     env:
       CARGO_INCREMENTAL: 0
       RUSTFLAGS: "-D warnings"
@@ -44,6 +47,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: _checkout
 
       - name: Require persistent physical Thor runner
         shell: bash
