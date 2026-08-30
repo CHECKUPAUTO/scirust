@@ -1,0 +1,8 @@
+[package]
+name = "scirust-adaptive-control"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Small deterministic adaptive-step control primitives shared by SciRust numerical runtimes."
+
+[dependencies]

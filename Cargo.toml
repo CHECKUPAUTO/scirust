@@ -234,6 +234,7 @@ members = [
     "scirust-variational",
     "scirust-sigma",
     "scirust-special",
+    "scirust-adaptive-control",
     "scirust-fractional",
     "scirust-history",
     "scirust-relativity",
