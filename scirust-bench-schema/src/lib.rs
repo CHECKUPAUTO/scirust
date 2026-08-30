@@ -66,6 +66,9 @@
 //! LCG) precisely so timings are comparable, and that pinned seed is what
 //! the converter's mandatory `seed` argument is for.
 
+mod evidence;
+pub use evidence::{EvidenceDisposition, ScientificEvidence, ScientificEvidenceKind};
+
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::Path;
@@ -222,6 +225,11 @@ pub struct BenchRecord {
     /// exploratory — see [`Preregistration`].
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub prereg: Option<Preregistration>,
+    /// Optional scientific classification of what this measurement/result means.
+    /// This is orthogonal to preregistration and certificates: a confirmatory
+    /// row can still support, reject, or leave a claim inconclusive.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub evidence: Option<ScientificEvidence>,
 }
 
 impl BenchRecord {
@@ -246,6 +254,7 @@ impl BenchRecord {
             ci: None,
             cert: None,
             prereg: None,
+            evidence: None,
         }
     }
 
@@ -265,6 +274,13 @@ impl BenchRecord {
     #[must_use]
     pub fn with_prereg(mut self, prereg: Preregistration) -> Self {
         self.prereg = Some(prereg);
+        self
+    }
+
+    /// Attach a scientific evidence classification without changing the measured value.
+    #[must_use]
+    pub fn with_evidence(mut self, evidence: ScientificEvidence) -> Self {
+        self.evidence = Some(evidence);
         self
     }
 
