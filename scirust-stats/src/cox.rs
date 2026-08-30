@@ -35,10 +35,7 @@ impl CoxObservation {
     /// Construct a Cox regression observation.
     ///
     /// At least one covariate is required, and every covariate must be finite.
-    pub fn new(
-        survival: RightCensoredObservation,
-        covariates: Vec<f64>,
-    ) -> Result<Self, CoxError> {
+    pub fn new(survival: RightCensoredObservation, covariates: Vec<f64>) -> Result<Self, CoxError> {
         if covariates.is_empty()
         {
             return Err(CoxError::EmptyCovariates);
@@ -177,9 +174,10 @@ impl fmt::Display for CoxError {
                 f,
                 "Cox covariate dimension mismatch at row {row}: expected {expected}, got {actual}"
             ),
-            Self::NonFiniteCovariate { index, value } => {
+            Self::NonFiniteCovariate { index, value } =>
+            {
                 write!(f, "Cox covariate {index} must be finite, got {value}")
-            }
+            },
             Self::InvalidOptions => write!(f, "invalid Cox fitting options"),
             Self::SingularInformation => write!(f, "Cox observed information matrix is singular"),
             Self::LineSearchFailed => write!(f, "Cox Newton line search failed"),
@@ -324,8 +322,7 @@ fn partial_likelihood(
                     tied1[j] += weight * row.covariates[j];
                     for k in 0..p
                     {
-                        tied2[j * p + k] +=
-                            weight * row.covariates[j] * row.covariates[k];
+                        tied2[j * p + k] += weight * row.covariates[j] * row.covariates[k];
                     }
                 }
             }
@@ -457,8 +454,7 @@ fn invert_matrix(
     {
         let mut unit = vec![0.0; dimension];
         unit[column] = 1.0;
-        let solution =
-            solve_linear_system(matrix, &unit, dimension, singularity_tolerance)?;
+        let solution = solve_linear_system(matrix, &unit, dimension, singularity_tolerance)?;
         for row in 0..dimension
         {
             inverse[row * dimension + column] = solution[row];
@@ -613,8 +609,10 @@ mod tests {
             cox_proportional_hazards(&data, CoxFitOptions::default()),
             Err(CoxError::NoEvents)
         );
-        let mut options = CoxFitOptions::default();
-        options.tolerance = 0.0;
+        let options = CoxFitOptions {
+            tolerance: 0.0,
+            ..CoxFitOptions::default()
+        };
         assert_eq!(
             cox_proportional_hazards(&[row(1.0, true, 0.0)], options),
             Err(CoxError::InvalidOptions)
@@ -649,8 +647,10 @@ mod tests {
             row(2.0, false, -1.0),
             row(2.0, false, 1.0),
         ];
-        let mut breslow_options = CoxFitOptions::default();
-        breslow_options.tie_method = CoxTieMethod::Breslow;
+        let breslow_options = CoxFitOptions {
+            tie_method: CoxTieMethod::Breslow,
+            ..CoxFitOptions::default()
+        };
         let breslow = cox_proportional_hazards(&data, breslow_options).unwrap();
         let efron = cox_proportional_hazards(&data, CoxFitOptions::default()).unwrap();
 
