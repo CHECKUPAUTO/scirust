@@ -41,6 +41,7 @@
 //! metric-aware research diagnostic is a separate, optional concern.
 
 use crate::{NonlocalRelativityError, NonlocalResult, WorldlineState, validate_scalar};
+use scirust_adaptive_control::IController;
 
 /// Componentwise scaled local-error tolerance for adaptive stepping.
 ///
@@ -232,21 +233,28 @@ pub(crate) const FIRST_ORDER_STEP_EXPONENT: f64 = 0.5;
 /// the scaled error `normalized_error` was, then clamped to `[min_step,
 /// max_step]`. A zero error (identical estimates) grows at the cap.
 #[must_use]
+fn step_controller() -> IController {
+    IController::new(
+        STEP_SAFETY_FACTOR,
+        STEP_SHRINK_FLOOR,
+        STEP_GROWTH_CAP,
+        FIRST_ORDER_STEP_EXPONENT,
+    )
+    .expect("nonlocal adaptive-controller constants are valid")
+}
+
+#[must_use]
 pub(crate) fn grow_accepted_step(
     step: f64,
     normalized_error: f64,
     min_step: f64,
     max_step: f64,
 ) -> f64 {
-    let growth = if normalized_error > 0.0
-    {
-        STEP_SAFETY_FACTOR * normalized_error.powf(-FIRST_ORDER_STEP_EXPONENT)
-    }
-    else
-    {
-        STEP_GROWTH_CAP
-    };
-    (step * growth.min(STEP_GROWTH_CAP)).clamp(min_step, max_step)
+    let scale = step_controller()
+        .evaluate(normalized_error)
+        .expect("scaled_local_error_norm produces a finite non-negative error")
+        .scale();
+    (step * scale).clamp(min_step, max_step)
 }
 
 /// Shrink a rejected step by the same control law, bounded below by
@@ -254,8 +262,11 @@ pub(crate) fn grow_accepted_step(
 /// `min_step`; the caller decides whether crossing `min_step` is an error.
 #[must_use]
 pub(crate) fn shrink_rejected_step(step: f64, normalized_error: f64) -> f64 {
-    let shrink = STEP_SAFETY_FACTOR * normalized_error.powf(-FIRST_ORDER_STEP_EXPONENT);
-    step * shrink.max(STEP_SHRINK_FLOOR)
+    let scale = step_controller()
+        .evaluate(normalized_error)
+        .expect("scaled_local_error_norm produces a finite non-negative error")
+        .scale();
+    step * scale
 }
 
 /// Clamp a proposed step so an accepted step cannot overshoot the target
