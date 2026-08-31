@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  rebase-and-format:
+  format:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-24.04
     steps:
@@ -17,21 +17,18 @@ jobs:
         with:
           ref: fix/cox-numerical-scaling
           fetch-depth: 0
-      - name: Rebase on current master
-        run: |
-          git fetch origin master
-          git rebase origin/master
       - name: Install nightly rustfmt
-        run: |
-          rustup toolchain install nightly --profile minimal --component rustfmt
+        run: rustup toolchain install nightly --profile minimal --component rustfmt
       - name: Apply repository formatting
         run: cargo +nightly fmt --all
-      - name: Commit repair and update branch
+      - name: Commit formatted sources
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add --all
-          if ! git diff --cached --quiet; then
-            git commit -m 'style(stats): apply repository rustfmt'
+          if git diff --cached --quiet; then
+            echo 'Already formatted.'
+            exit 0
           fi
-          git push --force-with-lease origin HEAD:fix/cox-numerical-scaling
+          git commit -m 'style(stats): apply repository rustfmt'
+          git push origin HEAD:fix/cox-numerical-scaling
