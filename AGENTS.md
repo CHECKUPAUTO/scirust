@@ -17,15 +17,30 @@ git show origin/agent/ecosystem-roadmap:.agent/SCIRUST_ECOSYSTEM_ROADMAP.yaml
 
 If the roadmap cannot be fetched or read, fail closed for major architecture, shared-contract, cross-repository promotion, representation-format, or merge decisions. Read-only diagnosis is allowed.
 
+## Mandatory ML maturity overlay
+
+For any machine-learning, tensor/device/dtype, training, model I/O, compiler, data-pipeline, distributed, accelerator, serving, benchmark, or cross-repository ML work, also read:
+
+`origin/agent/ecosystem-roadmap:.agent/ML_MATURITY_5_OF_5.yaml`
+
+Recommended command:
+
+```bash
+git fetch origin agent/ecosystem-roadmap && \
+git show origin/agent/ecosystem-roadmap:.agent/ML_MATURITY_5_OF_5.yaml
+```
+
+The ML maturity scores in that file are an audit baseline, not achievements. A dimension may be called `5/5` only after its listed end-to-end, interoperability, measurement, evidence, limitation, and exact-head CI exit criteria are actually satisfied. Never convert planned work, proxy benchmarks, compilation-only hardware support, or synthetic quality evidence into a higher maturity score.
+
 ## Mandatory reread points
 
-Reread the roadmap:
+Reread the roadmap and, for ML work, the ML maturity overlay:
 
 1. at the start of every agent session;
 2. before selecting the next major task;
 3. before any cross-repository integration or promotion;
-4. after any user instruction that changes ecosystem roles, invariants, or strategy;
-5. before opening or merging a PR that changes shared contracts, tensor representation, evidence semantics, or public behavior.
+4. after any user instruction that changes ecosystem roles, invariants, strategy, or ML maturity priorities;
+5. before opening or merging a PR that changes shared contracts, tensor representation, model/runtime behavior, evidence semantics, or public behavior.
 
 ## Ecosystem role
 
@@ -54,18 +69,19 @@ Cross-repository contracts are never assumed merely because code or concepts loo
 - optional hardware backends remain optional unless an explicit versioned contract changes that policy;
 - shared abstractions belong at the lowest correct reusable layer, not automatically in the largest repository;
 - required CI must be green on the exact PR head before merge;
-- missing roadmap, missing provenance, or missing required evidence causes fail-closed behavior for major decisions.
+- missing roadmap, missing ML maturity overlay when applicable, missing provenance, or missing required evidence causes fail-closed behavior for major decisions.
 
 ## Mandatory roadmap maintenance
 
-Update the off-main roadmap when:
+Update the off-main roadmap and the ML maturity overlay when applicable when:
 
-- a roadmap phase changes status;
+- a roadmap or ML maturity phase changes status;
 - a cross-repository contract is published, changed, or rejected;
 - a shared ownership boundary changes;
 - research work is promoted or rejected;
+- an audited ML gap is closed, regresses, or is re-scoped;
 - MSRV or major ecosystem compatibility policy changes.
 
-Do not merge the roadmap itself into the default branch unless the user explicitly requests it.
+Do not merge the roadmap or ML maturity overlay itself into the default branch unless the user explicitly requests it.
 
-This file is only the bootstrap pointer. The off-main roadmap is the persistent source of current agent strategy and ecosystem state.
+This file is only the bootstrap pointer. The off-main roadmap plus the ML maturity overlay are the persistent sources of current agent strategy and ML execution priorities.
