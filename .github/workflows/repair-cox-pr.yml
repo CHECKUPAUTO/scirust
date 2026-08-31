@@ -32,3 +32,5 @@ jobs:
           fi
           git commit -m 'style(stats): apply repository rustfmt'
           git push origin HEAD:fix/cox-numerical-scaling
+
+# Trigger the repair workflow after it exists on the branch.
