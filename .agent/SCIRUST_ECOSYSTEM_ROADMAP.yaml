@@ -1,0 +1,283 @@
+schema_version: 1
+kind: scirust_ecosystem_agent_roadmap
+status: active
+last_updated: "2026-08-31"
+repository: Memorithm/scirust
+intended_consumer: autonomous_coding_agent
+visibility_note: >-
+  This roadmap is intentionally kept off the default branch on an agent-oriented
+  branch. GitHub cannot make repository content visible only to an AI assistant.
+  Never store secrets, private keys, credentials, unpublished personal data, or
+  sensitive deployment information here.
+merge_policy: never_merge_this_file_to_default_branch_unless_user_explicitly_requests
+
+mission:
+  primary: >-
+    Evolve SciRust as the inspectable Rust-first scientific-computing, machine-
+    learning, tensor, simulation, numerical-method, and reusable scientific
+    primitive substrate of the Memorithm ecosystem.
+  ecosystem_goal: >-
+    Provide stable reusable computation, schemas, reference/oracle paths, and
+    deterministic interfaces that specialized products can consume without
+    forcing SciRust to absorb their product-specific control planes, execution
+    policies, optimization search engines, or deployment semantics.
+
+verified_current_facts:
+  - the_repository_is_an_active_multi_crate_Rust_workspace_with_more_than_one_hundred_crates
+  - root_package_version_is_currently_0_14_0
+  - declared_MSRV_is_Rust_1_89
+  - canonical_tensor_core_runtime_and_GPU_adapters_exist
+  - WGPU_and_CUDA_paths_are_opt_in_and_hardware_dependent
+  - deterministic_and_bitwise_claims_are_explicitly_scoped_to_documented_paths
+  - docs_TEST_PROTOCOL_md_and_docs_evidence_exist_for_acceptance_and_retained_evidence
+  - scirust_capsule_schema_and_provenance_primitives_exist_in_the_monorepo
+
+engineering_invariants:
+  - correctness_and_declared_semantics_dominate_optimization
+  - no_fabricated_performance_claims
+  - no_fabricated_scientific_novelty
+  - deterministic_claims_must_be_scoped_to_exact_code_path_target_features_toolchain_and_evidence
+  - hardware_backend_support_is_never_inferred_from_compilation_alone
+  - optimized_paths_require_reference_or_oracle_validation
+  - reusable_primitives_should_live_at_the_lowest_correct_shared_layer
+  - specialized_product_semantics_must_not_be_absorbed_into_SciRust_without_a_clear_shared_abstraction
+  - cross_repository_contracts_are_not_assumed_until_published_and_tested
+  - required_CI_must_be_green_on_the_exact_PR_head_before_merge
+
+ownership:
+  role: shared_scientific_and_computational_substrate
+  owns:
+    - reusable_scientific_and_numerical_primitives
+    - tensor_core_and_tensor_runtime_abstractions
+    - reference_and_oracle_implementations_for_shared_compute_paths
+    - reusable_autodiff_learning_solver_symbolic_simulation_and_domain_primitives
+    - shared_low_level_capsule_schema_and_provenance_primitives_already_defined_in_SciRust
+    - shared_representation_IR_and_storage_accounting_when_the_abstraction_is_general
+    - SciRust_specific_acceptance_protocols_and_internal_functional_evidence
+  does_not_own:
+    - ecosystem_control_plane_owned_by_scirust_hub
+    - evidence_dossier_normalization_and_verdict_layer_owned_by_SciRust_Verify
+    - SciCapsule_product_CLI_trust_policy_and_bounded_execution_semantics
+    - evolutionary_candidate_search_strategy_owned_by_Forge
+    - generic_elastic_resource_control_loop_owned_by_ElasticXxx
+    - NNIS_native_CUDA_model_runtime_internals
+    - FLAT_ATTENTION_specialized_attention_engine_ownership
+    - SLHAv2_compressed_KV_product_and_CCOs_policy_ownership
+    - product_specific_agent_harness_semantics_owned_by_SoulSystem_or_other_agent_products
+
+control_loop:
+  - OBSERVE_WORKSPACE_AND_PUBLIC_CONTRACTS
+  - IDENTIFY_SHARED_VS_PRODUCT_SPECIFIC_RESPONSIBILITY
+  - DEFINE_REFERENCE_ORACLE_AND_INVARIANTS
+  - IMPLEMENT_SMALLEST_SHARED_PRIMITIVE_OR_CONTRACT
+  - VALIDATE_PORTABLE_REFERENCE_PATH
+  - VALIDATE_OPT_IN_ACCELERATED_PATH_IF_RELEVANT
+  - RECORD_SCOPE_PROVENANCE_AND_LIMITATIONS
+  - PUBLISH_VERSIONED_CONTRACT
+  - VERIFY_DOWNSTREAM_CONSUMERS
+  - COMMIT_OR_ROLLBACK
+
+ecosystem_interfaces:
+  Memorithm/nonlocal-relativity-v2:
+    relationship: research_incubator_and_promotion_source_for_relativity_work
+    status: active_conceptual_relationship_contract_to_be_hardened
+    accept_only_when:
+      - exact_source_and_target_SHAs_are_recorded
+      - destination_already_equivalent_or_newer_code_is_checked
+      - scientific_category_and_limitations_are_preserved
+      - targeted_tests_and_SciRust_CI_are_green
+    must_not:
+      - bulk_sync_unrelated_workspace_content
+      - promote_phenomenological_results_as_established_physics
+  Memorithm/ElasticXxx:
+    relationship: generic_adaptive_resource_runtime_consumer_and_partner
+    status: active_integration_direction_contract_to_be_hardened
+    SciRust_provides:
+      - stable_tensor_and_representation_contracts
+      - capability_and_execution_surfaces_where_generalizable
+      - deterministic_reference_paths_for_validation
+    ElasticXxx_owns:
+      - observe_forecast_plan_validate_act_verify_commit_or_rollback_runtime_semantics
+      - generic_resource_invariants_objectives_and_transition_control
+  Memorithm/SLHAv2:
+    relationship: specialized_KV_and_attention_memory_consumer_reference_environment
+    status: active_ecosystem_product_no_generic_ownership_transfer
+    SciRust_may_provide:
+      - reusable_math_tensor_quantization_and_oracle_primitives
+    SLHAv2_owns:
+      - compressed_KV_tile_semantics
+      - product_specific_KV_cache_mechanisms_and_real_model_integration
+  Memorithm/FLAT-ATTENTION:
+    relationship: specialized_attention_engine_with_SciRust_integration_target
+    status: active_ecosystem_product
+    contract_direction:
+      - SciRust_exposes_tensor_reference_and_backend_seams
+      - FLAT_ATTENTION_exposes_versioned_attention_execution_capabilities
+      - optimized_FLAT_results_are_validated_against_SciRust_or_equivalent_deterministic_oracles
+  Memorithm/NVIDIA-Native-Inference-Stack:
+    relationship: specialized_native_NVIDIA_inference_runtime
+    status: active_ecosystem_product
+    contract_direction:
+      - share_only_backend_neutral_tensor_representation_or_model_contracts_when_stable
+      - do_not_move_NNIS_CUDA_JIT_kernel_or_model_runtime_internals_into_SciRust_without_a_general_abstraction
+  Memorithm/forge:
+    relationship: execution_driven_candidate_search_engine
+    status: active_ecosystem_product
+    contract_direction:
+      - SciRust_may_supply_domains_or_oracles
+      - Forge_may_return_candidates_measurements_and_search_provenance
+      - executed_correctness_evidence_remains_authoritative
+      - SciRust_does_not_absorb_Forge_search_strategy
+  Memorithm/SciRust-Verify:
+    relationship: ecosystem_verification_evidence_and_verdict_layer
+    status: active_ecosystem_product
+    contract_direction:
+      - SciRust_owns_internal_acceptance_semantics
+      - SciRust_Verify_ingests_or_normalizes_completed_evidence_without_flattening_scoped_verdicts
+      - future_shared_evidence_envelopes_must_be_versioned
+  Memorithm/SciCapsule:
+    relationship: portable_reproducible_execution_capsule_product
+    status: active_ecosystem_product
+    contract_direction:
+      - SciRust_retains_reusable_scicap_schema_and_low_level_primitives
+      - SciCapsule_owns_user_facing_pack_verify_trust_policy_and_bounded_execution_product_semantics
+  Memorithm/scirust-hub:
+    relationship: ecosystem_registry_orchestration_provenance_control_plane
+    status: active_ecosystem_product
+    contract_direction:
+      - Hub_registers_and_orchestrates_SciRust_capabilities_through_published_component_contracts
+      - Hub_does_not_absorb_SciRust_scientific_or_tensor_logic
+      - SciRust_does_not_reimplement_Hub_registry_or_workflow_control_plane
+
+roadmap:
+  - id: SR0
+    name: Ecosystem boundary and public-contract inventory
+    status: active
+    goals:
+      - inventory_shared_public_surfaces_used_or_needed_by_ecosystem_repositories
+      - classify_each_surface_as_SciRust_owned_shared_or_product_specific
+      - identify_duplicate_or_diverged_implementations_before_new_cross_repo_work
+      - record_MSRV_feature_and_semantic_compatibility_requirements
+    exit_criteria:
+      - cross_repo_work_starts_from_verified_contracts_not_repository_assumptions
+
+  - id: SR1
+    name: Canonical tensor and representation substrate
+    status: active
+    goals:
+      - harden_tensor_core_runtime_and_representation_IR_as_general_shared_contracts
+      - preserve_exact_storage_accounting_and_versioned_representation_metadata
+      - support_heterogeneous_representation_without_embedding_product_specific_policy
+      - keep_CPU_reference_paths_available_for_validation
+      - expose_backend_capability_contracts_without_making_optional_backends_mandatory
+    dependencies:
+      - relevant_existing_tensor_IR_and_representation_work
+    downstream_targets:
+      - ElasticXxx
+      - FLAT_ATTENTION
+      - NNIS_when_backend_neutral_contracts_are_justified
+
+  - id: SR2
+    name: Verification and evidence interoperability
+    status: active
+    goals:
+      - preserve_SciRust_internal_test_protocol_as_authoritative_for_its_own_functional_semantics
+      - publish_machine_readable_evidence_boundaries_where_missing
+      - integrate_with_SciRust_Verify_through_versioned_ingestion_not_semantic_duplication
+      - keep_hardware_and_cross_platform_claim_scopes_explicit
+    exit_criteria:
+      - representative_CPU_GPU_and_scientific_evidence_can_be_ingested_without_claim_inflation
+
+  - id: SR3
+    name: Portable artifact and capsule interoperability
+    status: active
+    goals:
+      - keep_scicap_schema_and_low_level_deterministic_container_primitives_stable_and_versioned
+      - avoid_moving_SciCapsule_product_trust_or_execution_policy_into_the_monorepo_unnecessarily
+      - validate_SciCapsule_against_shared_schema_changes
+    downstream_targets:
+      - SciCapsule
+      - SciRust_Hub_through_SciCapsule_contracts
+
+  - id: SR4
+    name: Ecosystem execution contracts
+    status: pending_after_SR0_SR2
+    goals:
+      - publish_minimal_process_or_library_contracts_for_selected_SciRust_capabilities
+      - allow_SciRust_Hub_registration_without_Hub_specific_logic_in_core_crates
+      - ensure_artifact_identity_and_provenance_fields_are_compatible_with_Verify_and_Hub
+      - avoid_one_giant_ecosystem_protocol_when_smaller_versioned_contracts_suffice
+
+  - id: SR5
+    name: Specialized acceleration integration without ownership collapse
+    status: active
+    goals:
+      - integrate_FLAT_ATTENTION_through_explicit_attention_capability_boundaries
+      - integrate_NNIS_only_through_backend_neutral_or_explicit_adapter_contracts
+      - use_Forge_for_candidate_search_without_moving_search_semantics_into_SciRust
+      - keep_reference_oracles_independent_of_the_optimized_candidate
+    exit_criteria:
+      - at_least_one_specialized_product_can_be_swapped_or_disabled_without_breaking_SciRust_reference_semantics
+
+  - id: SR6
+    name: Elastic resource integration
+    status: pending_after_SR1_and_Elastic_runtime_contracts
+    goals:
+      - expose_resource_capabilities_and_admissible_representation_execution_choices_to_ElasticXxx
+      - keep_invariants_owned_by_the_calling_scientific_or_application_layer
+      - require_PLAN_VALIDATE_ACT_VERIFY_COMMIT_or_ROLLBACK_for_runtime_adaptation
+      - never_turn_SciRust_tensor_semantics_into_implicit_optimization_objectives
+
+  - id: SR7
+    name: Research incubation and promotion pipeline
+    status: active
+    goals:
+      - define_repeatable_promotion_flow_from_nonlocal_relativitiy_v2_and_future_research_repositories
+      - require_exact_source_target_lineage_scientific_category_tests_and_limitations
+      - retain_negative_and_null_results_when_they_change_future_research_choices
+      - keep_research_repositories_free_to_experiment_without_silently_mutating_SciRust_public_semantics
+
+  - id: SR8
+    name: Productization and stable releases
+    status: long_term
+    goals:
+      - reduce_unnecessary_public_API_churn
+      - document_semver_and_MSRV_policy_for_shared_ecosystem_contracts
+      - qualify_release_candidates_with_reproducible_evidence
+      - publish_compatibility_matrix_for_key_ecosystem_consumers
+      - avoid_claiming_production_or_regulatory_certification_without_corresponding_process_and_evidence
+
+cross_repository_change_protocol:
+  before_editing_another_repository:
+    - read_that_repository_AGENTS_md
+    - read_that_repository_current_off_main_agent_roadmap
+    - verify_ownership_boundary_and_contract_status
+    - record_exact_source_and_target_SHAs
+  before_adding_a_shared_dependency_or_contract:
+    - prove_the_abstraction_is_shared_not_product_specific
+    - define_versioning_and_failure_behavior
+    - add_reference_oracle_or_independent_validation_path
+    - document_feature_and_MSRV_effect
+  before_merge:
+    - re_read_relevant_roadmaps
+    - verify_exact_PR_head_SHA
+    - require_all_required_CI_green_on_that_head
+    - fail_closed_if_required_evidence_or_contract_state_is_missing
+
+agent_operating_protocol:
+  must_read_this_file:
+    - at_start_of_every_agent_session_on_this_repository
+    - before_selecting_the_next_major_task
+    - before_any_cross_repository_integration_or_promotion
+    - after_any_user_change_to_ecosystem_roles_invariants_or_strategy
+    - before_opening_or_merging_a_PR_that_changes_shared_contracts_tensor_representation_or_public_semantics
+  must_update_this_file:
+    - when_a_roadmap_phase_changes_status
+    - when_a_cross_repository_contract_is_published_changed_or_rejected
+    - when_a_new_shared_ownership_boundary_is_decided
+    - when_a_research_slice_is_promoted_or_rejected
+    - when_MSRV_or_major_compatibility_policy_changes
+  fail_closed: >-
+    If this roadmap cannot be fetched or read, an autonomous agent must not make
+    a major architecture, shared-contract, cross-repository promotion,
+    representation-format, or merge decision. Read-only diagnosis is allowed.
