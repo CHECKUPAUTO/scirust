@@ -1,0 +1,189 @@
+schema_version: 1
+kind: memorithm_ml_maturity_program
+status: active
+last_updated: "2026-08-31"
+repository: Memorithm/scirust
+objective: >-
+  Raise every SciRust-owned machine-learning maturity dimension to evidence-backed
+  5/5 without inflating scores, duplicating product ownership, or trading
+  correctness for breadth. A 5/5 rating is an exit criterion, never a marketing
+  label.
+
+score_policy:
+  five_of_five_requires:
+    - production_grade_public_contract_for_the_dimension
+    - end_to_end_executable_path_not_only_unit_or_proxy_tests
+    - independent_reference_or_oracle_validation_where_numerical
+    - representative_real_workload_evidence
+    - reproducible_machine_readable_measurements_when_performance_is_relevant
+    - failure_modes_and_limitations_documented
+    - exact_head_required_CI_green_before_merge
+    - downstream_contract_validation_when_cross_repository
+  forbidden:
+    - scoring_planned_work_as_implemented
+    - scoring_synthetic_proxy_results_as_real_model_evidence
+    - inferring_GPU_or_distributed_support_from_compilation_only
+    - claiming_parity_with_PyTorch_Burn_or_Candle_without_same_workload_measurement
+
+baseline_from_2026_08_31_ml_audit:
+  scientific_computing_plus_ml: 5
+  determinism_reproducibility: 5
+  verification_provenance_ecosystem: 5
+  research_algorithmics_ecosystem: 5
+  classical_ml_statistics: 4.5
+  autodiff_deep_learning_cpu: 4
+  experimental_ml_architectures: 4.5
+  quantization_representation: 4
+  native_nvidia_inference_ecosystem: 3.5
+  general_gpu_backend: 2.5
+  gpu_training: 2
+  mixed_precision_training: 1.5
+  distributed_training: 1
+  model_interoperability: 2
+  large_scale_data_pipeline: 2
+  llm_serving_ecosystem: 2
+  cross_component_coherence: 2.5
+
+ownership:
+  SciRust_owns:
+    - canonical_backend_neutral_Tensor_Device_DType_and_Model_contracts
+    - reusable_autodiff_training_and_optimizer_semantics
+    - general_model_IO_contracts_and_reference_import_export_paths
+    - general_data_pipeline_and_distributed_training_abstractions
+    - compiler_IR_graph_fusion_and_backend_neutral_execution_planning
+    - portable_reference_and_oracle_paths
+    - common_ML_qualification_workloads_and_result_schema_producers
+  partners_own:
+    NNIS: native_NVIDIA_inference_runtime_and_CUDA_kernel_internals
+    FLAT_ATTENTION: specialized_attention_execution_engine
+    SLHAv2: compressed_KV_product_and_real_model_KV_integration
+    TurboQuant: TurboQuant_codec_semantics_and_format
+    ElasticXxx: adaptive_resource_control_loop_and_policy_execution
+    Forge: execution_driven_candidate_search
+    Hub: ecosystem_orchestration_control_plane
+    SciRust_Verify: evidence_normalization_and_scoped_verdicts
+    SciCapsule: portable_capsule_product_trust_and_bounded_execution
+
+priority_program:
+  - id: ML0
+    name: Canonical Tensor Device DType contract
+    priority: P0
+    goals:
+      - one_backend_neutral_tensor_identity_and_shape_layout_contract
+      - explicit_CPU_WGPU_CUDA_device_identity_and_transfer_semantics
+      - lazy_or_explicit_device_residency_without_hidden_CPU_roundtrips
+      - versioned_dtype_support_for_f32_bf16_f16_and_quantized_representations
+      - asynchronous_transfer_and_stream_or_queue_boundary_where_backend_supports_it
+    exit_criteria:
+      - representative_multi_op_forward_path_stays_device_resident
+      - same_program_executes_on_CPU_and_at_least_one_real_GPU_backend
+      - transfer_and_fallback_behavior_is_observable_and_tested
+
+  - id: ML1
+    name: Integrated mixed precision training
+    priority: P0
+    goals:
+      - converge_duplicate_AMP_implementations
+      - integrate_autocast_master_weights_loss_scaling_overflow_detection_and_optimizer_step
+      - support_bf16_and_f16_through_the_canonical_dtype_contract
+    exit_criteria:
+      - real_training_loop_converges_under_mixed_precision
+      - numerical_quality_is_compared_to_f32_reference
+      - overflow_and_recovery_paths_are_tested
+
+  - id: ML2
+    name: Distributed training
+    priority: P0
+    goals:
+      - replace_thread_only_collectives_as_the_highest_distributed_capability
+      - add_versioned_multi_process_collective_backend_contract
+      - support_multi_GPU_data_parallel_training
+      - add_multi_host_transport_backend_without_baking_transport_into_autodiff
+      - add_parameter_gradient_and_optimizer_state_sharding_after_DDP_is_stable
+    exit_criteria:
+      - same_training_job_runs_single_device_multi_device_and_multi_host
+      - result_quality_and_failure_semantics_are_evidence_backed
+      - restart_timeout_rank_failure_and_collective_mismatch_are_fail_closed
+
+  - id: ML3
+    name: Real model interoperability
+    priority: P0
+    goals:
+      - standardize_Safetensors_as_a_first_class_weight_container
+      - add_Hugging_Face_style_model_config_and_tokenizer_adapters_without_vendor_lock_in
+      - implement_real_ONNX_protobuf_import_export_for_supported_operator_sets
+      - preserve_unknown_or_unsupported_ops_as_explicit_errors_not_silent_simplification
+      - support_sharded_and_large_weight_loading_without_JSON_materialization
+    exit_criteria:
+      - at_least_one_external_vision_model_and_one_external_decoder_model_roundtrip_or_import_with_parity
+      - model_identity_config_tokenizer_weights_and_provenance_are_bound_together
+
+  - id: ML4
+    name: Graph compiler fusion and backend lowering
+    priority: P0
+    goals:
+      - connect_tensor_IR_to_executable_graph_capture
+      - add_shape_dtype_layout_and_alias_analysis
+      - implement_safe_fusion_and_memory_planning
+      - lower_to_CPU_WGPU_and_explicit_NNIS_adapter_targets
+      - allow_FLAT_attention_as_a_versioned_specialized_lowering
+      - make_ElasticXxx_planning_advisory_or_actuating_only_through_explicit_contracts
+    exit_criteria:
+      - representative_model_subgraph_compiles_and_executes_without_semantic_drift
+      - unfused_reference_and_fused_outputs_are_oracle_checked
+      - compilation_cache_identity_includes_graph_backend_dtype_and_relevant_hardware_capabilities
+
+  - id: ML5
+    name: Large scale data pipeline
+    priority: P1
+    goals:
+      - make_prefetch_real_not_config_only
+      - add_parallel_workers_bounded_queues_and_backpressure
+      - add_distributed_sampler_and_epoch_seed_contract
+      - add_memory_mapped_or_streaming_shards_and_pinned_host_batches_where_supported
+      - preserve_deterministic_replay_mode
+    exit_criteria:
+      - benchmark_demonstrates_compute_data_overlap_on_real_training_workload
+      - no_unbounded_buffer_growth
+      - distributed_sampling_has_no_silent_duplication_or_omission
+
+  - id: ML6
+    name: Unified model training and inference contracts
+    priority: P1
+    goals:
+      - one_Model_parameter_state_checkpoint_contract_across_small_and_large_models
+      - remove_JSON_only_checkpoint_bottleneck_for_large_models
+      - expose_prefill_decode_and_training_surfaces_without_forcing_one_runtime
+      - enable_NNIS_FLAT_SLHA_and_TurboQuant_adapters_through_versioned_boundaries
+    exit_criteria:
+      - one_real_decoder_model_can_be_loaded_evaluated_and_routed_to_specialized_inference_components
+      - one_training_checkpoint_can_resume_with_optimizer_and_rng_state_exactly_within_declared_scope
+
+  - id: ML7
+    name: Ecosystem ML qualification suite
+    priority: P0
+    goals:
+      - define_same_workload_comparison_harness_for_SciRust_Burn_Candle_and_PyTorch_where_available
+      - measure_forward_backward_throughput_memory_load_time_compile_time_and_quality
+      - include_x86_64_ARM64_and_NVIDIA_targets_when_hardware_is_available
+      - emit_versioned_machine_readable_results_for_SciRust_Verify
+    exit_criteria:
+      - no_5_of_5_performance_or_maturity_claim_without_reproducible_evidence
+      - regressions_are_detectable_across_commits_and_hardware_scopes
+
+execution_order:
+  - ML0
+  - ML3
+  - ML1
+  - ML4
+  - ML2
+  - ML5
+  - ML6
+  - ML7
+
+completion_definition: >-
+  SciRust reaches evidence-backed 5/5 across its ML responsibilities only when a
+  user can load real external models, train with integrated mixed precision,
+  scale training across processes/devices/hosts, execute device-resident graphs
+  through portable or specialized backends, stream data at scale, and reproduce
+  the resulting quality/performance evidence through ecosystem verification.
