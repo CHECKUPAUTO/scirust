@@ -30,11 +30,14 @@ impl CoxObservation {
     ///
     /// At least one covariate is required, and every covariate must be finite.
     pub fn new(survival: RightCensoredObservation, covariates: Vec<f64>) -> Result<Self, CoxError> {
-        if covariates.is_empty() {
+        if covariates.is_empty()
+        {
             return Err(CoxError::EmptyCovariates);
         }
-        for (index, &value) in covariates.iter().enumerate() {
-            if !value.is_finite() {
+        for (index, &value) in covariates.iter().enumerate()
+        {
+            if !value.is_finite()
+            {
                 return Err(CoxError::NonFiniteCovariate { index, value });
             }
         }
@@ -145,7 +148,8 @@ pub enum CoxError {
 
 impl fmt::Display for CoxError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self
+        {
             Self::EmptySample => write!(f, "Cox regression sample must not be empty"),
             Self::EmptyCovariates => write!(f, "Cox regression requires at least one covariate"),
             Self::NoEvents => write!(f, "Cox regression requires at least one observed event"),
@@ -157,9 +161,10 @@ impl fmt::Display for CoxError {
                 f,
                 "Cox covariate dimension mismatch at row {row}: expected {expected}, got {actual}"
             ),
-            Self::NonFiniteCovariate { index, value } => {
+            Self::NonFiniteCovariate { index, value } =>
+            {
                 write!(f, "Cox covariate {index} must be finite, got {value}")
-            }
+            },
             Self::InvalidOptions => write!(f, "invalid Cox fitting options"),
             Self::SingularInformation => write!(f, "Cox observed information matrix is singular"),
             Self::LineSearchFailed => write!(f, "Cox Newton line search failed"),
@@ -189,7 +194,8 @@ fn max_abs(values: &[f64]) -> f64 {
 }
 
 fn validate_data(data: &[CoxObservation], options: CoxFitOptions) -> Result<usize, CoxError> {
-    if data.is_empty() {
+    if data.is_empty()
+    {
         return Err(CoxError::EmptySample);
     }
     if options.max_iterations == 0
@@ -203,12 +209,15 @@ fn validate_data(data: &[CoxObservation], options: CoxFitOptions) -> Result<usiz
     }
 
     let dimension = data[0].covariates.len();
-    if dimension == 0 {
+    if dimension == 0
+    {
         return Err(CoxError::EmptyCovariates);
     }
     let mut any_event = false;
-    for (row, observation) in data.iter().enumerate() {
-        if observation.covariates.len() != dimension {
+    for (row, observation) in data.iter().enumerate()
+    {
+        if observation.covariates.len() != dimension
+        {
             return Err(CoxError::CovariateDimensionMismatch {
                 row,
                 expected: dimension,
@@ -216,13 +225,16 @@ fn validate_data(data: &[CoxObservation], options: CoxFitOptions) -> Result<usiz
             });
         }
         any_event |= observation.survival.event_observed();
-        for (index, &value) in observation.covariates.iter().enumerate() {
-            if !value.is_finite() {
+        for (index, &value) in observation.covariates.iter().enumerate()
+        {
+            if !value.is_finite()
+            {
                 return Err(CoxError::NonFiniteCovariate { index, value });
             }
         }
     }
-    if !any_event {
+    if !any_event
+    {
         return Err(CoxError::NoEvents);
     }
     Ok(dimension)
@@ -258,9 +270,11 @@ fn partial_likelihood(
     let mut score = vec![0.0; p];
     let mut information = vec![0.0; p * p];
 
-    for time in event_times {
+    for time in event_times
+    {
         let mut max_eta = f64::NEG_INFINITY;
-        for row in data.iter().filter(|row| row.survival.time() >= time) {
+        for row in data.iter().filter(|row| row.survival.time() >= time)
+        {
             max_eta = max_eta.max(dot(beta, &row.covariates));
         }
 
@@ -274,28 +288,35 @@ fn partial_likelihood(
         let mut event_eta = 0.0;
         let mut event_count = 0usize;
 
-        for row in data {
-            if row.survival.time() < time {
+        for row in data
+        {
+            if row.survival.time() < time
+            {
                 continue;
             }
             let is_event = row.survival.time() == time && row.survival.event_observed();
             let eta = dot(beta, &row.covariates);
             let weight = (eta - max_eta).exp();
             risk0 += weight;
-            for j in 0..p {
+            for j in 0..p
+            {
                 risk1[j] += weight * row.covariates[j];
-                for k in 0..p {
+                for k in 0..p
+                {
                     risk2[j * p + k] += weight * row.covariates[j] * row.covariates[k];
                 }
             }
-            if is_event {
+            if is_event
+            {
                 event_count += 1;
                 event_eta += eta;
                 tied0 += weight;
-                for j in 0..p {
+                for j in 0..p
+                {
                     event_x[j] += row.covariates[j];
                     tied1[j] += weight * row.covariates[j];
-                    for k in 0..p {
+                    for k in 0..p
+                    {
                         tied2[j * p + k] += weight * row.covariates[j] * row.covariates[k];
                     }
                 }
@@ -303,12 +324,15 @@ fn partial_likelihood(
         }
 
         log_likelihood += event_eta;
-        for j in 0..p {
+        for j in 0..p
+        {
             score[j] += event_x[j];
         }
 
-        for tied_index in 0..event_count {
-            let fraction = match tie_method {
+        for tied_index in 0..event_count
+        {
+            let fraction = match tie_method
+            {
                 CoxTieMethod::Breslow => 0.0,
                 CoxTieMethod::Efron => tied_index as f64 / event_count as f64,
             };
@@ -316,13 +340,16 @@ fn partial_likelihood(
             log_likelihood -= max_eta + denominator.ln();
 
             let mut mean = vec![0.0; p];
-            for j in 0..p {
+            for j in 0..p
+            {
                 let first = risk1[j] - fraction * tied1[j];
                 mean[j] = first / denominator;
                 score[j] -= mean[j];
             }
-            for j in 0..p {
-                for k in 0..p {
+            for j in 0..p
+            {
+                for k in 0..p
+                {
                     let second = risk2[j * p + k] - fraction * tied2[j * p + k];
                     information[j * p + k] += second / denominator - mean[j] * mean[k];
                 }
@@ -346,39 +373,49 @@ fn solve_linear_system(
     let mut a = matrix.to_vec();
     let mut b = rhs.to_vec();
     let scale = a.iter().fold(0.0_f64, |m, &v| m.max(v.abs()));
-    if !scale.is_finite() || scale == 0.0 {
+    if !scale.is_finite() || scale == 0.0
+    {
         return Err(CoxError::SingularInformation);
     }
     let threshold = singularity_tolerance * scale;
 
-    for column in 0..dimension {
+    for column in 0..dimension
+    {
         let mut pivot = column;
         let mut pivot_abs = a[column * dimension + column].abs();
-        for row in (column + 1)..dimension {
+        for row in (column + 1)..dimension
+        {
             let candidate = a[row * dimension + column].abs();
-            if candidate > pivot_abs {
+            if candidate > pivot_abs
+            {
                 pivot = row;
                 pivot_abs = candidate;
             }
         }
-        if !pivot_abs.is_finite() || pivot_abs <= threshold {
+        if !pivot_abs.is_finite() || pivot_abs <= threshold
+        {
             return Err(CoxError::SingularInformation);
         }
-        if pivot != column {
-            for k in 0..dimension {
+        if pivot != column
+        {
+            for k in 0..dimension
+            {
                 a.swap(column * dimension + k, pivot * dimension + k);
             }
             b.swap(column, pivot);
         }
 
         let diag = a[column * dimension + column];
-        for row in (column + 1)..dimension {
+        for row in (column + 1)..dimension
+        {
             let factor = a[row * dimension + column] / diag;
-            if factor == 0.0 {
+            if factor == 0.0
+            {
                 continue;
             }
             a[row * dimension + column] = 0.0;
-            for k in (column + 1)..dimension {
+            for k in (column + 1)..dimension
+            {
                 a[row * dimension + k] -= factor * a[column * dimension + k];
             }
             b[row] -= factor * b[column];
@@ -386,13 +423,16 @@ fn solve_linear_system(
     }
 
     let mut x = vec![0.0; dimension];
-    for row in (0..dimension).rev() {
+    for row in (0..dimension).rev()
+    {
         let mut value = b[row];
-        for k in (row + 1)..dimension {
+        for k in (row + 1)..dimension
+        {
             value -= a[row * dimension + k] * x[k];
         }
         let diag = a[row * dimension + row];
-        if !diag.is_finite() || diag.abs() <= threshold {
+        if !diag.is_finite() || diag.abs() <= threshold
+        {
             return Err(CoxError::SingularInformation);
         }
         x[row] = value / diag;
@@ -406,11 +446,13 @@ fn invert_matrix(
     singularity_tolerance: f64,
 ) -> Result<Vec<f64>, CoxError> {
     let mut inverse = vec![0.0; dimension * dimension];
-    for column in 0..dimension {
+    for column in 0..dimension
+    {
         let mut unit = vec![0.0; dimension];
         unit[column] = 1.0;
         let solution = solve_linear_system(matrix, &unit, dimension, singularity_tolerance)?;
-        for row in 0..dimension {
+        for row in 0..dimension
+        {
             inverse[row * dimension + column] = solution[row];
         }
     }
@@ -435,7 +477,8 @@ pub fn cox_proportional_hazards(
     let mut iterations = 0usize;
     let mut converged = max_abs(&current.score) <= options.tolerance;
 
-    while !converged && iterations < options.max_iterations {
+    while !converged && iterations < options.max_iterations
+    {
         let direction = solve_linear_system(
             &current.information,
             &current.score,
@@ -444,7 +487,8 @@ pub fn cox_proportional_hazards(
         )?;
         let mut accepted = None;
         let mut step_scale = 1.0;
-        for _ in 0..options.max_step_halvings {
+        for _ in 0..options.max_step_halvings
+        {
             let candidate_beta: Vec<f64> = beta
                 .iter()
                 .zip(&direction)
@@ -459,7 +503,9 @@ pub fn cox_proportional_hazards(
             }
             step_scale *= 0.5;
         }
-        let Some((candidate_beta, candidate, accepted_scale)) = accepted else {
+        let Some((candidate_beta, candidate, accepted_scale)) = accepted
+        else
+        {
             return Err(CoxError::LineSearchFailed);
         };
 
@@ -476,9 +522,11 @@ pub fn cox_proportional_hazards(
         options.singularity_tolerance,
     )?;
     let mut standard_errors = Vec::with_capacity(dimension);
-    for index in 0..dimension {
+    for index in 0..dimension
+    {
         let variance = covariance[index * dimension + index];
-        if !variance.is_finite() || variance < 0.0 {
+        if !variance.is_finite() || variance < 0.0
+        {
             return Err(CoxError::InvalidVariance {
                 index,
                 value: variance,
@@ -533,8 +581,7 @@ mod tests {
 
     #[test]
     fn hand_solved_log_two_coefficient() {
-        let fit =
-            cox_proportional_hazards(&base_data(1.0, 0.0), CoxFitOptions::default()).unwrap();
+        let fit = cox_proportional_hazards(&base_data(1.0, 0.0), CoxFitOptions::default()).unwrap();
         assert!(fit.converged);
         close(fit.coefficients[0], 2.0_f64.ln(), 1.0e-10);
         close(fit.standard_errors[0], 1.5_f64.sqrt(), 1.0e-10);
@@ -542,8 +589,7 @@ mod tests {
 
     #[test]
     fn large_common_offset_preserves_fit() {
-        let a =
-            cox_proportional_hazards(&base_data(1.0, 0.0), CoxFitOptions::default()).unwrap();
+        let a = cox_proportional_hazards(&base_data(1.0, 0.0), CoxFitOptions::default()).unwrap();
         let b = cox_proportional_hazards(&base_data(1.0, 1.0e8), CoxFitOptions::default()).unwrap();
         close(a.coefficients[0], b.coefficients[0], 1.0e-10);
         close(a.standard_errors[0], b.standard_errors[0], 1.0e-10);
@@ -587,11 +633,7 @@ mod tests {
         let efron = cox_proportional_hazards(&data, CoxFitOptions::default()).unwrap();
         close(breslow.coefficients[0], 0.0, 1.0e-15);
         close(efron.coefficients[0], 0.0, 1.0e-15);
-        close(
-            breslow.log_partial_likelihood,
-            -2.0 * 4.0_f64.ln(),
-            2.0e-15,
-        );
+        close(breslow.log_partial_likelihood, -2.0 * 4.0_f64.ln(), 2.0e-15);
         close(efron.log_partial_likelihood, -12.0_f64.ln(), 2.0e-15);
     }
 
@@ -641,10 +683,6 @@ mod tests {
         let b = cox_proportional_hazards(&data, CoxFitOptions::default()).unwrap();
         close(a.coefficients[0], b.coefficients[0], 2.0e-9);
         close(a.standard_errors[0], b.standard_errors[0], 1.0e-9);
-        close(
-            a.log_partial_likelihood,
-            b.log_partial_likelihood,
-            4.0e-15,
-        );
+        close(a.log_partial_likelihood, b.log_partial_likelihood, 4.0e-15);
     }
 }
