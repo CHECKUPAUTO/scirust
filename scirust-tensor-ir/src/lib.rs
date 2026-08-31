@@ -15,6 +15,7 @@ mod graph;
 mod ids;
 mod operation;
 mod optimize;
+mod physical;
 mod representation;
 mod shard;
 mod verify;
@@ -31,6 +32,12 @@ pub use ids::{ConstantId, NodeId};
 pub use operation::{Operation, Scalar};
 pub use optimize::{
     OptimizationConfig, OptimizationError, OptimizationStats, OptimizedGraph, optimize_graph,
+};
+pub use physical::{
+    ContentIdentity, EffectiveBitsRate, LayoutIdentity, MaterializationClass,
+    PhysicalAccountingError, PhysicalAccountingScope, PhysicalSegment, PhysicalSegmentId,
+    PhysicalSegmentReference, PhysicalSegmentRole, ReconstructionRole, ResidentMaterialization,
+    SegmentLifetime, SegmentUse,
 };
 pub use representation::{
     PrimitiveRepresentation, Rebinding, RepresentationComponent, RepresentationError,
