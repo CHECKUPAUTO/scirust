@@ -107,7 +107,7 @@ pub struct TransferRequest {
 
 impl TransferRequest {
     /// Construct a transfer request with explicit residency, dtype and ordering.
-    pub const fn new(
+    pub fn new(
         source: TensorResidency,
         destination: TensorResidency,
         dtype: DType,
