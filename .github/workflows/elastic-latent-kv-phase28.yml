@@ -113,7 +113,7 @@ jobs:
       SCIRUST_RESIDENT_BENCH_TOP_KS: "50"
       SCIRUST_RESIDENT_BENCH_REPEATS: "7"
       SCIRUST_RESIDENT_BENCH_WARMUP: "3"
-      SCIRUST_THOR_GPU_LOCK: /tmp/scirust-thor-gpu.lock
+      SCIRUST_THOR_GPU_LOCK: ${{ runner.temp }}/scirust-thor-gpu.lock
       CARGO_INCREMENTAL: "0"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
