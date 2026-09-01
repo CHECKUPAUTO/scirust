@@ -28,7 +28,8 @@ pub enum TensorResidency {
 impl TensorResidency {
     /// Memory-space category represented by this residency.
     pub const fn memory_space(self) -> MemorySpace {
-        match self {
+        match self
+        {
             Self::Host => MemorySpace::Host,
             Self::HostPinned => MemorySpace::HostPinned,
             Self::Device(_) => MemorySpace::Device,
@@ -38,14 +39,16 @@ impl TensorResidency {
 
     /// Device identity, when this residency is associated with a device.
     pub const fn device(self) -> Option<DeviceId> {
-        match self {
+        match self
+        {
             Self::Host | Self::HostPinned => None,
             Self::Device(device) | Self::Unified(device) => Some(device),
         }
     }
 
     fn canonical_record(self) -> String {
-        match self {
+        match self
+        {
             Self::Host => String::from("host"),
             Self::HostPinned => String::from("host-pinned"),
             Self::Device(device) => format!(
@@ -78,7 +81,8 @@ pub enum TransferMode {
 impl TransferMode {
     /// Stream associated with an asynchronous transfer.
     pub const fn stream(self) -> Option<StreamId> {
-        match self {
+        match self
+        {
             Self::Synchronous => None,
             Self::Asynchronous { stream } => Some(stream),
         }
@@ -114,7 +118,8 @@ impl TransferRequest {
         byte_len: usize,
         mode: TransferMode,
     ) -> Result<Self, TransferRequestError> {
-        if source == destination {
+        if source == destination
+        {
             return Err(TransferRequestError::SameResidency { residency: source });
         }
 
@@ -155,7 +160,8 @@ impl TransferRequest {
     /// Stable record for provenance and cross-backend diagnostics.
     #[must_use]
     pub fn canonical_record(self) -> String {
-        let stream = match self.mode {
+        let stream = match self.mode
+        {
             TransferMode::Synchronous => String::from("none"),
             TransferMode::Asynchronous { stream } => stream.get().to_string(),
         };
@@ -182,7 +188,8 @@ pub enum TransferRequestError {
 
 impl core::fmt::Display for TransferRequestError {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
+        match self
+        {
             Self::SameResidency { residency } => write!(
                 formatter,
                 "transfer source and destination are identical: {residency:?}"
@@ -195,14 +202,16 @@ impl core::fmt::Display for TransferRequestError {
 impl std::error::Error for TransferRequestError {}
 
 const fn mode_name(mode: TransferMode) -> &'static str {
-    match mode {
+    match mode
+    {
         TransferMode::Synchronous => "sync",
         TransferMode::Asynchronous { .. } => "async",
     }
 }
 
 const fn dtype_name(dtype: DType) -> &'static str {
-    match dtype {
+    match dtype
+    {
         DType::Bool => "bool",
         DType::U8 => "u8",
         DType::I8 => "i8",
@@ -220,7 +229,8 @@ const fn dtype_name(dtype: DType) -> &'static str {
 }
 
 const fn device_kind_name(kind: DeviceKind) -> &'static str {
-    match kind {
+    match kind
+    {
         DeviceKind::Reference => "reference",
         DeviceKind::Cpu => "cpu",
         DeviceKind::Wgpu => "wgpu",
