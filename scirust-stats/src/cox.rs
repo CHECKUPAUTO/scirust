@@ -240,8 +240,16 @@ fn validate_data(data: &[CoxObservation], options: CoxFitOptions) -> Result<usiz
     Ok(dimension)
 }
 
+const NORMALIZATION_LOWER_BOUND: f64 = 1.0e-4;
+const NORMALIZATION_UPPER_BOUND: f64 = 1.0e4;
+const CENTERING_RATIO: f64 = 1.0e6;
+
 fn scaled_copy(data: &[CoxObservation], dimension: usize) -> (Vec<CoxObservation>, Vec<f64>) {
     let origin = &data[0].covariates;
+    let largest_input = data
+        .iter()
+        .flat_map(|row| row.covariates.iter())
+        .fold(0.0_f64, |maximum, &value| maximum.max(value.abs()));
     let centered: Vec<CoxObservation> = data
         .iter()
         .map(|row| CoxObservation {
@@ -260,6 +268,17 @@ fn scaled_copy(data: &[CoxObservation], dimension: usize) -> (Vec<CoxObservation
             *scale = (*scale).max(value.abs());
         }
     }
+    let largest_centered = scales.iter().copied().fold(0.0_f64, f64::max);
+    let needs_centering =
+        largest_centered > 0.0 && largest_input > CENTERING_RATIO * largest_centered;
+    let needs_scaling = scales.iter().any(|&scale| {
+        scale > 0.0 && !(NORMALIZATION_LOWER_BOUND..=NORMALIZATION_UPPER_BOUND).contains(&scale)
+    });
+    if !needs_centering && !needs_scaling
+    {
+        return (data.to_vec(), vec![1.0; dimension]);
+    }
+
     for scale in &mut scales
     {
         if *scale == 0.0
@@ -490,12 +509,12 @@ fn invert_matrix(
 
 /// Fit a Cox proportional-hazards regression model.
 ///
-/// Covariates are internally translated by a fixed column origin and scaled
-/// by their largest centered magnitude before evaluating risk-set moments. The
-/// Cox partial likelihood is invariant to translations and the coefficients,
-/// standard errors, and covariance matrix are transformed back to the caller's
-/// original covariate units. Centered and scaled moments avoid both large
-/// common-offset cancellation and tiny-scale information matrices.
+/// Covariates with a large common offset or poorly scaled columns are
+/// internally translated and scaled before evaluating risk-set moments. The
+/// Cox partial likelihood is invariant to translations, and coefficients,
+/// standard errors, and covariance are transformed back to the caller's
+/// original units. Already well-conditioned inputs retain the direct numerical
+/// path so reference results do not acquire an avoidable rounding difference.
 pub fn cox_proportional_hazards(
     data: &[CoxObservation],
     options: CoxFitOptions,
