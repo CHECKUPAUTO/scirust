@@ -240,16 +240,45 @@ fn validate_data(data: &[CoxObservation], options: CoxFitOptions) -> Result<usiz
     Ok(dimension)
 }
 
-fn centered_copy(data: &[CoxObservation], dimension: usize) -> Vec<CoxObservation> {
+fn scaled_copy(data: &[CoxObservation], dimension: usize) -> (Vec<CoxObservation>, Vec<f64>) {
     let origin = &data[0].covariates;
-    data.iter()
+    let centered: Vec<CoxObservation> = data
+        .iter()
         .map(|row| CoxObservation {
             survival: row.survival,
             covariates: (0..dimension)
                 .map(|j| row.covariates[j] - origin[j])
                 .collect(),
         })
-        .collect()
+        .collect();
+
+    let mut scales = vec![0.0; dimension];
+    for row in &centered
+    {
+        for (scale, &value) in scales.iter_mut().zip(&row.covariates)
+        {
+            *scale = scale.max(value.abs());
+        }
+    }
+    for scale in &mut scales
+    {
+        if *scale == 0.0
+        {
+            *scale = 1.0;
+        }
+    }
+
+    let scaled = centered
+        .into_iter()
+        .map(|mut row| {
+            for (value, &scale) in row.covariates.iter_mut().zip(&scales)
+            {
+                *value /= scale;
+            }
+            row
+        })
+        .collect();
+    (scaled, scales)
 }
 
 fn partial_likelihood(
@@ -461,17 +490,19 @@ fn invert_matrix(
 
 /// Fit a Cox proportional-hazards regression model.
 ///
-/// Covariates are internally translated by a fixed column origin before
-/// evaluating risk-set moments. The Cox partial likelihood is invariant to such
-/// translations, while centered moments avoid subtracting nearly equal large
-/// numbers when the original covariates have a large common offset.
+/// Covariates are internally translated by a fixed column origin and scaled
+/// by their largest centered magnitude before evaluating risk-set moments. The
+/// Cox partial likelihood is invariant to translations and the coefficients,
+/// standard errors, and covariance matrix are transformed back to the caller's
+/// original covariate units. Centered and scaled moments avoid both large
+/// common-offset cancellation and tiny-scale information matrices.
 pub fn cox_proportional_hazards(
     data: &[CoxObservation],
     options: CoxFitOptions,
 ) -> Result<CoxFitResult, CoxError> {
     let dimension = validate_data(data, options)?;
-    let centered = centered_copy(data, dimension);
-    let data = centered.as_slice();
+    let (scaled, covariate_scales) = scaled_copy(data, dimension);
+    let data = scaled.as_slice();
     let mut beta = vec![0.0; dimension];
     let mut current = partial_likelihood(data, &beta, options.tie_method);
     let mut iterations = 0usize;
@@ -516,15 +547,15 @@ pub fn cox_proportional_hazards(
         converged = step_size <= options.tolerance || max_abs(&current.score) <= options.tolerance;
     }
 
-    let covariance = invert_matrix(
+    let scaled_covariance = invert_matrix(
         &current.information,
         dimension,
         options.singularity_tolerance,
     )?;
-    let mut standard_errors = Vec::with_capacity(dimension);
+    let mut scaled_standard_errors = Vec::with_capacity(dimension);
     for index in 0..dimension
     {
-        let variance = covariance[index * dimension + index];
+        let variance = scaled_covariance[index * dimension + index];
         if !variance.is_finite() || variance < 0.0
         {
             return Err(CoxError::InvalidVariance {
@@ -532,13 +563,34 @@ pub fn cox_proportional_hazards(
                 value: variance,
             });
         }
-        standard_errors.push(variance.sqrt());
+        scaled_standard_errors.push(variance.sqrt());
     }
 
+    let inverse_scales: Vec<f64> = covariate_scales.iter().map(|scale| 1.0 / scale).collect();
+    let coefficients = beta
+        .iter()
+        .zip(&inverse_scales)
+        .map(|(&coefficient, &scale)| coefficient * scale)
+        .collect();
+    let standard_errors = scaled_standard_errors
+        .iter()
+        .zip(&inverse_scales)
+        .map(|(&standard_error, &scale)| standard_error * scale)
+        .collect();
+    let variance_covariance = scaled_covariance
+        .iter()
+        .enumerate()
+        .map(|(index, &value)| {
+            let row = index / dimension;
+            let column = index % dimension;
+            value * inverse_scales[row] * inverse_scales[column]
+        })
+        .collect();
+
     Ok(CoxFitResult {
-        coefficients: beta,
+        coefficients,
         standard_errors,
-        variance_covariance: covariance,
+        variance_covariance,
         log_partial_likelihood: current.log_likelihood,
         iterations,
         converged,
