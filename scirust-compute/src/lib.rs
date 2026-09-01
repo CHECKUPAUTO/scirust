@@ -24,11 +24,11 @@ mod shape;
 mod strides;
 mod tensor;
 mod topology;
-mod transfer;
 mod topology_augmentation;
 #[cfg(feature = "std")]
 mod topology_probe;
 mod topology_provider;
+mod transfer;
 mod workspace;
 
 pub use backend::ComputeBackend;
@@ -67,10 +67,6 @@ pub use requirements::{
 pub use shape::Shape;
 pub use strides::Strides;
 pub use tensor::TensorSpec;
-pub use transfer::{
-    DTYPE_CONTRACT_VERSION, TRANSFER_CONTRACT_VERSION, TensorResidency, TransferMode,
-    TransferRequest, TransferRequestError,
-};
 pub use topology::{
     CacheDescriptor, CacheKind, InterconnectClass, MemoryDomainDescriptor, MetricProvenance,
     SystemTopology, TopologyError, TopologyLink, TopologyNode, TopologyNodeId, TopologyNodeKind,
@@ -83,4 +79,8 @@ pub use topology_augmentation::{
 #[cfg(feature = "std")]
 pub use topology_probe::probe_host_topology;
 pub use topology_provider::AcceleratorTopologyProvider;
+pub use transfer::{
+    DTYPE_CONTRACT_VERSION, TRANSFER_CONTRACT_VERSION, TensorResidency, TransferMode,
+    TransferRequest, TransferRequestError,
+};
 pub use workspace::{KernelWorkspace, WorkspaceError, WorkspaceSpec};
