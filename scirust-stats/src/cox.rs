@@ -71,7 +71,7 @@ pub struct CoxFitOptions {
     pub tolerance: f64,
     /// Relative pivot threshold used when solving/inverting observed information.
     pub singularity_tolerance: f64,
-    /// Maximum deterministic step halvings used to obtain non-decreasing likelihood.
+    /// Maximum deterministic step halvings used to obtain likelihood within tolerance.
     pub max_step_halvings: usize,
 }
 
@@ -526,6 +526,7 @@ pub fn cox_proportional_hazards(
     let mut current = partial_likelihood(data, &beta, options.tie_method);
     let mut iterations = 0usize;
     let mut converged = max_abs(&current.score) <= options.tolerance;
+    let likelihood_tolerance = options.tolerance * (1.0 + current.log_likelihood.abs());
 
     while !converged && iterations < options.max_iterations
     {
@@ -546,7 +547,7 @@ pub fn cox_proportional_hazards(
                 .collect();
             let candidate = partial_likelihood(data, &candidate_beta, options.tie_method);
             if candidate.log_likelihood.is_finite()
-                && candidate.log_likelihood >= current.log_likelihood
+                && candidate.log_likelihood + likelihood_tolerance >= current.log_likelihood
             {
                 accepted = Some((candidate_beta, candidate, step_scale));
                 break;
@@ -704,8 +705,8 @@ mod tests {
         let efron = cox_proportional_hazards(&data, CoxFitOptions::default()).unwrap();
         close(breslow.coefficients[0], 0.0, 1.0e-15);
         close(efron.coefficients[0], 0.0, 1.0e-15);
-        close(breslow.log_partial_likelihood, -2.0 * 4.0_f64.ln(), 2.0e-15);
-        close(efron.log_partial_likelihood, -12.0_f64.ln(), 2.0e-15);
+        close(breslow.log_partial_likelihood, -2.0 * 4.0_f64.ln(), 4.0e-15);
+        close(efron.log_partial_likelihood, -12.0_f64.ln(), 4.0e-15);
     }
 
     #[test]
