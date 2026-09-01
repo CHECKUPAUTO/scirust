@@ -252,7 +252,7 @@ fn scaled_copy(data: &[CoxObservation], dimension: usize) -> (Vec<CoxObservation
         })
         .collect();
 
-    let mut scales = vec![0.0; dimension];
+    let mut scales = vec![0.0_f64; dimension];
     for row in &centered
     {
         for (scale, &value) in scales.iter_mut().zip(&row.covariates)
