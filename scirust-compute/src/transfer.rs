@@ -1,7 +1,7 @@
 extern crate alloc;
 
 use alloc::format;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 
 use crate::{DType, DeviceId, DeviceKind, MemorySpace, StreamId};
 
