@@ -24,6 +24,7 @@ mod shape;
 mod strides;
 mod tensor;
 mod topology;
+mod transfer;
 mod topology_augmentation;
 #[cfg(feature = "std")]
 mod topology_probe;
@@ -66,6 +67,10 @@ pub use requirements::{
 pub use shape::Shape;
 pub use strides::Strides;
 pub use tensor::TensorSpec;
+pub use transfer::{
+    DTYPE_CONTRACT_VERSION, TRANSFER_CONTRACT_VERSION, TensorResidency, TransferMode,
+    TransferRequest, TransferRequestError,
+};
 pub use topology::{
     CacheDescriptor, CacheKind, InterconnectClass, MemoryDomainDescriptor, MetricProvenance,
     SystemTopology, TopologyError, TopologyLink, TopologyNode, TopologyNodeId, TopologyNodeKind,
