@@ -257,7 +257,7 @@ fn scaled_copy(data: &[CoxObservation], dimension: usize) -> (Vec<CoxObservation
     {
         for (scale, &value) in scales.iter_mut().zip(&row.covariates)
         {
-            *scale = scale.max(value.abs());
+            *scale = (*scale).max(value.abs());
         }
     }
     for scale in &mut scales
