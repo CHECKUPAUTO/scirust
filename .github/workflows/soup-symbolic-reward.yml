@@ -1,0 +1,31 @@
+name: SOUP symbolic reward
+
+on:
+  push:
+    branches: [master, main, develop]
+  pull_request:
+    branches: [master, main, develop]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  reward-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Install pinned nightly
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt, clippy
+      - name: Rust reward tests
+        run: cargo +nightly-2026-07-02 test -p scirust-cli --bin scirust-reward --locked
+      - name: Rust reward clippy
+        run: cargo +nightly-2026-07-02 clippy -p scirust-cli --bin scirust-reward --locked -- -D warnings
+      - name: SOUP bridge tests
+        run: python3 -m unittest integrations/soup/test_scirust_symbolic_reward.py
