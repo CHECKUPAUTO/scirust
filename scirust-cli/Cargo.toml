@@ -13,6 +13,11 @@ name = "scirust"
 path = "src/main.rs"
 doc = false
 
+[[bin]]
+name = "scirust-reward"
+path = "src/reward_main.rs"
+doc = false
+
 [dependencies]
 scirust-core = { path = "../scirust-core" }
 scirust-runtime = { path = "../scirust-runtime" }
@@ -34,6 +39,4 @@ scirust-sciagent = { path = "../scirust-sciagent" }
 scirust-studio-schema = { path = "../scirust-studio-schema" }
 scirust-studio-runtime = { path = "../scirust-studio-runtime" }
 scirust-studio-store = { path = "../scirust-studio-store" }
-
-[dev-dependencies]
 serde_json = "1"
