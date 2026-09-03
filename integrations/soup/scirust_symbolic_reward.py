@@ -100,7 +100,6 @@ def reward_fn(completions: list[list[dict]], **kwargs: Any) -> list[float]:
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        stdin=subprocess.PIPE,
         shell=False,
         check=False,
         timeout=REWARD_TIMEOUT_SECONDS,
