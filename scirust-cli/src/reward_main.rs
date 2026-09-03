@@ -6,14 +6,17 @@
 use std::io::{self, BufRead, Write};
 
 use scirust_symbolic::{parse, prove_equal};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 const SCHEMA_VERSION: u64 = 1;
 const KIND: &str = "symbolic_equivalence";
 const MAX_LINE_BYTES: usize = 1024 * 1024;
 const MAX_RECORDS: usize = 4096;
 
-fn required_string<'a>(object: &'a serde_json::Map<String, Value>, key: &str) -> Result<&'a str, String> {
+fn required_string<'a>(
+    object: &'a serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<&'a str, String> {
     object
         .get(key)
         .and_then(Value::as_str)
@@ -25,24 +28,31 @@ fn evaluate_record(value: Value) -> Result<Value, String> {
     let object = value
         .as_object()
         .ok_or_else(|| "record must be a JSON object".to_owned())?;
-    if object.get("schema_version").and_then(Value::as_u64) != Some(SCHEMA_VERSION) {
-        return Err(format!("unsupported schema_version; expected {SCHEMA_VERSION}"));
+    if object.get("schema_version").and_then(Value::as_u64) != Some(SCHEMA_VERSION)
+    {
+        return Err(format!(
+            "unsupported schema_version; expected {SCHEMA_VERSION}"
+        ));
     }
-    if object.get("kind").and_then(Value::as_str) != Some(KIND) {
+    if object.get("kind").and_then(Value::as_str) != Some(KIND)
+    {
         return Err(format!("unsupported kind; expected `{KIND}`"));
     }
     let candidate = required_string(object, "candidate")?;
     let reference = required_string(object, "reference")?;
     let id = object.get("id").cloned().unwrap_or(Value::Null);
-    if !id.is_null() && !id.is_string() && !id.is_number() {
+    if !id.is_null() && !id.is_string() && !id.is_number()
+    {
         return Err("field `id`, when present, must be a string or number".to_owned());
     }
 
     let reference_expr = parse(reference)
         .map_err(|error| format!("trusted reference expression failed to parse: {error}"))?;
-    let candidate_expr = match parse(candidate) {
+    let candidate_expr = match parse(candidate)
+    {
         Ok(expr) => expr,
-        Err(error) => {
+        Err(error) =>
+        {
             return Ok(json!({
                 "schema_version": SCHEMA_VERSION,
                 "kind": KIND,
@@ -52,7 +62,7 @@ fn evaluate_record(value: Value) -> Result<Value, String> {
                 "verdict": "candidate_parse_error",
                 "detail": error.to_string(),
             }));
-        }
+        },
     };
 
     let equal = prove_equal(&candidate_expr, &reference_expr);
@@ -74,22 +84,27 @@ fn evaluate_record(value: Value) -> Result<Value, String> {
 fn run<R: BufRead, W: Write>(mut input: R, mut output: W) -> Result<(), String> {
     let mut line = String::new();
     let mut records = 0usize;
-    loop {
+    loop
+    {
         line.clear();
         let bytes = input
             .read_line(&mut line)
             .map_err(|error| format!("reading JSONL input: {error}"))?;
-        if bytes == 0 {
+        if bytes == 0
+        {
             break;
         }
-        if bytes > MAX_LINE_BYTES {
+        if bytes > MAX_LINE_BYTES
+        {
             return Err(format!("input line exceeds {MAX_LINE_BYTES} bytes"));
         }
-        if line.trim().is_empty() {
+        if line.trim().is_empty()
+        {
             continue;
         }
         records += 1;
-        if records > MAX_RECORDS {
+        if records > MAX_RECORDS
+        {
             return Err(format!("batch exceeds {MAX_RECORDS} records"));
         }
         let value: Value = serde_json::from_str(&line)
@@ -111,7 +126,8 @@ fn run<R: BufRead, W: Write>(mut input: R, mut output: W) -> Result<(), String> 
 fn main() {
     let stdin = io::stdin();
     let stdout = io::stdout();
-    if let Err(error) = run(stdin.lock(), stdout.lock()) {
+    if let Err(error) = run(stdin.lock(), stdout.lock())
+    {
         eprintln!("scirust-reward: {error}");
         std::process::exit(2);
     }
@@ -201,7 +217,8 @@ mod tests {
         for record in [
             json!({"schema_version": 2, "kind": KIND, "candidate": "x", "reference": "x"}),
             json!({"schema_version": 1, "kind": "other", "candidate": "x", "reference": "x"}),
-        ] {
+        ]
+        {
             assert!(evaluate_record(record).is_err());
         }
     }
