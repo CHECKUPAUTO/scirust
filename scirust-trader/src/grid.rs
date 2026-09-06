@@ -100,7 +100,8 @@ pub enum GridPlanError {
 }
 
 fn exit_price(entry: f32, side: Side, fraction: f32, instrument: &Instrument) -> f32 {
-    let raw = match side {
+    let raw = match side
+    {
         Side::Buy => entry * (1.0 + fraction),
         Side::Sell => entry * (1.0 - fraction),
     };
@@ -119,16 +120,20 @@ pub fn plan_grid(cfg: &GridConfig, instrument: &Instrument) -> Result<GridPlan, 
     {
         return Err(GridPlanError::InvalidBounds);
     }
-    if cfg.levels < 2 {
+    if cfg.levels < 2
+    {
         return Err(GridPlanError::TooFewLevels);
     }
-    if !cfg.total_quote.is_finite() || cfg.total_quote <= 0.0 {
+    if !cfg.total_quote.is_finite() || cfg.total_quote <= 0.0
+    {
         return Err(GridPlanError::InvalidBudget);
     }
-    if !cfg.min_order_quote.is_finite() || cfg.min_order_quote <= 0.0 {
+    if !cfg.min_order_quote.is_finite() || cfg.min_order_quote <= 0.0
+    {
         return Err(GridPlanError::InvalidMinOrderQuote);
     }
-    if !cfg.min_spread_fraction.is_finite() || cfg.min_spread_fraction < 0.0 {
+    if !cfg.min_spread_fraction.is_finite() || cfg.min_spread_fraction < 0.0
+    {
         return Err(GridPlanError::InvalidMinSpread);
     }
     if !cfg.take_profit_fraction.is_finite()
@@ -137,12 +142,14 @@ pub fn plan_grid(cfg: &GridConfig, instrument: &Instrument) -> Result<GridPlan, 
     {
         return Err(GridPlanError::InvalidTakeProfit);
     }
-    if cfg.max_open_orders == 0 || cfg.max_open_orders > cfg.levels {
+    if cfg.max_open_orders == 0 || cfg.max_open_orders > cfg.levels
+    {
         return Err(GridPlanError::InvalidMaxOpenOrders);
     }
 
     let requested_quote = cfg.total_quote / cfg.levels as f32;
-    if requested_quote < cfg.min_order_quote {
+    if requested_quote < cfg.min_order_quote
+    {
         return Err(GridPlanError::InvalidBudget);
     }
 
@@ -151,29 +158,36 @@ pub fn plan_grid(cfg: &GridConfig, instrument: &Instrument) -> Result<GridPlan, 
     let mut previous_price: Option<f32> = None;
     let mut rounded_quote_total = 0.0f32;
 
-    for index in 0..cfg.levels {
+    for index in 0..cfg.levels
+    {
         let raw_price = cfg.start_price + step * index as f32;
         let price = instrument.round_price(raw_price);
-        if !price.is_finite() || price <= 0.0 {
+        if !price.is_finite() || price <= 0.0
+        {
             return Err(GridPlanError::InvalidBounds);
         }
 
-        if let Some(previous) = previous_price {
-            if (price - previous).abs() <= f32::EPSILON {
+        if let Some(previous) = previous_price
+        {
+            if (price - previous).abs() <= f32::EPSILON
+            {
                 return Err(GridPlanError::RoundedPriceDuplicate { index });
             }
             let relative = (price - previous).abs() / previous.abs().max(f32::MIN_POSITIVE);
-            if relative < cfg.min_spread_fraction {
+            if relative < cfg.min_spread_fraction
+            {
                 return Err(GridPlanError::SpreadTooTight { index });
             }
         }
 
         let base_qty = instrument.round_qty(requested_quote / price);
-        if !base_qty.is_finite() || base_qty <= 0.0 {
+        if !base_qty.is_finite() || base_qty <= 0.0
+        {
             return Err(GridPlanError::RoundedQuantityZero { index });
         }
         let rounded_quote = price * base_qty;
-        if !instrument.meets_min_notional(price, base_qty) {
+        if !instrument.meets_min_notional(price, base_qty)
+        {
             return Err(GridPlanError::BelowMinNotional {
                 index,
                 rounded_notional: rounded_quote,
@@ -182,7 +196,8 @@ pub fn plan_grid(cfg: &GridConfig, instrument: &Instrument) -> Result<GridPlan, 
         }
 
         let take_profit_price = exit_price(price, cfg.side, cfg.take_profit_fraction, instrument);
-        if !take_profit_price.is_finite() || take_profit_price <= 0.0 {
+        if !take_profit_price.is_finite() || take_profit_price <= 0.0
+        {
             return Err(GridPlanError::InvalidTakeProfit);
         }
 
@@ -240,7 +255,8 @@ pub fn transition_level(level: &mut GridLevel, next: GridLevelState) -> bool {
             | (GridLevelState::ExitWorking, GridLevelState::Complete)
             | (GridLevelState::Complete, GridLevelState::Idle)
     );
-    if legal {
+    if legal
+    {
         level.state = next;
     }
     legal
@@ -282,7 +298,8 @@ mod tests {
         assert!((plan.levels[1].price - 100.0).abs() < 1e-6);
         assert!((plan.levels[2].price - 110.0).abs() < 1e-6);
         assert!(plan.rounded_quote_total <= plan.requested_quote_total);
-        for level in &plan.levels {
+        for level in &plan.levels
+        {
             assert!(level.entry_order.post_only);
             assert!(level.exit_order.reduce_only);
             assert_eq!(level.state, GridLevelState::Idle);
