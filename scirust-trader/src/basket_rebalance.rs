@@ -231,6 +231,13 @@ mod tests {
     use super::*;
     use crate::orders::Fill;
 
+    type BaseInputs = (
+        Account,
+        BTreeMap<String, f32>,
+        BTreeMap<String, f32>,
+        BTreeMap<String, RebalanceCostAssumption>,
+    );
+
     fn fill(price: f32, qty: f32) -> Fill {
         Fill {
             price,
@@ -241,12 +248,7 @@ mod tests {
         }
     }
 
-    fn base_inputs() -> (
-        Account,
-        BTreeMap<String, f32>,
-        BTreeMap<String, f32>,
-        BTreeMap<String, RebalanceCostAssumption>,
-    ) {
+    fn base_inputs() -> BaseInputs {
         let account = Account::new(10_000.0);
         let mut targets = BTreeMap::new();
         targets.insert("BTC".to_string(), 0.5);
