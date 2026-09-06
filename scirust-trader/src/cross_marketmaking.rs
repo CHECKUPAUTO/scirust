@@ -175,10 +175,10 @@ pub fn analyze_cross_exchange_mm(
         return Err(CrossExchangeMmError::ExcessiveSnapshotSkew);
     }
 
-    let latency_buffer_bps = cfg.adverse_move_bps_per_second * cfg.hedge_latency_ms as f32 / 1000.0;
+    let latency_buffer_bps =
+        cfg.adverse_move_bps_per_second * cfg.hedge_latency_ms as f32 / 1000.0;
     let latency_frac = latency_buffer_bps / 10_000.0;
 
-    // Maker bid fills: we bought base on maker and must sell base on hedge venue.
     let hedge_sell = hedge_book.vwap_to_fill(Side::Sell, cfg.base_size);
     let stressed_sell = hedge_sell.vwap * (1.0 - latency_frac);
     let maker_bid_notional = maker_quotes.bid * cfg.base_size;
@@ -208,7 +208,6 @@ pub fn analyze_cross_exchange_mm(
         executable_positive: bid_positive,
     };
 
-    // Maker ask fills: we sold base on maker and must buy base on hedge venue.
     let hedge_buy = hedge_book.vwap_to_fill(Side::Buy, cfg.base_size);
     let stressed_buy = hedge_buy.vwap * (1.0 + latency_frac);
     let maker_ask_notional = maker_quotes.ask * cfg.base_size;
@@ -356,22 +355,37 @@ mod tests {
     fn rejects_stale_future_and_skewed_snapshots() {
         let mut stale_cfg = cfg();
         stale_cfg.max_age_ms = 20;
-        assert_eq!(
-            analyze_cross_exchange_mm(&quotes(100.0, 101.0), 9_950, &hedge_book(9_900), &stale_cfg),
+        assert!(matches!(
+            analyze_cross_exchange_mm(
+                &quotes(100.0, 101.0),
+                9_950,
+                &hedge_book(9_900),
+                &stale_cfg
+            ),
             Err(CrossExchangeMmError::StaleSnapshot)
-        );
+        ));
 
-        assert_eq!(
-            analyze_cross_exchange_mm(&quotes(100.0, 101.0), 10_001, &hedge_book(9_900), &cfg()),
+        assert!(matches!(
+            analyze_cross_exchange_mm(
+                &quotes(100.0, 101.0),
+                10_001,
+                &hedge_book(9_900),
+                &cfg()
+            ),
             Err(CrossExchangeMmError::FutureSnapshot)
-        );
+        ));
 
         let mut skew_cfg = cfg();
         skew_cfg.max_skew_ms = 10;
-        assert_eq!(
-            analyze_cross_exchange_mm(&quotes(100.0, 101.0), 9_950, &hedge_book(9_900), &skew_cfg),
+        assert!(matches!(
+            analyze_cross_exchange_mm(
+                &quotes(100.0, 101.0),
+                9_950,
+                &hedge_book(9_900),
+                &skew_cfg
+            ),
             Err(CrossExchangeMmError::ExcessiveSnapshotSkew)
-        );
+        ));
     }
 
     #[test]
@@ -381,7 +395,13 @@ mod tests {
         let c = cfg();
         let a = analyze_cross_exchange_mm(&q, 9_950, &b, &c).unwrap();
         let d = analyze_cross_exchange_mm(&q, 9_950, &b, &c).unwrap();
-        assert_eq!(a.maker_bid_fill.net_pnl.to_bits(), d.maker_bid_fill.net_pnl.to_bits());
-        assert_eq!(a.maker_ask_fill.net_pnl.to_bits(), d.maker_ask_fill.net_pnl.to_bits());
+        assert_eq!(
+            a.maker_bid_fill.net_pnl.to_bits(),
+            d.maker_bid_fill.net_pnl.to_bits()
+        );
+        assert_eq!(
+            a.maker_ask_fill.net_pnl.to_bits(),
+            d.maker_ask_fill.net_pnl.to_bits()
+        );
     }
 }
