@@ -21,6 +21,12 @@
 //!  venue events ─► normalized contracts ─► lifecycle ─► replay / reconciliation
 //!                                      ├─► latency / queue / back-pressure models
 //!                                      └─► multi-leg imbalance / recovery plans
+//!  indicators ─► core catalogue + adaptive / OHLC-volatility / flow gaps
+//!  ML data ─► temporal leakage checks ─► linear/tree/forest/boosting/sequence baselines
+//!                  ├─► existing deterministic MLP
+//!                  └─► SciRust RL Env ─► train / frozen holdout separation
+//!  validation ─► purged CV / embargo ─► bootstrap / Holm / DSR / CSCV-PBO
+//!                  └─► parameter / regime / cost / perturbation evidence ─► manifest
 //!  derivatives ─► funding / basis / OI / liquidations ─► strategy / scanner
 //!             ├─► rolling history / price-OI regimes
 //!             └─► divergences / liquidation clusters
@@ -40,6 +46,7 @@
 //! 4. **Every decision is sealed** — proofs carry SHA-256 manifests for
 //!    third-party replay/audit.
 
+pub mod advanced_indicators;
 pub mod agent;
 pub mod arbitrage;
 pub mod backtest;
@@ -63,6 +70,8 @@ pub mod market;
 pub mod marketmaking;
 pub mod metrics;
 pub mod microstructure;
+pub mod ml_baselines;
+pub mod ml_dataset;
 pub mod model;
 pub mod multileg;
 pub mod optimize;
@@ -77,10 +86,14 @@ pub mod portfolio_opt;
 pub mod proof;
 pub mod reconciliation;
 pub mod regime;
+pub mod research_validation;
 pub mod risk;
+pub mod rl_market;
 pub mod robustness;
 pub mod runtime_replay;
 pub mod scanner;
+pub mod stat_validation;
 pub mod strategy;
+pub mod validation_cv;
 pub mod venue;
 pub mod wallet;
