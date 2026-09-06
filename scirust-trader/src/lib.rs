@@ -19,7 +19,8 @@
 //!                    ├─► cross-exchange market-making analysis
 //!                    └─► cost-aware basket rebalancing
 //!  venue events ─► normalized contracts ─► lifecycle ─► replay / reconciliation
-//!                                      └─► latency / queue / back-pressure models
+//!                                      ├─► latency / queue / back-pressure models
+//!                                      └─► multi-leg imbalance / recovery plans
 //!  derivatives ─► funding / basis / OI / liquidations ─► strategy / scanner
 //!             ├─► rolling history / price-OI regimes
 //!             └─► divergences / liquidation clusters
@@ -63,6 +64,7 @@ pub mod marketmaking;
 pub mod metrics;
 pub mod microstructure;
 pub mod model;
+pub mod multileg;
 pub mod optimize;
 pub mod options;
 pub mod order_lifecycle;
