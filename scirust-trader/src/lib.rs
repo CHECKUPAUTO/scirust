@@ -13,7 +13,8 @@
 //!  orderbook ─► orders ─► portfolio ┘         └─► execution / marketmaking / microstructure
 //!                    ├─► DCA planning
 //!                    ├─► bounded Grid planning
-//!                    └─► cross-venue arbitrage analysis
+//!                    ├─► cross-venue arbitrage analysis
+//!                    └─► spot/perp basis scenario analysis
 //!  derivatives ─► funding / basis / OI / liquidations ─► strategy / scanner
 //!             ├─► rolling history / price-OI regimes
 //!             └─► divergences / liquidation clusters
@@ -36,6 +37,7 @@
 pub mod agent;
 pub mod arbitrage;
 pub mod backtest;
+pub mod basis;
 pub mod certify;
 pub mod chart;
 pub mod cli;
