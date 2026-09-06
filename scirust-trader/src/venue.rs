@@ -100,7 +100,8 @@ pub enum VenueMarketEvent {
 
 impl VenueMarketEvent {
     pub fn venue(&self) -> &str {
-        match self {
+        match self
+        {
             Self::Book { venue, .. }
             | Self::Candle { venue, .. }
             | Self::Disconnected { venue, .. }
@@ -110,7 +111,8 @@ impl VenueMarketEvent {
     }
 
     pub fn sequence(&self) -> u64 {
-        match self {
+        match self
+        {
             Self::Book { sequence, .. }
             | Self::Candle { sequence, .. }
             | Self::Disconnected { sequence, .. }
@@ -120,7 +122,8 @@ impl VenueMarketEvent {
     }
 
     pub fn ts_ms(&self) -> i64 {
-        match self {
+        match self
+        {
             Self::Book { book, .. } => book.ts_ms,
             Self::Trade(trade) => trade.ts_ms,
             Self::Candle { candle, .. } => candle.ts_ms,
@@ -153,15 +156,18 @@ impl VenueOrderRequest {
             return false;
         }
         let qty = instrument.instrument().round_qty(self.qty);
-        if qty <= 0.0 {
+        if qty <= 0.0
+        {
             return false;
         }
-        match self.order_type.limit_price() {
-            Some(price) => {
+        match self.order_type.limit_price()
+        {
+            Some(price) =>
+            {
                 price.is_finite()
                     && price > 0.0
                     && instrument.instrument().meets_min_notional(price, qty)
-            }
+            },
             None => true,
         }
     }
@@ -229,7 +235,8 @@ pub enum VenueExecutionEvent {
 
 impl VenueExecutionEvent {
     pub fn sequence(&self) -> u64 {
-        match self {
+        match self
+        {
             Self::Accepted { sequence, .. }
             | Self::Rejected { sequence, .. }
             | Self::Fill { sequence, .. }
@@ -241,7 +248,8 @@ impl VenueExecutionEvent {
     }
 
     pub fn ts_ms(&self) -> i64 {
-        match self {
+        match self
+        {
             Self::Accepted { ts_ms, .. }
             | Self::Rejected { ts_ms, .. }
             | Self::Fill { ts_ms, .. }
@@ -253,7 +261,8 @@ impl VenueExecutionEvent {
     }
 
     pub fn client_order_id(&self) -> Option<u64> {
-        match self {
+        match self
+        {
             Self::Accepted {
                 client_order_id, ..
             }

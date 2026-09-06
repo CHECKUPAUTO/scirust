@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::derivatives::{basis_bps, funding_payment, PerpSide};
+use crate::derivatives::{PerpSide, basis_bps, funding_payment};
 use crate::orderbook::OrderBook;
 use crate::orders::Side;
 
@@ -348,9 +348,7 @@ pub fn analyze_funding_carry(
         let rehedge_cost_quote = (terminal_spot_notional + terminal_perp_notional)
             * scenario.rehedge_cost_bps
             / 10_000.0;
-        let net_pnl_quote = spot_leg_gross_pnl_quote
-            + perp_leg_gross_pnl_quote
-            + funding_pnl_quote
+        let net_pnl_quote = spot_leg_gross_pnl_quote + perp_leg_gross_pnl_quote + funding_pnl_quote
             - entry_fees_quote
             - exit_fees_quote
             - borrow_cost_quote
@@ -379,7 +377,10 @@ pub fn analyze_funding_carry(
         });
     }
 
-    let positive_scenarios = results.iter().filter(|result| result.scenario_positive).count();
+    let positive_scenarios = results
+        .iter()
+        .filter(|result| result.scenario_positive)
+        .count();
     let all_scenarios_positive = positive_scenarios == results.len();
     let worst_net_pnl_quote = results
         .iter()
@@ -558,12 +559,16 @@ mod tests {
             &scenarios,
         )
         .unwrap();
-        assert!(report
-            .constraints
-            .contains(&FundingCarryConstraint::SpotQuoteStale));
-        assert!(report
-            .constraints
-            .contains(&FundingCarryConstraint::LegTimestampSkew));
+        assert!(
+            report
+                .constraints
+                .contains(&FundingCarryConstraint::SpotQuoteStale)
+        );
+        assert!(
+            report
+                .constraints
+                .contains(&FundingCarryConstraint::LegTimestampSkew)
+        );
         assert_eq!(report.positive_scenarios, 0);
     }
 

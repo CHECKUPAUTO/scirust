@@ -126,13 +126,16 @@ pub fn plan_basket_rebalance(
     costs: &BTreeMap<String, RebalanceCostAssumption>,
     cfg: BasketRebalanceConfig,
 ) -> Result<BasketRebalancePlan, BasketRebalanceError> {
-    if !validate_config(cfg) {
+    if !validate_config(cfg)
+    {
         return Err(BasketRebalanceError::InvalidConfig);
     }
 
     let mut target_weight_sum = 0.0f32;
-    for (symbol, weight) in target_weights {
-        if !weight.is_finite() || *weight < 0.0 {
+    for (symbol, weight) in target_weights
+    {
+        if !weight.is_finite() || *weight < 0.0
+        {
             return Err(BasketRebalanceError::InvalidTargetWeights);
         }
         target_weight_sum += *weight;
@@ -140,23 +143,27 @@ pub fn plan_basket_rebalance(
             .get(symbol)
             .copied()
             .ok_or_else(|| BasketRebalanceError::InvalidMark(symbol.clone()))?;
-        if !mark.is_finite() || mark <= 0.0 {
+        if !mark.is_finite() || mark <= 0.0
+        {
             return Err(BasketRebalanceError::InvalidMark(symbol.clone()));
         }
         let cost = costs
             .get(symbol)
             .copied()
             .ok_or_else(|| BasketRebalanceError::MissingCostAssumption(symbol.clone()))?;
-        if !valid_cost(cost) {
+        if !valid_cost(cost)
+        {
             return Err(BasketRebalanceError::InvalidCostAssumption(symbol.clone()));
         }
     }
-    if !target_weight_sum.is_finite() || target_weight_sum > 1.0 + 1e-6 {
+    if !target_weight_sum.is_finite() || target_weight_sum > 1.0 + 1e-6
+    {
         return Err(BasketRebalanceError::InvalidTargetWeights);
     }
 
     let equity = account.equity(marks);
-    if !equity.is_finite() || equity <= 0.0 {
+    if !equity.is_finite() || equity <= 0.0
+    {
         return Err(BasketRebalanceError::NonPositiveEquity);
     }
 
@@ -167,9 +174,12 @@ pub fn plan_basket_rebalance(
         .sum();
     let requested_turnover_fraction = requested_notional / equity;
     let allowed_notional = cfg.max_turnover_fraction * equity;
-    let turnover_scale = if requested_notional <= 1e-12 {
+    let turnover_scale = if requested_notional <= 1e-12
+    {
         1.0
-    } else {
+    }
+    else
+    {
         (allowed_notional / requested_notional).clamp(0.0, 1.0)
     };
     let turnover_cap_binding = turnover_scale < 1.0 - 1e-7;
@@ -179,11 +189,13 @@ pub fn plan_basket_rebalance(
     let mut estimated_total_cost = 0.0f32;
     let mut skipped_small_trades = 0usize;
 
-    for candidate in candidates {
+    for candidate in candidates
+    {
         let price = marks[&candidate.symbol];
         let planned_qty = candidate.qty * turnover_scale;
         let planned_notional = planned_qty * price;
-        if planned_notional + 1e-9 < cfg.min_trade_notional || planned_qty <= 1e-12 {
+        if planned_notional + 1e-9 < cfg.min_trade_notional || planned_qty <= 1e-12
+        {
             skipped_small_trades += 1;
             continue;
         }
@@ -304,7 +316,10 @@ mod tests {
         assert!(plan.turnover_cap_binding);
         assert!((plan.turnover_scale - 0.25).abs() < 1e-5);
         assert!((plan.planned_turnover_fraction - 0.2).abs() < 1e-5);
-        assert!((plan.trades[0].planned_notional + plan.trades[1].planned_notional - 2_000.0).abs() < 1e-3);
+        assert!(
+            (plan.trades[0].planned_notional + plan.trades[1].planned_notional - 2_000.0).abs()
+                < 1e-3
+        );
     }
 
     #[test]

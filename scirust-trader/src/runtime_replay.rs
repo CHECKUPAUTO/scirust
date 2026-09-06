@@ -37,7 +37,8 @@ pub enum RuntimeRecord {
 
 impl RuntimeRecord {
     pub fn ts_ms(&self) -> i64 {
-        match self {
+        match self
+        {
             Self::SubmitIntent { ts_ms, .. }
             | Self::CancelIntent { ts_ms, .. }
             | Self::AmendIntent { ts_ms, .. } => *ts_ms,
@@ -75,17 +76,17 @@ pub struct ReplayReport {
 /// Runtime-record timestamp ordering is checked in addition to the strictly
 /// increasing venue sequence enforced by [`LifecycleBook`]. This catches a
 /// journal whose local intents were accidentally reordered around venue events.
-pub fn replay_runtime(
-    venue: &str,
-    records: &[RuntimeRecord],
-) -> Result<ReplayReport, ReplayError> {
+pub fn replay_runtime(venue: &str, records: &[RuntimeRecord]) -> Result<ReplayReport, ReplayError> {
     let mut book = LifecycleBook::new(venue);
     let mut previous_ts_ms = None;
 
-    for (index, record) in records.iter().enumerate() {
+    for (index, record) in records.iter().enumerate()
+    {
         let ts_ms = record.ts_ms();
-        if let Some(previous) = previous_ts_ms {
-            if ts_ms < previous {
+        if let Some(previous) = previous_ts_ms
+        {
+            if ts_ms < previous
+            {
                 return Err(ReplayError::NonMonotonicTimestamp {
                     previous_ts_ms: previous,
                     incoming_ts_ms: ts_ms,
@@ -94,7 +95,8 @@ pub fn replay_runtime(
             }
         }
 
-        let result = match record {
+        let result = match record
+        {
             RuntimeRecord::SubmitIntent { ts_ms, request } => book
                 .register_submission(request.clone(), *ts_ms)
                 .map(|_| ()),
@@ -112,7 +114,8 @@ pub fn replay_runtime(
             RuntimeRecord::VenueEvent(event) => book.apply_event(event.clone()),
         };
 
-        if let Err(error) = result {
+        if let Err(error) = result
+        {
             return Err(ReplayError::Lifecycle {
                 record_index: index,
                 error,
@@ -204,7 +207,10 @@ mod tests {
         };
         assert!(matches!(
             replay_runtime("x", &records),
-            Err(ReplayError::NonMonotonicTimestamp { record_index: 3, .. })
+            Err(ReplayError::NonMonotonicTimestamp {
+                record_index: 3,
+                ..
+            })
         ));
     }
 
@@ -218,7 +224,10 @@ mod tests {
         })];
         assert!(matches!(
             replay_runtime("x", &records),
-            Err(ReplayError::Lifecycle { record_index: 0, .. })
+            Err(ReplayError::Lifecycle {
+                record_index: 0,
+                ..
+            })
         ));
     }
 }

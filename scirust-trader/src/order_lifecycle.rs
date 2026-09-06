@@ -87,7 +87,8 @@ impl LifecycleBook {
         request: VenueOrderRequest,
         ts_ms: i64,
     ) -> Result<VenueOrderCommand, LifecycleError> {
-        if self.orders.contains_key(&request.client_order_id) {
+        if self.orders.contains_key(&request.client_order_id)
+        {
             return Err(LifecycleError::DuplicateClientOrderId(
                 request.client_order_id,
             ));
@@ -123,7 +124,8 @@ impl LifecycleBook {
         if !matches!(
             order.status,
             LifecycleStatus::Open | LifecycleStatus::PartiallyFilled
-        ) {
+        )
+        {
             return Err(LifecycleError::InvalidTransition { client_order_id });
         }
         order.status = LifecycleStatus::PendingCancel;
@@ -160,8 +162,10 @@ impl LifecycleBook {
     }
 
     fn check_sequence(&self, incoming: u64) -> Result<(), LifecycleError> {
-        if let Some(previous) = self.last_sequence {
-            if incoming <= previous {
+        if let Some(previous) = self.last_sequence
+        {
+            if incoming <= previous
+            {
                 return Err(LifecycleError::NonMonotonicSequence { previous, incoming });
             }
         }
@@ -174,41 +178,48 @@ impl LifecycleBook {
         let sequence = event.sequence();
         self.check_sequence(sequence)?;
 
-        match event {
-            VenueExecutionEvent::Disconnected { .. } => {
+        match event
+        {
+            VenueExecutionEvent::Disconnected { .. } =>
+            {
                 self.connected = false;
-            }
-            VenueExecutionEvent::Reconnected { .. } => {
+            },
+            VenueExecutionEvent::Reconnected { .. } =>
+            {
                 self.connected = true;
-            }
+            },
             VenueExecutionEvent::Accepted {
                 ts_ms,
                 client_order_id,
                 venue_order_id,
                 ..
-            } => {
+            } =>
+            {
                 let order = self.order_mut(client_order_id)?;
-                if order.status != LifecycleStatus::PendingSubmit {
+                if order.status != LifecycleStatus::PendingSubmit
+                {
                     return Err(LifecycleError::InvalidTransition { client_order_id });
                 }
                 order.venue_order_id = Some(venue_order_id);
                 order.status = LifecycleStatus::Open;
                 order.last_ts_ms = ts_ms;
-            }
+            },
             VenueExecutionEvent::Rejected {
                 ts_ms,
                 client_order_id,
                 reason,
                 ..
-            } => {
+            } =>
+            {
                 let order = self.order_mut(client_order_id)?;
-                if order.status != LifecycleStatus::PendingSubmit {
+                if order.status != LifecycleStatus::PendingSubmit
+                {
                     return Err(LifecycleError::InvalidTransition { client_order_id });
                 }
                 order.status = LifecycleStatus::Rejected;
                 order.reject_reason = Some(reason);
                 order.last_ts_ms = ts_ms;
-            }
+            },
             VenueExecutionEvent::Fill {
                 ts_ms,
                 client_order_id,
@@ -216,7 +227,8 @@ impl LifecycleBook {
                 qty,
                 fee,
                 ..
-            } => {
+            } =>
+            {
                 let order = self.order_mut(client_order_id)?;
                 if !matches!(
                     order.status,
@@ -239,38 +251,46 @@ impl LifecycleBook {
                 order.filled_qty = next;
                 order.cumulative_fee += fee;
                 order.last_ts_ms = ts_ms;
-                order.status = if order.remaining() <= 1e-9 {
+                order.status = if order.remaining() <= 1e-9
+                {
                     LifecycleStatus::Filled
-                } else if order.status == LifecycleStatus::PendingCancel {
+                }
+                else if order.status == LifecycleStatus::PendingCancel
+                {
                     LifecycleStatus::PendingCancel
-                } else {
+                }
+                else
+                {
                     LifecycleStatus::PartiallyFilled
                 };
-            }
+            },
             VenueExecutionEvent::Canceled {
                 ts_ms,
                 client_order_id,
                 ..
-            } => {
+            } =>
+            {
                 let order = self.order_mut(client_order_id)?;
                 if !matches!(
                     order.status,
                     LifecycleStatus::Open
                         | LifecycleStatus::PartiallyFilled
                         | LifecycleStatus::PendingCancel
-                ) {
+                )
+                {
                     return Err(LifecycleError::InvalidTransition { client_order_id });
                 }
                 order.status = LifecycleStatus::Canceled;
                 order.last_ts_ms = ts_ms;
-            }
+            },
             VenueExecutionEvent::Amended {
                 ts_ms,
                 client_order_id,
                 new_qty,
                 new_limit_price,
                 ..
-            } => {
+            } =>
+            {
                 let order = self.order_mut(client_order_id)?;
                 if !matches!(
                     order.status,
@@ -282,17 +302,20 @@ impl LifecycleBook {
                 {
                     return Err(LifecycleError::InvalidAmend { client_order_id });
                 }
-                if let Some(price) = new_limit_price {
-                    order.request.order_type = amend_limit_price(order.request.order_type, price)
-                        .ok_or(LifecycleError::InvalidAmend { client_order_id })?;
+                if let Some(price) = new_limit_price
+                {
+                    order.request.order_type =
+                        amend_limit_price(order.request.order_type, price)
+                            .ok_or(LifecycleError::InvalidAmend { client_order_id })?;
                 }
                 order.request.qty = new_qty;
                 order.revision += 1;
                 order.last_ts_ms = ts_ms;
-                if order.remaining() <= 1e-9 {
+                if order.remaining() <= 1e-9
+                {
                     order.status = LifecycleStatus::Filled;
                 }
-            }
+            },
         }
 
         self.last_sequence = Some(sequence);
@@ -307,7 +330,8 @@ impl LifecycleBook {
 }
 
 fn amend_limit_price(order_type: OrderType, price: f32) -> Option<OrderType> {
-    match order_type {
+    match order_type
+    {
         OrderType::Limit { .. } => Some(OrderType::Limit { price }),
         OrderType::TakeProfit { .. } => Some(OrderType::TakeProfit { price }),
         OrderType::StopLimit { stop, .. } => Some(OrderType::StopLimit { stop, limit: price }),

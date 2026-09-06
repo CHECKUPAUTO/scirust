@@ -122,15 +122,12 @@ fn validate_config(cfg: &CrossExchangeMmConfig) -> bool {
 }
 
 fn quote_valid(q: &Quotes) -> bool {
-    q.bid.is_finite()
-        && q.ask.is_finite()
-        && q.bid > 0.0
-        && q.ask > 0.0
-        && q.bid <= q.ask
+    q.bid.is_finite() && q.ask.is_finite() && q.bid > 0.0 && q.ask > 0.0 && q.bid <= q.ask
 }
 
 fn age_ms(now_ms: i64, ts_ms: i64) -> Result<i64, CrossExchangeMmError> {
-    if ts_ms > now_ms {
+    if ts_ms > now_ms
+    {
         return Err(CrossExchangeMmError::FutureSnapshot);
     }
     Ok(now_ms - ts_ms)
@@ -138,9 +135,12 @@ fn age_ms(now_ms: i64, ts_ms: i64) -> Result<i64, CrossExchangeMmError> {
 
 fn edge_bps(net_pnl: f32, maker_price: f32, base_size: f32) -> f32 {
     let notional = maker_price * base_size;
-    if notional > 1e-12 {
+    if notional > 1e-12
+    {
         10_000.0 * net_pnl / notional
-    } else {
+    }
+    else
+    {
         0.0
     }
 }
@@ -155,28 +155,32 @@ pub fn analyze_cross_exchange_mm(
     hedge_book: &OrderBook,
     cfg: &CrossExchangeMmConfig,
 ) -> Result<CrossExchangeMmReport, CrossExchangeMmError> {
-    if !validate_config(cfg) {
+    if !validate_config(cfg)
+    {
         return Err(CrossExchangeMmError::InvalidConfig);
     }
-    if !quote_valid(maker_quotes) {
+    if !quote_valid(maker_quotes)
+    {
         return Err(CrossExchangeMmError::InvalidQuotes);
     }
-    if hedge_book.best_bid().is_none() || hedge_book.best_ask().is_none() {
+    if hedge_book.best_bid().is_none() || hedge_book.best_ask().is_none()
+    {
         return Err(CrossExchangeMmError::EmptyHedgeBook);
     }
 
     let maker_age_ms = age_ms(cfg.now_ms, maker_ts_ms)?;
     let hedge_age_ms = age_ms(cfg.now_ms, hedge_book.ts_ms)?;
-    if maker_age_ms > cfg.max_age_ms || hedge_age_ms > cfg.max_age_ms {
+    if maker_age_ms > cfg.max_age_ms || hedge_age_ms > cfg.max_age_ms
+    {
         return Err(CrossExchangeMmError::StaleSnapshot);
     }
     let snapshot_skew_ms = (maker_ts_ms - hedge_book.ts_ms).abs();
-    if snapshot_skew_ms > cfg.max_skew_ms {
+    if snapshot_skew_ms > cfg.max_skew_ms
+    {
         return Err(CrossExchangeMmError::ExcessiveSnapshotSkew);
     }
 
-    let latency_buffer_bps =
-        cfg.adverse_move_bps_per_second * cfg.hedge_latency_ms as f32 / 1000.0;
+    let latency_buffer_bps = cfg.adverse_move_bps_per_second * cfg.hedge_latency_ms as f32 / 1000.0;
     let latency_frac = latency_buffer_bps / 10_000.0;
 
     let hedge_sell = hedge_book.vwap_to_fill(Side::Sell, cfg.base_size);
@@ -317,13 +321,9 @@ mod tests {
 
         let mut expensive = cfg();
         expensive.fixed_hedge_cost = 1.0;
-        let r2 = analyze_cross_exchange_mm(
-            &quotes(100.0, 101.0),
-            9_950,
-            &hedge_book(9_900),
-            &expensive,
-        )
-        .unwrap();
+        let r2 =
+            analyze_cross_exchange_mm(&quotes(100.0, 101.0), 9_950, &hedge_book(9_900), &expensive)
+                .unwrap();
         assert!(!r2.maker_bid_fill.executable_positive);
         assert!(!r2.maker_ask_fill.executable_positive);
     }
@@ -356,34 +356,19 @@ mod tests {
         let mut stale_cfg = cfg();
         stale_cfg.max_age_ms = 20;
         assert!(matches!(
-            analyze_cross_exchange_mm(
-                &quotes(100.0, 101.0),
-                9_950,
-                &hedge_book(9_900),
-                &stale_cfg
-            ),
+            analyze_cross_exchange_mm(&quotes(100.0, 101.0), 9_950, &hedge_book(9_900), &stale_cfg),
             Err(CrossExchangeMmError::StaleSnapshot)
         ));
 
         assert!(matches!(
-            analyze_cross_exchange_mm(
-                &quotes(100.0, 101.0),
-                10_001,
-                &hedge_book(9_900),
-                &cfg()
-            ),
+            analyze_cross_exchange_mm(&quotes(100.0, 101.0), 10_001, &hedge_book(9_900), &cfg()),
             Err(CrossExchangeMmError::FutureSnapshot)
         ));
 
         let mut skew_cfg = cfg();
         skew_cfg.max_skew_ms = 10;
         assert!(matches!(
-            analyze_cross_exchange_mm(
-                &quotes(100.0, 101.0),
-                9_950,
-                &hedge_book(9_900),
-                &skew_cfg
-            ),
+            analyze_cross_exchange_mm(&quotes(100.0, 101.0), 9_950, &hedge_book(9_900), &skew_cfg),
             Err(CrossExchangeMmError::ExcessiveSnapshotSkew)
         ));
     }

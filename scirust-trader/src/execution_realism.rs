@@ -66,7 +66,8 @@ pub enum QueueError {
 
 impl QueuePosition {
     pub fn new(ahead_qty: f32, own_qty: f32) -> Result<Self, QueueError> {
-        if !ahead_qty.is_finite() || ahead_qty < 0.0 || !own_qty.is_finite() || own_qty <= 0.0 {
+        if !ahead_qty.is_finite() || ahead_qty < 0.0 || !own_qty.is_finite() || own_qty <= 0.0
+        {
             return Err(QueueError::InvalidQuantity);
         }
         Ok(Self {
@@ -82,7 +83,8 @@ impl QueuePosition {
 
     /// Consume matched quantity at this exact price level.
     pub fn consume_trade(&mut self, traded_qty: f32) -> Result<QueueConsumption, QueueError> {
-        if !traded_qty.is_finite() || traded_qty < 0.0 {
+        if !traded_qty.is_finite() || traded_qty < 0.0
+        {
             return Err(QueueError::InvalidQuantity);
         }
         let consumed_ahead_qty = traded_qty.min(self.ahead_qty);
@@ -102,7 +104,8 @@ impl QueuePosition {
     /// Reduce estimated quantity ahead because of cancellations or amendments at
     /// the same price. This never increases the order's own fill quantity.
     pub fn cancel_ahead(&mut self, qty: f32) -> Result<f32, QueueError> {
-        if !qty.is_finite() || qty < 0.0 {
+        if !qty.is_finite() || qty < 0.0
+        {
             return Err(QueueError::InvalidQuantity);
         }
         let removed = qty.min(self.ahead_qty);
@@ -150,7 +153,8 @@ impl RateLimitBucket {
         refill_interval_ms: u64,
         start_ts_ms: i64,
     ) -> Result<Self, RateLimitError> {
-        if capacity == 0 || tokens_per_interval == 0 || refill_interval_ms == 0 {
+        if capacity == 0 || tokens_per_interval == 0 || refill_interval_ms == 0
+        {
             return Err(RateLimitError::InvalidConfig);
         }
         Ok(Self {
@@ -163,17 +167,18 @@ impl RateLimitBucket {
     }
 
     fn refill(&mut self, now_ts_ms: i64) -> Result<(), RateLimitError> {
-        if now_ts_ms < self.last_refill_ts_ms {
+        if now_ts_ms < self.last_refill_ts_ms
+        {
             return Err(RateLimitError::NonMonotonicClock);
         }
         let elapsed = (now_ts_ms - self.last_refill_ts_ms) as u64;
         let intervals = elapsed / self.refill_interval_ms;
-        if intervals == 0 {
+        if intervals == 0
+        {
             return Ok(());
         }
         let restored = intervals.saturating_mul(self.tokens_per_interval as u64);
-        self.available = (self.available as u64 + restored)
-            .min(self.capacity as u64) as u32;
+        self.available = (self.available as u64 + restored).min(self.capacity as u64) as u32;
         let advanced = intervals.saturating_mul(self.refill_interval_ms);
         self.last_refill_ts_ms = self
             .last_refill_ts_ms
@@ -188,17 +193,20 @@ impl RateLimitBucket {
         now_ts_ms: i64,
         required: u32,
     ) -> Result<AcquireDecision, RateLimitError> {
-        if required > self.capacity {
+        if required > self.capacity
+        {
             return Err(RateLimitError::RequestExceedsCapacity);
         }
-        if required == 0 {
+        if required == 0
+        {
             self.refill(now_ts_ms)?;
             return Ok(AcquireDecision::Allowed {
                 remaining: self.available,
             });
         }
         self.refill(now_ts_ms)?;
-        if self.available >= required {
+        if self.available >= required
+        {
             self.available -= required;
             return Ok(AcquireDecision::Allowed {
                 remaining: self.available,
@@ -286,9 +294,6 @@ mod tests {
     #[test]
     fn limiter_rejects_time_travel() {
         let mut b = RateLimitBucket::new(10, 2, 1_000, 100).unwrap();
-        assert_eq!(
-            b.try_acquire(99, 1),
-            Err(RateLimitError::NonMonotonicClock)
-        );
+        assert_eq!(b.try_acquire(99, 1), Err(RateLimitError::NonMonotonicClock));
     }
 }

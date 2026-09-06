@@ -109,11 +109,13 @@ pub enum ReconciliationError {
 }
 
 fn price_matches(local: f32, venue: f32, tolerance_bps: f32) -> bool {
-    if local == 0.0 && venue == 0.0 {
+    if local == 0.0 && venue == 0.0
+    {
         return true;
     }
     let reference = local.abs().max(venue.abs());
-    if reference <= 1e-12 {
+    if reference <= 1e-12
+    {
         return (local - venue).abs() <= 1e-12;
     }
     (local - venue).abs() / reference * 10_000.0 <= tolerance_bps
@@ -135,55 +137,65 @@ pub fn reconcile_orders(
 
     let mut discrepancies = Vec::new();
     let mut venue_by_id = BTreeMap::new();
-    for remote in venue_snapshot {
-        if !remote.validate() {
+    for remote in venue_snapshot
+    {
+        if !remote.validate()
+        {
             discrepancies.push(ReconciliationDiscrepancy::InvalidVenueSnapshot {
                 client_order_id: remote.client_order_id,
             });
             continue;
         }
-        if venue_by_id.insert(remote.client_order_id, remote).is_some() {
+        if venue_by_id.insert(remote.client_order_id, remote).is_some()
+        {
             discrepancies.push(ReconciliationDiscrepancy::DuplicateVenueSnapshot {
                 client_order_id: remote.client_order_id,
             });
         }
     }
 
-    for (client_order_id, local_order) in &local.orders {
-        match venue_by_id.get(client_order_id) {
-            None => {
-                if local_order.is_active() {
-                    discrepancies.push(
-                        ReconciliationDiscrepancy::LocalActiveMissingOnVenue {
-                            client_order_id: *client_order_id,
-                            local_status: local_order.status,
-                        },
-                    );
+    for (client_order_id, local_order) in &local.orders
+    {
+        match venue_by_id.get(client_order_id)
+        {
+            None =>
+            {
+                if local_order.is_active()
+                {
+                    discrepancies.push(ReconciliationDiscrepancy::LocalActiveMissingOnVenue {
+                        client_order_id: *client_order_id,
+                        local_status: local_order.status,
+                    });
                 }
-            }
-            Some(remote) => {
-                if local_order.venue_order_id != remote.venue_order_id {
+            },
+            Some(remote) =>
+            {
+                if local_order.venue_order_id != remote.venue_order_id
+                {
                     discrepancies.push(ReconciliationDiscrepancy::VenueOrderIdMismatch {
                         client_order_id: *client_order_id,
                         local: local_order.venue_order_id.clone(),
                         venue: remote.venue_order_id.clone(),
                     });
                 }
-                if local_order.status != remote.status {
+                if local_order.status != remote.status
+                {
                     discrepancies.push(ReconciliationDiscrepancy::StatusMismatch {
                         client_order_id: *client_order_id,
                         local: local_order.status,
                         venue: remote.status,
                     });
                 }
-                if (local_order.request.qty - remote.qty).abs() > cfg.qty_tolerance {
+                if (local_order.request.qty - remote.qty).abs() > cfg.qty_tolerance
+                {
                     discrepancies.push(ReconciliationDiscrepancy::QuantityMismatch {
                         client_order_id: *client_order_id,
                         local_qty: local_order.request.qty,
                         venue_qty: remote.qty,
                     });
                 }
-                if (local_order.filled_qty - remote.filled_qty).abs() > cfg.qty_tolerance {
+                if (local_order.filled_qty - remote.filled_qty).abs() > cfg.qty_tolerance
+                {
                     discrepancies.push(ReconciliationDiscrepancy::FilledQuantityMismatch {
                         client_order_id: *client_order_id,
                         local_filled_qty: local_order.filled_qty,
@@ -194,19 +206,22 @@ pub fn reconcile_orders(
                     local_order.avg_fill_price,
                     remote.avg_fill_price,
                     cfg.price_tolerance_bps,
-                ) {
+                )
+                {
                     discrepancies.push(ReconciliationDiscrepancy::AverageFillPriceMismatch {
                         client_order_id: *client_order_id,
                         local_avg_fill_price: local_order.avg_fill_price,
                         venue_avg_fill_price: remote.avg_fill_price,
                     });
                 }
-            }
+            },
         }
     }
 
-    for (client_order_id, remote) in &venue_by_id {
-        if !local.orders.contains_key(client_order_id) {
+    for (client_order_id, remote) in &venue_by_id
+    {
+        if !local.orders.contains_key(client_order_id)
+        {
             discrepancies.push(ReconciliationDiscrepancy::UnexpectedVenueOrder {
                 client_order_id: *client_order_id,
                 venue_status: remote.status,
@@ -284,12 +299,7 @@ mod tests {
 
     #[test]
     fn missing_active_local_order_is_reported() {
-        let report = reconcile_orders(
-            &local_open(),
-            &[],
-            ReconciliationConfig::default(),
-        )
-        .unwrap();
+        let report = reconcile_orders(&local_open(), &[], ReconciliationConfig::default()).unwrap();
         assert!(!report.consistent);
         assert!(matches!(
             report.discrepancies.as_slice(),
@@ -311,23 +321,27 @@ mod tests {
         .unwrap();
         assert!(report.discrepancies.iter().any(|d| matches!(
             d,
-            ReconciliationDiscrepancy::UnexpectedVenueOrder { client_order_id: 1, .. }
+            ReconciliationDiscrepancy::UnexpectedVenueOrder {
+                client_order_id: 1,
+                ..
+            }
         )));
     }
 
     #[test]
     fn quantity_status_and_price_drift_are_all_visible() {
         let mut local = local_open();
-        local.apply_event(VenueExecutionEvent::Fill {
-            sequence: 2,
-            ts_ms: 110,
-            client_order_id: 1,
-            price: 100.0,
-            qty: 0.5,
-            fee: 0.01,
-            taker: false,
-        })
-        .unwrap();
+        local
+            .apply_event(VenueExecutionEvent::Fill {
+                sequence: 2,
+                ts_ms: 110,
+                client_order_id: 1,
+                price: 100.0,
+                qty: 0.5,
+                fee: 0.01,
+                taker: false,
+            })
+            .unwrap();
 
         let remote = VenueOrderSnapshot {
             client_order_id: 1,
@@ -350,7 +364,11 @@ mod tests {
             qty_tolerance: 1e-6,
             price_tolerance_bps: 0.1,
         };
-        assert!(reconcile_orders(&local_open(), &[remote], cfg).unwrap().consistent);
+        assert!(
+            reconcile_orders(&local_open(), &[remote], cfg)
+                .unwrap()
+                .consistent
+        );
     }
 
     #[test]

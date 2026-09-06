@@ -33,9 +33,12 @@ impl LegProgress {
     }
 
     pub fn fill_fraction(&self) -> f32 {
-        if self.intent.target_qty <= 1e-12 {
+        if self.intent.target_qty <= 1e-12
+        {
             0.0
-        } else {
+        }
+        else
+        {
             (self.filled_qty / self.intent.target_qty).clamp(0.0, 1.0)
         }
     }
@@ -110,18 +113,19 @@ impl MultiLegState {
         intents: Vec<LegIntent>,
         fill_fraction_tolerance: f32,
     ) -> Result<Self, MultiLegError> {
-        if strategy_id.is_empty() || intents.is_empty() {
+        if strategy_id.is_empty() || intents.is_empty()
+        {
             return Err(MultiLegError::EmptyStrategy);
         }
-        if !fill_fraction_tolerance.is_finite()
-            || !(0.0..=1.0).contains(&fill_fraction_tolerance)
+        if !fill_fraction_tolerance.is_finite() || !(0.0..=1.0).contains(&fill_fraction_tolerance)
         {
             return Err(MultiLegError::InvalidTolerance);
         }
 
         let mut seen = std::collections::BTreeSet::new();
         let mut legs = Vec::with_capacity(intents.len());
-        for intent in intents {
+        for intent in intents
+        {
             if intent.leg_id.is_empty()
                 || intent.venue.is_empty()
                 || intent.symbol.is_empty()
@@ -132,7 +136,8 @@ impl MultiLegState {
                     leg_id: intent.leg_id,
                 });
             }
-            if !seen.insert(intent.leg_id.clone()) {
+            if !seen.insert(intent.leg_id.clone())
+            {
                 return Err(MultiLegError::DuplicateLegId {
                     leg_id: intent.leg_id,
                 });
@@ -179,20 +184,21 @@ impl MultiLegState {
         }
         let previous = leg.filled_qty;
         let next = previous + qty;
-        leg.avg_fill_price =
-            (leg.avg_fill_price * previous + price * qty) / next.max(1e-12);
+        leg.avg_fill_price = (leg.avg_fill_price * previous + price * qty) / next.max(1e-12);
         leg.filled_qty = next;
         leg.fees_paid += fee;
         Ok(())
     }
 
     pub fn max_fill_fraction_gap(&self) -> f32 {
-        if self.legs.is_empty() {
+        if self.legs.is_empty()
+        {
             return 0.0;
         }
         let mut min_fraction = 1.0f32;
         let mut max_fraction = 0.0f32;
-        for leg in &self.legs {
+        for leg in &self.legs
+        {
             let fraction = leg.fill_fraction();
             min_fraction = min_fraction.min(fraction);
             max_fraction = max_fraction.max(fraction);
@@ -201,15 +207,20 @@ impl MultiLegState {
     }
 
     pub fn status(&self) -> MultiLegStatus {
-        if self.legs.iter().all(|leg| leg.complete()) {
+        if self.legs.iter().all(|leg| leg.complete())
+        {
             return MultiLegStatus::Complete;
         }
-        if self.legs.iter().all(|leg| leg.filled_qty <= 1e-12) {
+        if self.legs.iter().all(|leg| leg.filled_qty <= 1e-12)
+        {
             return MultiLegStatus::Unfilled;
         }
-        if self.max_fill_fraction_gap() > self.fill_fraction_tolerance {
+        if self.max_fill_fraction_gap() > self.fill_fraction_tolerance
+        {
             MultiLegStatus::Imbalanced
-        } else {
+        }
+        else
+        {
             MultiLegStatus::BalancedPartial
         }
     }
@@ -218,12 +229,15 @@ impl MultiLegState {
     /// multi-leg state.
     pub fn recovery_plan(&self, mode: RecoveryMode) -> RecoveryPlan {
         let mut actions = Vec::new();
-        for leg in &self.legs {
-            let (side, qty) = match mode {
+        for leg in &self.legs
+        {
+            let (side, qty) = match mode
+            {
                 RecoveryMode::CompleteOutstanding => (leg.intent.side, leg.remaining_qty()),
                 RecoveryMode::NeutralizeFilled => (leg.intent.side.opposite(), leg.filled_qty),
             };
-            if qty > 1e-9 {
+            if qty > 1e-9
+            {
                 actions.push(RecoveryAction {
                     leg_id: leg.intent.leg_id.clone(),
                     venue: leg.intent.venue.clone(),
