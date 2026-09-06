@@ -203,7 +203,8 @@ pub fn plan_grid(cfg: &GridConfig, instrument: &Instrument) -> Result<GridPlan, 
 
         let entry_id = (index as u64) * 2 + 1;
         let exit_id = entry_id + 1;
-        let entry_order = Order::limit(entry_id, &cfg.symbol, cfg.side, base_qty, price).post_only();
+        let entry_order =
+            Order::limit(entry_id, &cfg.symbol, cfg.side, base_qty, price).post_only();
         let exit_order = Order::new(
             exit_id,
             &cfg.symbol,
@@ -310,7 +311,11 @@ mod tests {
     #[test]
     fn sell_grid_take_profit_is_below_entry() {
         let plan = plan_grid(&config(Side::Sell), &instrument()).unwrap();
-        assert!(plan.levels.iter().all(|level| level.take_profit_price < level.price));
+        assert!(
+            plan.levels
+                .iter()
+                .all(|level| level.take_profit_price < level.price)
+        );
     }
 
     #[test]
@@ -321,7 +326,8 @@ mod tests {
         cfg.min_spread_fraction = 0.01;
         assert!(matches!(
             plan_grid(&cfg, &instrument()),
-            Err(GridPlanError::RoundedPriceDuplicate { .. }) | Err(GridPlanError::SpreadTooTight { .. })
+            Err(GridPlanError::RoundedPriceDuplicate { .. })
+                | Err(GridPlanError::SpreadTooTight { .. })
         ));
     }
 
@@ -329,7 +335,10 @@ mod tests {
     fn invalid_budget_and_throttle_are_rejected() {
         let mut cfg = config(Side::Buy);
         cfg.total_quote = 10.0;
-        assert_eq!(plan_grid(&cfg, &instrument()).unwrap_err(), GridPlanError::InvalidBudget);
+        assert_eq!(
+            plan_grid(&cfg, &instrument()).unwrap_err(),
+            GridPlanError::InvalidBudget
+        );
 
         let mut cfg = config(Side::Buy);
         cfg.max_open_orders = 4;
@@ -341,7 +350,10 @@ mod tests {
 
     #[test]
     fn lifecycle_only_accepts_declared_transitions() {
-        let mut level = plan_grid(&config(Side::Buy), &instrument()).unwrap().levels.remove(0);
+        let mut level = plan_grid(&config(Side::Buy), &instrument())
+            .unwrap()
+            .levels
+            .remove(0);
         assert!(transition_level(&mut level, GridLevelState::EntryWorking));
         assert!(transition_level(&mut level, GridLevelState::EntryFilled));
         assert!(!transition_level(&mut level, GridLevelState::Complete));
