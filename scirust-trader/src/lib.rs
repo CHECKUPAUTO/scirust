@@ -12,7 +12,8 @@
 //!                                   ├─► strategy ─► backtest ─► metrics ─► scanner ─► proof
 //!  orderbook ─► orders ─► portfolio ┘         └─► execution / marketmaking / microstructure
 //!  derivatives ─► funding / basis / OI / liquidations ─► strategy / scanner
-//!             └─► rolling history / price-OI regimes
+//!             ├─► rolling history / price-OI regimes
+//!             └─► divergences / liquidation clusters
 //!  model ─► certify ─► agent+LLM ─► proof   (certified, LLM-bounded prediction)
 //! ```
 //!
@@ -36,6 +37,7 @@ pub mod chart;
 pub mod cli;
 pub mod dashboard;
 pub mod derivatives;
+pub mod derivatives_context;
 pub mod derivatives_history;
 pub mod execution;
 pub mod indicators;
