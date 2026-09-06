@@ -19,6 +19,7 @@
 //!                    ├─► cross-exchange market-making analysis
 //!                    └─► cost-aware basket rebalancing
 //!  venue events ─► normalized contracts ─► lifecycle ─► replay / reconciliation
+//!                                      └─► latency / queue / back-pressure models
 //!  derivatives ─► funding / basis / OI / liquidations ─► strategy / scanner
 //!             ├─► rolling history / price-OI regimes
 //!             └─► divergences / liquidation clusters
@@ -53,6 +54,7 @@ pub mod derivatives;
 pub mod derivatives_context;
 pub mod derivatives_history;
 pub mod execution;
+pub mod execution_realism;
 pub mod funding_carry;
 pub mod grid;
 pub mod indicators;
