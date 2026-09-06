@@ -45,9 +45,9 @@ The roadmap extends these foundations rather than replacing them.
 
 Close the largest market-model gap versus crypto-native platforms: perpetual futures state.
 
-### 1A. Core derivatives state — IN PROGRESS
+### 1A. Core derivatives state — COMPLETE
 
-Implement deterministic primitives for:
+Implemented deterministic primitives for:
 
 - spot/perpetual basis;
 - mark/index basis;
@@ -56,16 +56,22 @@ Implement deterministic primitives for:
 - long/short liquidation imbalance;
 - a serializable report usable by strategies, scanners and MCP tools.
 
-### 1B. Historical derivatives features
+### 1B. Historical derivatives features — IN PROGRESS
 
-Add rolling features over timestamp-aligned observations:
+Implemented first historical slice:
 
-- funding z-score and percentile;
-- basis z-score and percentile;
-- open-interest momentum and acceleration;
-- liquidation intensity and liquidation clusters;
-- price/OI regime classification (price up/down x OI up/down);
-- divergence features combining price, funding, basis and OI.
+- funding trailing z-score and empirical percentile;
+- basis trailing z-score and empirical percentile;
+- one-step and configurable-lookback open-interest momentum;
+- open-interest acceleration from adjacent percentage changes;
+- liquidation total, imbalance, trailing z-score and percentile;
+- price/OI regime classification (price up/down x OI up/down).
+
+Remaining historical work:
+
+- liquidation-cluster detection with explicit configurable thresholds;
+- divergence features combining price, funding, basis and OI;
+- deterministic replay fixtures over longer timestamp-aligned histories.
 
 ### 1C. Validation
 
