@@ -16,4 +16,5 @@ pub mod sim;
 pub mod sis;
 pub mod tolerance;
 pub mod trader;
+pub mod trader_research;
 pub mod wallet;
