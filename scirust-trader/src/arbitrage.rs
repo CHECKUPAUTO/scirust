@@ -111,15 +111,12 @@ pub enum ArbitrageError {
     InvalidSellAdditionalCost,
 }
 
-fn side_specific_error(buy: bool, buy_error: ArbitrageError, sell_error: ArbitrageError) -> ArbitrageError {
-    if buy
-    {
-        buy_error
-    }
-    else
-    {
-        sell_error
-    }
+fn side_specific_error(
+    buy: bool,
+    buy_error: ArbitrageError,
+    sell_error: ArbitrageError,
+) -> ArbitrageError {
+    if buy { buy_error } else { sell_error }
 }
 
 fn validate_venue(venue: &ArbitrageVenue, buy: bool) -> Result<(), ArbitrageError> {
@@ -291,7 +288,8 @@ pub fn analyze_cross_venue(
         {
             constraints.push(ArbitrageConstraint::InsufficientBuyQuoteBalance);
         },
-        Some(_) => {},
+        Some(_) =>
+        {},
     }
     match sell.available_base
     {
@@ -300,7 +298,8 @@ pub fn analyze_cross_venue(
         {
             constraints.push(ArbitrageConstraint::InsufficientSellInventory);
         },
-        Some(_) => {},
+        Some(_) =>
+        {},
     }
 
     let balance_blocked = constraints.iter().any(|c| {
@@ -417,9 +416,11 @@ mod tests {
         assert!(report.buy_vwap > 108.0);
         assert!(report.sell_vwap < 102.0);
         assert!(!report.market_edge_positive);
-        assert!(report
-            .constraints
-            .contains(&ArbitrageConstraint::BelowNetProfitThreshold));
+        assert!(
+            report
+                .constraints
+                .contains(&ArbitrageConstraint::BelowNetProfitThreshold)
+        );
     }
 
     #[test]
@@ -428,9 +429,11 @@ mod tests {
         let sell = venue("B", "USD", 995, &[(103.0, 10.0)], &[(104.0, 10.0)]);
         let report = analyze_cross_venue(&buy, &sell, &cfg(1.0)).unwrap();
         assert!(!report.market_edge_positive);
-        assert!(report
-            .constraints
-            .contains(&ArbitrageConstraint::BuyDepthInsufficient));
+        assert!(
+            report
+                .constraints
+                .contains(&ArbitrageConstraint::BuyDepthInsufficient)
+        );
     }
 
     #[test]
@@ -452,9 +455,11 @@ mod tests {
         assert!(report.gross_spread_bps > 0.0);
         assert!(report.net_profit_common < 0.0);
         assert!(!report.market_edge_positive);
-        assert!(report
-            .constraints
-            .contains(&ArbitrageConstraint::BelowNetProfitThreshold));
+        assert!(
+            report
+                .constraints
+                .contains(&ArbitrageConstraint::BelowNetProfitThreshold)
+        );
     }
 
     #[test]
@@ -463,10 +468,16 @@ mod tests {
         let sell = venue("B", "USD", 995, &[(103.0, 10.0)], &[(104.0, 10.0)]);
         let report = analyze_cross_venue(&buy, &sell, &cfg(1.0)).unwrap();
         assert!(!report.market_edge_positive);
-        assert!(report.constraints.contains(&ArbitrageConstraint::BuyQuoteStale));
-        assert!(report
-            .constraints
-            .contains(&ArbitrageConstraint::LegTimestampSkew));
+        assert!(
+            report
+                .constraints
+                .contains(&ArbitrageConstraint::BuyQuoteStale)
+        );
+        assert!(
+            report
+                .constraints
+                .contains(&ArbitrageConstraint::LegTimestampSkew)
+        );
     }
 
     #[test]
@@ -478,12 +489,16 @@ mod tests {
         let report = analyze_cross_venue(&buy, &sell, &cfg(1.0)).unwrap();
         assert!(report.market_edge_positive);
         assert!(!report.fully_executable);
-        assert!(report
-            .constraints
-            .contains(&ArbitrageConstraint::BuyBalanceUnverified));
-        assert!(report
-            .constraints
-            .contains(&ArbitrageConstraint::SellInventoryUnverified));
+        assert!(
+            report
+                .constraints
+                .contains(&ArbitrageConstraint::BuyBalanceUnverified)
+        );
+        assert!(
+            report
+                .constraints
+                .contains(&ArbitrageConstraint::SellInventoryUnverified)
+        );
     }
 
     #[test]
