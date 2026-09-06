@@ -25,6 +25,8 @@
 //!  ML data ─► temporal leakage checks ─► linear/tree/forest/boosting/sequence baselines
 //!                  ├─► existing deterministic MLP
 //!                  └─► SciRust RL Env ─► train / frozen holdout separation
+//!  validation ─► purged CV / embargo ─► bootstrap / Holm / DSR / CSCV-PBO
+//!                  └─► parameter / regime / cost / perturbation evidence ─► manifest
 //!  derivatives ─► funding / basis / OI / liquidations ─► strategy / scanner
 //!             ├─► rolling history / price-OI regimes
 //!             └─► divergences / liquidation clusters
@@ -84,11 +86,14 @@ pub mod portfolio_opt;
 pub mod proof;
 pub mod reconciliation;
 pub mod regime;
+pub mod research_validation;
 pub mod risk;
 pub mod rl_market;
 pub mod robustness;
 pub mod runtime_replay;
 pub mod scanner;
+pub mod stat_validation;
 pub mod strategy;
+pub mod validation_cv;
 pub mod venue;
 pub mod wallet;
