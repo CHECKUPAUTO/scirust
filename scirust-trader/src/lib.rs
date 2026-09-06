@@ -11,6 +11,7 @@
 //!  data ─► indicators ─► patterns ─┐
 //!                                   ├─► strategy ─► backtest ─► metrics ─► scanner ─► proof
 //!  orderbook ─► orders ─► portfolio ┘         └─► execution / marketmaking / microstructure
+//!  derivatives ─► funding / basis / OI / liquidations ─► strategy / scanner
 //!  model ─► certify ─► agent+LLM ─► proof   (certified, LLM-bounded prediction)
 //! ```
 //!
@@ -33,6 +34,7 @@ pub mod certify;
 pub mod chart;
 pub mod cli;
 pub mod dashboard;
+pub mod derivatives;
 pub mod execution;
 pub mod indicators;
 pub mod market;
