@@ -378,7 +378,8 @@ mod tests {
         let mut env = MarketRlEnv::new(&d, 0..2, 10.0).unwrap();
         env.reset();
         let (_, reward, _) = env.step(&MarketAction::Long);
-        assert!((reward - 0.009).abs() < 1e-12);
+        let expected = f64::from(d.rows[0].target) - 10.0 / 10_000.0;
+        assert!((reward - expected).abs() < 1e-12);
     }
 
     #[test]
