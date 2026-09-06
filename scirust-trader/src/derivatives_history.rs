@@ -346,7 +346,9 @@ mod tests {
         assert!((report.open_interest_change_pct.unwrap() - (100.0 / 11.0)).abs() < 1e-5);
         assert!((report.open_interest_momentum_pct.unwrap() - 20.0).abs() < 1e-6);
         let expected_acceleration = 100.0 / 11.0 - 10.0;
-        assert!((report.open_interest_acceleration_pct.unwrap() - expected_acceleration).abs() < 1e-5);
+        assert!(
+            (report.open_interest_acceleration_pct.unwrap() - expected_acceleration).abs() < 1e-5
+        );
         assert!((report.liquidation_total - 30.0).abs() < 1e-6);
         assert!((report.liquidation_zscore.unwrap() - 1.0).abs() < 1e-6);
         assert!((report.liquidation_percentile.unwrap() - 1.0).abs() < 1e-6);
