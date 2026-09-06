@@ -8,6 +8,7 @@ use crate::registry::McpTool;
 use serde::Serialize;
 use serde_json::{Value, json};
 
+use scirust_trader::comparison::{CandidateEvidence, ComparisonMetric, compare_candidates, comparison_csv};
 use scirust_trader::ml_dataset::TimeSeriesMlDataset;
 use scirust_trader::research_validation::{ExperimentManifest, cost_stress};
 use scirust_trader::rl_market::RlExperimentPlan;
@@ -61,6 +62,7 @@ pub fn trader_research_tools() -> Vec<McpTool> {
         pbo_tool(),
         cost_stress_tool(),
         temporal_rl_plan_tool(),
+        compare_tool(),
         manifest_tool(),
     ]
 }
@@ -209,6 +211,39 @@ fn temporal_rl_plan_tool() -> McpTool {
     }
 }
 
+fn compare_tool() -> McpTool {
+    McpTool {
+        name: "trader_research_compare".to_string(),
+        description: "Build the final multi-metric candidate comparison with explicit metric directions, per-metric ranks and a Pareto front. No hidden weighting or composite profitability score is used.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "required": ["metrics", "candidates"],
+            "properties": {
+                "metrics": {"type": "array", "description": "ComparisonMetric objects: name, direction (HigherBetter|LowerBetter), unit"},
+                "candidates": {"type": "array", "description": "CandidateEvidence objects with identical metric sets and evidence_refs"}
+            }
+        }),
+        handler: Box::new(|args| {
+            let metrics: Vec<ComparisonMetric> = serde_json::from_value(
+                args.get("metrics")
+                    .cloned()
+                    .ok_or_else(|| "missing `metrics`".to_string())?,
+            )
+            .map_err(|error| format!("invalid `metrics`: {error}"))?;
+            let candidates: Vec<CandidateEvidence> = serde_json::from_value(
+                args.get("candidates")
+                    .cloned()
+                    .ok_or_else(|| "missing `candidates`".to_string())?,
+            )
+            .map_err(|error| format!("invalid `candidates`: {error}"))?;
+            let report = compare_candidates(metrics, candidates)
+                .map_err(|error| format!("{error:?}"))?;
+            let csv = comparison_csv(&report);
+            Ok(json!({"report": report, "csv": csv}))
+        }),
+    }
+}
+
 fn manifest_tool() -> McpTool {
     McpTool {
         name: "trader_research_manifest".to_string(),
@@ -236,7 +271,9 @@ fn manifest_tool() -> McpTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use scirust_trader::comparison::MetricDirection;
     use scirust_trader::ml_dataset::{FeatureProvenance, MlRow};
+    use std::collections::BTreeMap;
 
     fn dataset_value() -> Value {
         to_value(&TimeSeriesMlDataset {
@@ -292,5 +329,24 @@ mod tests {
         .unwrap();
         assert_eq!(result["train"]["start"], 0);
         assert_eq!(result["holdout"]["end"], 12);
+    }
+
+    #[test]
+    fn comparison_tool_returns_report_and_csv() {
+        let tool = compare_tool();
+        let metrics = vec![ComparisonMetric {
+            name: "holdout_sharpe".into(),
+            direction: MetricDirection::HigherBetter,
+            unit: "ratio".into(),
+        }];
+        let candidates = vec![CandidateEvidence {
+            candidate_id: "baseline".into(),
+            family: "linear".into(),
+            metrics: BTreeMap::from([("holdout_sharpe".into(), 0.4)]),
+            evidence_refs: vec!["baseline.json".into()],
+        }];
+        let result = (tool.handler)(json!({"metrics": metrics, "candidates": candidates})).unwrap();
+        assert_eq!(result["report"]["pareto_front"][0], "baseline");
+        assert!(result["csv"].as_str().unwrap().contains("baseline.json"));
     }
 }
