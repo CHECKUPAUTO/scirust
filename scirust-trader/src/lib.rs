@@ -22,6 +22,8 @@
 //!                                      ├─► latency / queue / back-pressure models
 //!                                      └─► multi-leg imbalance / recovery plans
 //!  indicators ─► core catalogue + adaptive / OHLC-volatility / flow gaps
+//!  ML data ─► temporal leakage checks ─► linear/tree/forest/boosting/sequence baselines
+//!                  └─► existing deterministic MLP / SciRust RL components
 //!  derivatives ─► funding / basis / OI / liquidations ─► strategy / scanner
 //!             ├─► rolling history / price-OI regimes
 //!             └─► divergences / liquidation clusters
@@ -65,6 +67,8 @@ pub mod market;
 pub mod marketmaking;
 pub mod metrics;
 pub mod microstructure;
+pub mod ml_baselines;
+pub mod ml_dataset;
 pub mod model;
 pub mod multileg;
 pub mod optimize;
