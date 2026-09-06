@@ -13,7 +13,8 @@
 //!  orderbook ─► orders ─► portfolio ┘         └─► execution / marketmaking / microstructure
 //!                    └─► DCA planning
 //!  derivatives ─► funding / basis / OI / liquidations ─► strategy / scanner
-//!             └─► rolling history / price-OI regimes
+//!             ├─► rolling history / price-OI regimes
+//!             └─► divergences / liquidation clusters
 //!  model ─► certify ─► agent+LLM ─► proof   (certified, LLM-bounded prediction)
 //! ```
 //!
@@ -38,6 +39,7 @@ pub mod cli;
 pub mod dashboard;
 pub mod dca;
 pub mod derivatives;
+pub mod derivatives_context;
 pub mod derivatives_history;
 pub mod execution;
 pub mod indicators;
