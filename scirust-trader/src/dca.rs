@@ -104,7 +104,12 @@ fn valid_fraction(value: Option<f32>) -> bool {
     value.map(|v| v.is_finite() && v >= 0.0).unwrap_or(true)
 }
 
-fn exit_reference(weighted_entry: f32, side: Side, fraction: Option<f32>, profit: bool) -> Option<f32> {
+fn exit_reference(
+    weighted_entry: f32,
+    side: Side,
+    fraction: Option<f32>,
+    profit: bool,
+) -> Option<f32> {
     let fraction = fraction?;
     let direction = match (side, profit)
     {
@@ -146,11 +151,8 @@ pub fn plan_dca(cfg: &DcaConfig, instrument: &Instrument) -> Result<DcaPlan, Dca
     let mut total_base_qty = 0.0f32;
     let mut weighted_notional = 0.0f32;
 
-    for (index, (&raw_price, &requested_quote)) in cfg
-        .prices
-        .iter()
-        .zip(cfg.quote_amounts.iter())
-        .enumerate()
+    for (index, (&raw_price, &requested_quote)) in
+        cfg.prices.iter().zip(cfg.quote_amounts.iter()).enumerate()
     {
         if !raw_price.is_finite() || raw_price <= 0.0
         {
@@ -223,7 +225,12 @@ pub fn plan_dca(cfg: &DcaConfig, instrument: &Instrument) -> Result<DcaPlan, Dca
         rounded_quote_total,
         total_base_qty,
         weighted_entry_price,
-        take_profit_price: exit_reference(weighted_entry_price, cfg.side, cfg.take_profit_pct, true),
+        take_profit_price: exit_reference(
+            weighted_entry_price,
+            cfg.side,
+            cfg.take_profit_pct,
+            true,
+        ),
         stop_loss_price: exit_reference(weighted_entry_price, cfg.side, cfg.stop_loss_pct, false),
     })
 }
