@@ -56,9 +56,7 @@ pub struct LiquidationClusterReport {
 }
 
 fn pct_change(previous: f32, current: f32) -> Option<f32> {
-    if !previous.is_finite()
-        || !current.is_finite()
-        || previous.abs() <= f32::EPSILON
+    if !previous.is_finite() || !current.is_finite() || previous.abs() <= f32::EPSILON
     {
         return None;
     }
@@ -80,10 +78,7 @@ fn opposed(a: Option<f32>, b: Option<f32>) -> Option<bool> {
 }
 
 /// Compute one-step mark, funding, basis and open-interest changes.
-pub fn changes(
-    previous: &DerivativesSnapshot,
-    current: &DerivativesSnapshot,
-) -> DerivativesChange {
+pub fn changes(previous: &DerivativesSnapshot, current: &DerivativesSnapshot) -> DerivativesChange {
     let previous_basis = basis_bps(previous.mark_price, previous.spot_price);
     let current_basis = basis_bps(current.mark_price, current.spot_price);
     let basis_change_bps = match (previous_basis, current_basis)
@@ -91,7 +86,8 @@ pub fn changes(
         (Some(a), Some(b)) => Some(b - a),
         _ => None,
     };
-    let funding_change_bps = if previous.funding_rate.is_finite() && current.funding_rate.is_finite()
+    let funding_change_bps = if previous.funding_rate.is_finite()
+        && current.funding_rate.is_finite()
     {
         Some((current.funding_rate - previous.funding_rate) * 10_000.0)
     }
