@@ -18,6 +18,7 @@
 //!                    ├─► funding-carry stress scenarios
 //!                    ├─► cross-exchange market-making analysis
 //!                    └─► cost-aware basket rebalancing
+//!  venue events ─► normalized contracts ─► order lifecycle / deterministic replay
 //!  derivatives ─► funding / basis / OI / liquidations ─► strategy / scanner
 //!             ├─► rolling history / price-OI regimes
 //!             └─► divergences / liquidation clusters
@@ -62,6 +63,7 @@ pub mod microstructure;
 pub mod model;
 pub mod optimize;
 pub mod options;
+pub mod order_lifecycle;
 pub mod orderbook;
 pub mod orders;
 pub mod pairs;
@@ -74,4 +76,5 @@ pub mod risk;
 pub mod robustness;
 pub mod scanner;
 pub mod strategy;
+pub mod venue;
 pub mod wallet;
