@@ -11,7 +11,7 @@
 //!  data ─► indicators ─► patterns ─┐
 //!                                   ├─► strategy ─► backtest ─► metrics ─► scanner ─► proof
 //!  orderbook ─► orders ─► portfolio ┘         └─► execution / marketmaking / microstructure
-//!                    └─► DCA planning
+//!                    └─► DCA / grid planning
 //!  derivatives ─► funding / basis / OI / liquidations ─► strategy / scanner
 //!             └─► rolling history / price-OI regimes
 //!  model ─► certify ─► agent+LLM ─► proof   (certified, LLM-bounded prediction)
@@ -40,6 +40,7 @@ pub mod dca;
 pub mod derivatives;
 pub mod derivatives_history;
 pub mod execution;
+pub mod grid;
 pub mod indicators;
 pub mod market;
 pub mod marketmaking;
