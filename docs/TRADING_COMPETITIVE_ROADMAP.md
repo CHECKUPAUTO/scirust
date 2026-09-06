@@ -4,13 +4,13 @@ Status date: 2026-09-06
 
 ## Goal
 
-Make `scirust-trader` the strongest auditable open-source quantitative crypto-trading core in the comparison set, measured by **verified capability coverage, deterministic behavior, research validation, and agent usability**.
+Make `scirust-trader` the strongest auditable open-source quantitative crypto-trading core in the comparison set, measured by **verified capability coverage, deterministic behavior, research validation, execution realism, and agent usability**.
 
 This roadmap does **not** define success as guaranteed profitability. Every quantitative claim must be demonstrated by reproducible tests or benchmarks. Existing SciRust invariants remain dominant: deterministic reductions, simulation-first execution, evidence-backed recommendations, and proof-sealed decisions.
 
 ## External reference set
 
-The comparison baseline is the current public code of:
+Current capability references:
 
 - Freqtrade / FreqAI: https://github.com/freqtrade/freqtrade
 - Hummingbot: https://github.com/hummingbot/hummingbot
@@ -39,64 +39,114 @@ The roadmap extends these foundations rather than replacing them.
 
 ---
 
-## Phase 1 — Crypto derivatives intelligence
+## Phase 1 — Crypto derivatives intelligence — COMPLETE
 
-### Objective
+### 1A. Core derivatives state — COMPLETE
 
-Close the largest market-model gap versus crypto-native platforms: perpetual futures state.
-
-### 1A. Core derivatives state — IN PROGRESS
-
-Implement deterministic primitives for:
+Implemented deterministic primitives for:
 
 - spot/perpetual basis;
 - mark/index basis;
 - funding-rate normalization and signed funding cash-flow accounting;
 - open-interest change;
 - long/short liquidation imbalance;
-- a serializable report usable by strategies, scanners and MCP tools.
+- a serializable derivatives report.
 
-### 1B. Historical derivatives features
+### 1B. Historical derivatives context — COMPLETE
 
-Add rolling features over timestamp-aligned observations:
+Implemented:
 
-- funding z-score and percentile;
-- basis z-score and percentile;
-- open-interest momentum and acceleration;
-- liquidation intensity and liquidation clusters;
+- funding trailing z-score and empirical percentile;
+- basis trailing z-score and empirical percentile;
+- one-step and configurable-lookback open-interest momentum;
+- open-interest acceleration from adjacent percentage changes;
+- liquidation total, imbalance, trailing z-score and percentile;
 - price/OI regime classification (price up/down x OI up/down);
-- divergence features combining price, funding, basis and OI.
+- one-step mark return, funding change, basis change and OI change with explicit units;
+- descriptive sign-divergence flags across price/funding/basis/OI;
+- configurable liquidation-cluster detection using both z-score and percentile gates;
+- deterministic repeated-analysis validation.
 
-### 1C. Validation
+No single derivatives metric is promoted automatically into a trading recommendation.
 
-- unit tests for signs, units, invalid input and edge cases;
-- deterministic replay tests;
-- fixtures checked against independently calculated examples;
-- no trading recommendation inferred from a single derivatives metric.
-
-**Definition of done:** SciRust can represent and analyze the core perpetual-futures state needed by funding, basis and liquidation-aware strategies without exchange-specific code.
+**Definition of done:** satisfied for the venue-neutral quantitative layer. Exchange adapters and live derivatives feeds belong to Phase 3.
 
 ---
 
-## Phase 2 — Strategy-family parity and extension
+## Phase 2 — Strategy-family parity and extension — IN PROGRESS
 
-### Objective
+### 2A. Deterministic DCA planning — IMPLEMENTED
 
-Cover strategy families that Hummingbot/OctoBot expose explicitly but SciRust does not yet expose as first-class strategy objects.
+Implemented foundation:
 
-Implement, in simulation-first form:
+- explicit quote allocations and trigger/reference prices;
+- maker/post-only and taker activation templates;
+- instrument tick/lot/min-notional validation;
+- requested vs rounded budget accounting;
+- quantity-weighted entry reference;
+- directional take-profit and stop-loss references.
 
-1. configurable DCA / Smart-DCA scheduling;
-2. bounded grid strategy with explicit inventory accounting;
-3. cross-venue arbitrage opportunity model including fees and executable depth;
-4. spot/perpetual basis scanner;
-5. funding-carry scanner with explicit funding-direction accounting;
-6. cross-exchange market-making model using venue-specific quotes and transfer/latency assumptions;
-7. basket/index rebalancing strategy.
+Remaining runtime work: trailing stop, time-limit behavior and persisted execution lifecycle belong to the execution-runtime layer rather than the closed-bar `Strategy` trait.
 
-Every strategy must expose the assumptions required for profitability calculations. Fees, slippage and liquidity cannot default silently to zero in any scanner that labels an opportunity as economically positive.
+### 2B. Bounded Grid planning — IMPLEMENTED
 
-**Definition of done:** every strategy family verified in Hummingbot and OctoBot has either a SciRust first-class equivalent or a documented reason why SciRust intentionally omits it.
+Implemented foundation:
+
+- deterministic arithmetic levels inside inclusive bounds;
+- explicit quote budget allocation;
+- tick/lot/min-notional validation;
+- duplicate/tight rounded-level rejection;
+- post-only entry and reduce-only take-profit templates;
+- `max_open_orders` throttle contract;
+- explicit replayable level lifecycle state machine.
+
+Remaining runtime work: enforcement of throttling, amendments/cancellation and reconciliation belongs to Phase 3.
+
+### 2C. Cross-venue arbitrage — NEXT
+
+Implement a venue-neutral opportunity model that only labels an opportunity economically positive after all applicable assumptions are explicit:
+
+- buy and sell venues/instruments;
+- executable depth for the requested quantity rather than top-of-book only;
+- quote-currency conversion when venues use different quotes;
+- maker/taker fees;
+- slippage/market impact;
+- network/gas/transfer costs where applicable;
+- available inventory/balance constraints;
+- minimum required net profitability;
+- stale-quote / timestamp checks;
+- leg-risk exposure if fills are not simultaneous.
+
+**Acceptance rule:** gross spread alone can never imply profitability.
+
+### 2D. Spot/perpetual basis scanner
+
+Implement:
+
+- executable spot and perpetual prices for a common size;
+- explicit basis and annualized basis conventions;
+- funding impact over a declared holding horizon;
+- fees/slippage on both legs;
+- collateral and leverage assumptions;
+- basis convergence scenario rather than guaranteed convergence.
+
+### 2E. Funding-carry scanner
+
+Implement:
+
+- signed funding direction;
+- expected funding cash flow for a declared horizon;
+- hedge-leg cost;
+- basis drift sensitivity;
+- fees/slippage and re-hedging costs;
+- scenario/stress output rather than a single deterministic profit forecast.
+
+### 2F. Remaining strategy families
+
+- cross-exchange market-making model with venue-specific quotes and latency assumptions;
+- basket/index rebalancing strategy with cost-aware turnover constraints.
+
+**Phase 2 definition of done:** every strategy family verified in Hummingbot/OctoBot has a SciRust first-class equivalent or a documented intentional omission, and every economically-positive label exposes its cost/liquidity assumptions.
 
 ---
 
@@ -110,13 +160,14 @@ Implement:
 
 - venue-neutral market-data adapter traits;
 - normalized instrument metadata and exchange trading rules;
-- order lifecycle state machine;
+- explicit order lifecycle state machine;
 - partial fills, cancellations and amendments;
 - maker/taker fee schedules per venue/instrument;
 - latency and queue-position simulation;
 - rate-limit/back-pressure model;
 - disconnect/reconnect and deterministic event replay;
-- reconciliation of local simulated state against imported exchange event streams.
+- reconciliation of local simulated state against imported exchange event streams;
+- leg-risk and recovery semantics for multi-venue strategies.
 
 Live order submission is a separate policy surface and must not be required by the quantitative core.
 
@@ -126,34 +177,21 @@ Live order submission is a separate policy surface and must not be required by t
 
 ## Phase 4 — Indicator and feature-library coverage
 
-### Objective
-
 Use Jesse as the breadth reference while avoiding low-value duplication.
 
 Process:
 
-1. inventory Jesse's indicator catalogue;
+1. inventory Jesse's current indicator catalogue;
 2. map exact equivalents in SciRust;
 3. rank missing indicators by independent information content and usage in published/systematic strategies;
 4. implement high-value gaps first;
 5. add cross-check fixtures against published formulas or independent implementations.
 
-Priority families include:
-
-- directional-movement / ADX family;
-- Aroon family;
-- adaptive moving averages;
-- volatility estimators beyond ATR;
-- volume/flow indicators;
-- cycle/filter indicators where evidence justifies them.
-
-**Definition of done:** SciRust has documented coverage for the reference catalogue and no important indicator family is missing solely because it was overlooked.
+Priority families include adaptive moving averages, additional volatility estimators, volume/flow indicators and justified cycle/filter indicators. Existing ADX/DMI support must be counted rather than reimplemented.
 
 ---
 
 ## Phase 5 — ML baselines for market data
-
-### Objective
 
 Match FreqAI's practical model breadth without weakening SciRust's deterministic/evidence-first architecture.
 
@@ -162,7 +200,7 @@ Add or integrate reproducible baselines for:
 - decision trees and random forests;
 - gradient-boosted trees;
 - linear/logistic baselines;
-- MLP and sequence baselines already supported by SciRust components;
+- MLP and sequence baselines supported by SciRust components;
 - reinforcement-learning experiments through `scirust-rl-algo` only with explicit environment definitions and holdout evaluation.
 
 Required validation:
@@ -172,30 +210,24 @@ Required validation:
 - deterministic seeds where stochastic algorithms are used;
 - feature provenance;
 - baseline comparison against simple strategies;
-- no promotion of a model solely from in-sample performance.
-
-**Definition of done:** FreqAI model families have reproducible SciRust-native equivalents or well-defined bridges and are evaluated under stricter time-series validation.
+- no promotion solely from in-sample performance.
 
 ---
 
 ## Phase 6 — Research-grade robustness
 
-### Objective
-
-Make SciRust harder to fool with backtests than the reference projects.
-
-Extend the existing train/holdout + walk-forward system with, where mathematically appropriate:
+Extend the existing train/holdout, walk-forward and seeded Monte-Carlo machinery with, where mathematically appropriate:
 
 - purged/embargoed cross-validation for overlapping labels;
-- bootstrap confidence intervals for key metrics;
+- bootstrap confidence intervals;
 - multiple-testing correction for strategy searches;
 - Deflated Sharpe Ratio;
 - Probability of Backtest Overfitting / combinatorial validation;
 - parameter-stability surfaces;
 - regime-conditional performance;
 - transaction-cost stress tests;
-- Monte Carlo trade/order perturbation;
-- reproducibility manifests for every research result.
+- order/trade perturbation tests;
+- reproducibility manifests for every promoted result.
 
 **Definition of done:** every promoted strategy can carry a machine-readable robustness report and provenance proof.
 
@@ -203,26 +235,20 @@ Extend the existing train/holdout + walk-forward system with, where mathematical
 
 ## Phase 7 — Agent/MCP quantitative workbench
 
-### Objective
+Expose high-value capabilities through stable agent contracts for:
 
-Expose all high-value capabilities to an agent without forcing it to parse implementation details.
-
-Add MCP/tool surfaces for:
-
-- derivatives-state analysis;
+- derivatives-state/history/context analysis;
+- DCA/Grid plan construction;
 - order-book and microstructure analysis;
-- strategy construction;
+- strategy construction and backtesting;
 - pair/stat-arb scanning;
 - funding/basis/arbitrage scanning;
 - execution-cost estimation;
-- backtest and walk-forward validation;
-- optimizer/robustness reports;
+- walk-forward/optimizer/robustness reports;
 - portfolio/risk state;
 - proof/provenance retrieval.
 
-Every returned recommendation-like object must include the evidence, assumptions and data timestamp needed to audit it.
-
-**Definition of done:** an agent can perform the full observe -> hypothesize -> simulate -> validate -> compare -> document loop through stable tool contracts.
+Every recommendation-like object must include evidence, assumptions and data timestamps needed to audit it.
 
 ---
 
@@ -236,7 +262,8 @@ A capability counts as SciRust-complete only when all applicable boxes are true:
 - [ ] unit tests;
 - [ ] deterministic replay or reproducibility test;
 - [ ] transaction-cost assumptions explicit;
-- [ ] backtest integration;
+- [ ] liquidity/depth assumptions explicit;
+- [ ] backtest/simulation integration;
 - [ ] robustness validation;
 - [ ] agent/MCP surface where useful;
 - [ ] documentation with units/sign conventions;
@@ -246,8 +273,6 @@ The target is a verified capability superset of the reference projects' open-sou
 
 ## Execution order
 
-The implementation sequence is:
+`converge Phase 1 + DCA/Grid into master -> cross-venue arbitrage -> basis scanner -> funding-carry scanner -> venue-neutral execution runtime -> indicator gaps -> ML baselines -> robustness extensions -> MCP coverage -> competitive matrix refresh`
 
-`derivatives intelligence -> derivatives history/features -> DCA/grid -> arbitrage/basis/funding scanners -> venue-neutral execution contracts -> indicator gaps -> ML baselines -> robustness extensions -> MCP coverage -> refreshed competitive matrix`
-
-Work should advance in small mergeable PRs. Each PR must preserve the existing architecture and include its own validation evidence.
+Work advances in small mergeable PRs. Every PR must preserve the architecture and carry validation evidence. Stacked PRs are not considered integrated until their content reaches `master` and passes CI there.
