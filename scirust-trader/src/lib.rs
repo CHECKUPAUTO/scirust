@@ -16,7 +16,8 @@
 //!                    └─► cross-venue arbitrage analysis
 //!  derivatives ─► funding / basis / OI / liquidations ─► strategy / scanner
 //!             ├─► rolling history / price-OI regimes
-//!             └─► divergences / liquidation clusters
+//!             ├─► divergences / liquidation clusters
+//!             └─► explicit spot/perp basis scenarios
 //!  model ─► certify ─► agent+LLM ─► proof   (certified, LLM-bounded prediction)
 //! ```
 //!
@@ -36,6 +37,7 @@
 pub mod agent;
 pub mod arbitrage;
 pub mod backtest;
+pub mod basis;
 pub mod certify;
 pub mod chart;
 pub mod cli;
