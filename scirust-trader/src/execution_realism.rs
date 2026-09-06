@@ -206,8 +206,7 @@ impl RateLimitBucket {
         }
 
         let missing = required - self.available;
-        let intervals_needed = (missing as u64 + self.tokens_per_interval as u64 - 1)
-            / self.tokens_per_interval as u64;
+        let intervals_needed = (missing as u64).div_ceil(self.tokens_per_interval as u64);
         let since_refill = (now_ts_ms - self.last_refill_ts_ms) as u64;
         let until_next = self.refill_interval_ms.saturating_sub(since_refill);
         let retry_after_ms = until_next.saturating_add(
