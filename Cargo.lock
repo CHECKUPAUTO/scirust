@@ -4277,6 +4277,7 @@ dependencies = [
  "chrono",
  "reqwest",
  "scirust-core",
+ "scirust-learning",
  "serde",
  "serde_json",
  "sha2",
