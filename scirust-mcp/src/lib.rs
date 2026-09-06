@@ -95,6 +95,10 @@ pub fn registry_for_profile(profile: RegistryProfile) -> ToolRegistry {
     {
         registry.register(tool);
     }
+    for tool in tools::trader_research::trader_research_tools()
+    {
+        registry.register(tool);
+    }
     for tool in tools::wallet::wallet_tools()
     {
         registry.register(tool);
@@ -158,6 +162,12 @@ mod tests {
         assert!(registry.names().contains(&"trader_pair_scan"));
         assert!(registry.names().contains(&"trader_option_price"));
         assert!(registry.names().contains(&"trader_option_book"));
+        assert!(registry.names().contains(&"trader_research_purged_cv"));
+        assert!(registry.names().contains(&"trader_research_dsr"));
+        assert!(registry.names().contains(&"trader_research_pbo"));
+        assert!(registry.names().contains(&"trader_research_cost_stress"));
+        assert!(registry.names().contains(&"trader_research_rl_plan"));
+        assert!(registry.names().contains(&"trader_research_manifest"));
         assert!(registry.names().contains(&"wallet_validate_address"));
         assert!(registry.names().contains(&"wallet_build_evm_transaction"));
         assert!(registry.names().contains(&"wallet_authorization_status"));
