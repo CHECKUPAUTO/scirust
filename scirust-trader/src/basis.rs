@@ -9,7 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::derivatives::{basis_bps, funding_payment, PerpSide};
+use crate::derivatives::{PerpSide, basis_bps, funding_payment};
 use crate::orderbook::OrderBook;
 use crate::orders::Side;
 
@@ -253,10 +253,7 @@ pub fn analyze_basis_scenario(
 
     let spot_leg_gross_pnl_quote = match cfg.direction
     {
-        BasisDirection::CashAndCarry =>
-        {
-            (cfg.terminal_spot_price - spot_fill.vwap) * cfg.base_size
-        },
+        BasisDirection::CashAndCarry => (cfg.terminal_spot_price - spot_fill.vwap) * cfg.base_size,
         BasisDirection::ReverseCashAndCarry =>
         {
             (spot_fill.vwap - cfg.terminal_spot_price) * cfg.base_size
@@ -264,10 +261,7 @@ pub fn analyze_basis_scenario(
     };
     let perp_leg_gross_pnl_quote = match cfg.direction
     {
-        BasisDirection::CashAndCarry =>
-        {
-            (perp_fill.vwap - cfg.terminal_perp_price) * cfg.base_size
-        },
+        BasisDirection::CashAndCarry => (perp_fill.vwap - cfg.terminal_perp_price) * cfg.base_size,
         BasisDirection::ReverseCashAndCarry =>
         {
             (cfg.terminal_perp_price - perp_fill.vwap) * cfg.base_size
@@ -295,9 +289,7 @@ pub fn analyze_basis_scenario(
     {
         0.0
     };
-    let net_pnl_quote = spot_leg_gross_pnl_quote
-        + perp_leg_gross_pnl_quote
-        + funding_pnl_quote
+    let net_pnl_quote = spot_leg_gross_pnl_quote + perp_leg_gross_pnl_quote + funding_pnl_quote
         - entry_fees_quote
         - exit_fees_quote
         - borrow_cost_quote
@@ -408,7 +400,8 @@ mod tests {
     fn cash_and_carry_values_explicit_convergence_scenario() {
         let spot = book(990, 99.0, 100.0);
         let perp = book(995, 103.0, 104.0);
-        let report = analyze_basis_scenario(&spot, &perp, &cfg(BasisDirection::CashAndCarry)).unwrap();
+        let report =
+            analyze_basis_scenario(&spot, &perp, &cfg(BasisDirection::CashAndCarry)).unwrap();
         assert!((report.entry_basis_bps - 300.0).abs() < 1e-4);
         assert_eq!(report.terminal_basis_bps, 0.0);
         assert_eq!(report.timestamp_skew_ms, 5);
@@ -423,7 +416,8 @@ mod tests {
         let spot = book(990, 100.0, 101.0);
         let perp = book(995, 97.0, 98.0);
         let report =
-            analyze_basis_scenario(&spot, &perp, &cfg(BasisDirection::ReverseCashAndCarry)).unwrap();
+            analyze_basis_scenario(&spot, &perp, &cfg(BasisDirection::ReverseCashAndCarry))
+                .unwrap();
         assert!(report.entry_basis_bps < 0.0);
         assert!(report.funding_pnl_quote < 0.0);
         assert!(report.borrow_cost_quote > 0.0);
@@ -450,7 +444,8 @@ mod tests {
             vec![Level::new(100.0, 0.1)],
         );
         let perp = book(995, 103.0, 104.0);
-        let report = analyze_basis_scenario(&spot, &perp, &cfg(BasisDirection::CashAndCarry)).unwrap();
+        let report =
+            analyze_basis_scenario(&spot, &perp, &cfg(BasisDirection::CashAndCarry)).unwrap();
         assert!(!report.scenario_positive);
         assert!(
             report
@@ -463,9 +458,14 @@ mod tests {
     fn stale_or_skewed_entry_books_block_positive_scenario() {
         let spot = book(700, 99.0, 100.0);
         let perp = book(995, 103.0, 104.0);
-        let report = analyze_basis_scenario(&spot, &perp, &cfg(BasisDirection::CashAndCarry)).unwrap();
+        let report =
+            analyze_basis_scenario(&spot, &perp, &cfg(BasisDirection::CashAndCarry)).unwrap();
         assert!(!report.scenario_positive);
-        assert!(report.constraints.contains(&BasisConstraint::SpotQuoteStale));
+        assert!(
+            report
+                .constraints
+                .contains(&BasisConstraint::SpotQuoteStale)
+        );
         assert!(
             report
                 .constraints
@@ -477,7 +477,8 @@ mod tests {
     fn future_entry_book_blocks_positive_scenario() {
         let spot = book(1_001, 99.0, 100.0);
         let perp = book(995, 103.0, 104.0);
-        let report = analyze_basis_scenario(&spot, &perp, &cfg(BasisDirection::CashAndCarry)).unwrap();
+        let report =
+            analyze_basis_scenario(&spot, &perp, &cfg(BasisDirection::CashAndCarry)).unwrap();
         assert!(!report.scenario_positive);
         assert!(
             report
