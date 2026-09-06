@@ -24,11 +24,16 @@ pub enum FundingBias {
 
 impl FundingBias {
     pub fn from_rate(rate: f32) -> Self {
-        if rate > 0.0 {
+        if rate > 0.0
+        {
             Self::LongsPayShorts
-        } else if rate < 0.0 {
+        }
+        else if rate < 0.0
+        {
             Self::ShortsPayLongs
-        } else {
+        }
+        else
+        {
             Self::Neutral
         }
     }
@@ -112,9 +117,12 @@ pub fn basis_bps(derivative_price: f32, reference_price: f32) -> Option<f32> {
 
 /// Funding rate for one interval, expressed in basis points.
 pub fn funding_interval_bps(funding_rate: f32) -> f32 {
-    if funding_rate.is_finite() {
+    if funding_rate.is_finite()
+    {
         funding_rate * 10_000.0
-    } else {
+    }
+    else
+    {
         0.0
     }
 }
@@ -127,9 +135,7 @@ pub fn funding_interval_bps(funding_rate: f32) -> f32 {
 ///
 /// Returns `None` for a non-positive/non-finite interval or non-finite rate.
 pub fn annualized_funding_pct(funding_rate: f32, interval_hours: f32) -> Option<f32> {
-    if !funding_rate.is_finite()
-        || !interval_hours.is_finite()
-        || interval_hours <= 0.0
+    if !funding_rate.is_finite() || !interval_hours.is_finite() || interval_hours <= 0.0
     {
         return None;
     }
@@ -142,11 +148,13 @@ pub fn annualized_funding_pct(funding_rate: f32, interval_hours: f32) -> Option<
 /// negative funding means shorts pay longs. `notional` is treated as an
 /// absolute amount, so callers cannot accidentally invert the sign twice.
 pub fn funding_payment(notional: f32, funding_rate: f32, side: PerpSide) -> f32 {
-    if !notional.is_finite() || !funding_rate.is_finite() {
+    if !notional.is_finite() || !funding_rate.is_finite()
+    {
         return 0.0;
     }
     let payment_to_short = notional.abs() * funding_rate;
-    match side {
+    match side
+    {
         PerpSide::Long => -payment_to_short,
         PerpSide::Short => payment_to_short,
     }
@@ -158,7 +166,8 @@ pub fn funding_payment(notional: f32, funding_rate: f32, side: PerpSide) -> f32 
 /// strictly positive, because a percentage change would be undefined or not
 /// economically interpretable.
 pub fn open_interest_change(previous: f32, current: f32) -> Option<OpenInterestChange> {
-    if !previous.is_finite() || !current.is_finite() || previous <= 0.0 {
+    if !previous.is_finite() || !current.is_finite() || previous <= 0.0
+    {
         return None;
     }
     let absolute = current - previous;
@@ -174,20 +183,29 @@ pub fn open_interest_change(previous: f32, current: f32) -> Option<OpenInterestC
 /// negative values mean long liquidations dominate. Invalid/negative inputs are
 /// clamped to zero because liquidation amounts cannot be negative quantities.
 pub fn liquidation_imbalance(long_liquidations: f32, short_liquidations: f32) -> f32 {
-    let long = if long_liquidations.is_finite() {
+    let long = if long_liquidations.is_finite()
+    {
         long_liquidations.max(0.0)
-    } else {
+    }
+    else
+    {
         0.0
     };
-    let short = if short_liquidations.is_finite() {
+    let short = if short_liquidations.is_finite()
+    {
         short_liquidations.max(0.0)
-    } else {
+    }
+    else
+    {
         0.0
     };
     let total = long + short;
-    if total <= f32::EPSILON {
+    if total <= f32::EPSILON
+    {
         0.0
-    } else {
+    }
+    else
+    {
         ((short - long) / total).clamp(-1.0, 1.0)
     }
 }
@@ -205,9 +223,8 @@ pub fn analyze(
     let mark_index_basis_bps = basis_bps(current.mark_price, current.index_price).unwrap_or(0.0);
     let annualized_funding_pct =
         annualized_funding_pct(current.funding_rate, current.funding_interval_hours).unwrap_or(0.0);
-    let open_interest_change = previous.and_then(|prev| {
-        open_interest_change(prev.open_interest, current.open_interest)
-    });
+    let open_interest_change =
+        previous.and_then(|prev| open_interest_change(prev.open_interest, current.open_interest));
 
     DerivativesReport {
         symbol: current.symbol.clone(),
