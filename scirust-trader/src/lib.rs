@@ -14,7 +14,8 @@
 //!                    ├─► DCA planning
 //!                    ├─► bounded Grid planning
 //!                    ├─► cross-venue arbitrage analysis
-//!                    └─► spot/perp basis scenario analysis
+//!                    ├─► spot/perp basis scenario analysis
+//!                    └─► funding-carry stress scenarios
 //!  derivatives ─► funding / basis / OI / liquidations ─► strategy / scanner
 //!             ├─► rolling history / price-OI regimes
 //!             └─► divergences / liquidation clusters
@@ -47,6 +48,7 @@ pub mod derivatives;
 pub mod derivatives_context;
 pub mod derivatives_history;
 pub mod execution;
+pub mod funding_carry;
 pub mod grid;
 pub mod indicators;
 pub mod market;
