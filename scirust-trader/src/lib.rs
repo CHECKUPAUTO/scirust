@@ -12,7 +12,8 @@
 //!                                   ├─► strategy ─► backtest ─► metrics ─► scanner ─► proof
 //!  orderbook ─► orders ─► portfolio ┘         └─► execution / marketmaking / microstructure
 //!                    ├─► DCA planning
-//!                    └─► bounded Grid planning
+//!                    ├─► bounded Grid planning
+//!                    └─► cross-venue arbitrage analysis
 //!  derivatives ─► funding / basis / OI / liquidations ─► strategy / scanner
 //!             ├─► rolling history / price-OI regimes
 //!             └─► divergences / liquidation clusters
@@ -33,6 +34,7 @@
 //!    third-party replay/audit.
 
 pub mod agent;
+pub mod arbitrage;
 pub mod backtest;
 pub mod certify;
 pub mod chart;
