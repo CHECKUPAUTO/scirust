@@ -38,8 +38,8 @@ pub struct CrossVenueConfig {
     pub base_asset: String,
     pub common_quote: String,
     pub base_size: f32,
-    /// Minimum net return required after all explicit costs, in basis points of
-    /// the buy-side acquisition cost.
+    /// Minimum strictly-exceeded net return required after all explicit costs,
+    /// in basis points of the buy-side acquisition cost. Must be non-negative.
     pub min_net_profit_bps: f32,
     /// Evaluation timestamp used for staleness checks.
     pub now_ts_ms: i64,
@@ -111,30 +111,41 @@ pub enum ArbitrageError {
     InvalidSellAdditionalCost,
 }
 
+fn side_specific_error(buy: bool, buy_error: ArbitrageError, sell_error: ArbitrageError) -> ArbitrageError {
+    if buy
+    {
+        buy_error
+    }
+    else
+    {
+        sell_error
+    }
+}
+
 fn validate_venue(venue: &ArbitrageVenue, buy: bool) -> Result<(), ArbitrageError> {
     if !venue.quote_to_common.is_finite() || venue.quote_to_common <= 0.0
     {
-        return Err(if buy {
-            ArbitrageError::InvalidBuyConversion
-        } else {
-            ArbitrageError::InvalidSellConversion
-        });
+        return Err(side_specific_error(
+            buy,
+            ArbitrageError::InvalidBuyConversion,
+            ArbitrageError::InvalidSellConversion,
+        ));
     }
     if !venue.taker_fee_bps.is_finite() || venue.taker_fee_bps < 0.0
     {
-        return Err(if buy {
-            ArbitrageError::InvalidBuyFee
-        } else {
-            ArbitrageError::InvalidSellFee
-        });
+        return Err(side_specific_error(
+            buy,
+            ArbitrageError::InvalidBuyFee,
+            ArbitrageError::InvalidSellFee,
+        ));
     }
     if !venue.additional_cost_common.is_finite() || venue.additional_cost_common < 0.0
     {
-        return Err(if buy {
-            ArbitrageError::InvalidBuyAdditionalCost
-        } else {
-            ArbitrageError::InvalidSellAdditionalCost
-        });
+        return Err(side_specific_error(
+            buy,
+            ArbitrageError::InvalidBuyAdditionalCost,
+            ArbitrageError::InvalidSellAdditionalCost,
+        ));
     }
     Ok(())
 }
@@ -170,7 +181,7 @@ pub fn analyze_cross_venue(
     {
         return Err(ArbitrageError::InvalidBaseSize);
     }
-    if !cfg.min_net_profit_bps.is_finite()
+    if !cfg.min_net_profit_bps.is_finite() || cfg.min_net_profit_bps < 0.0
     {
         return Err(ArbitrageError::InvalidProfitThreshold);
     }
@@ -253,7 +264,7 @@ pub fn analyze_cross_venue(
         0.0
     };
 
-    if net_profit_bps < cfg.min_net_profit_bps
+    if net_profit_bps <= cfg.min_net_profit_bps
     {
         constraints.push(ArbitrageConstraint::BelowNetProfitThreshold);
     }
@@ -433,6 +444,20 @@ mod tests {
     }
 
     #[test]
+    fn explicit_fixed_cost_can_erase_a_gross_spread() {
+        let mut buy = venue("A", "USD", 990, &[(99.0, 10.0)], &[(100.0, 10.0)]);
+        let sell = venue("B", "USD", 995, &[(103.0, 10.0)], &[(104.0, 10.0)]);
+        buy.additional_cost_common = 5.0;
+        let report = analyze_cross_venue(&buy, &sell, &cfg(1.0)).unwrap();
+        assert!(report.gross_spread_bps > 0.0);
+        assert!(report.net_profit_common < 0.0);
+        assert!(!report.market_edge_positive);
+        assert!(report
+            .constraints
+            .contains(&ArbitrageConstraint::BelowNetProfitThreshold));
+    }
+
+    #[test]
     fn stale_or_skewed_quotes_are_never_marked_positive() {
         let buy = venue("A", "USD", 700, &[(99.0, 10.0)], &[(100.0, 10.0)]);
         let sell = venue("B", "USD", 995, &[(103.0, 10.0)], &[(104.0, 10.0)]);
@@ -459,6 +484,18 @@ mod tests {
         assert!(report
             .constraints
             .contains(&ArbitrageConstraint::SellInventoryUnverified));
+    }
+
+    #[test]
+    fn negative_profit_threshold_is_rejected() {
+        let buy = venue("A", "USD", 990, &[(99.0, 10.0)], &[(100.0, 10.0)]);
+        let sell = venue("B", "USD", 995, &[(103.0, 10.0)], &[(104.0, 10.0)]);
+        let mut config = cfg(1.0);
+        config.min_net_profit_bps = -1.0;
+        assert_eq!(
+            analyze_cross_venue(&buy, &sell, &config).unwrap_err(),
+            ArbitrageError::InvalidProfitThreshold
+        );
     }
 
     #[test]
