@@ -21,6 +21,7 @@
 //!  venue events ─► normalized contracts ─► lifecycle ─► replay / reconciliation
 //!                                      ├─► latency / queue / back-pressure models
 //!                                      └─► multi-leg imbalance / recovery plans
+//!  indicators ─► core catalogue + adaptive / OHLC-volatility / flow gaps
 //!  derivatives ─► funding / basis / OI / liquidations ─► strategy / scanner
 //!             ├─► rolling history / price-OI regimes
 //!             └─► divergences / liquidation clusters
@@ -40,6 +41,7 @@
 //! 4. **Every decision is sealed** — proofs carry SHA-256 manifests for
 //!    third-party replay/audit.
 
+pub mod advanced_indicators;
 pub mod agent;
 pub mod arbitrage;
 pub mod backtest;
