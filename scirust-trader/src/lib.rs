@@ -16,7 +16,8 @@
 //!                    ├─► cross-venue arbitrage analysis
 //!                    ├─► spot/perp basis scenario analysis
 //!                    ├─► funding-carry stress scenarios
-//!                    └─► cross-exchange market-making analysis
+//!                    ├─► cross-exchange market-making analysis
+//!                    └─► cost-aware basket rebalancing
 //!  derivatives ─► funding / basis / OI / liquidations ─► strategy / scanner
 //!             ├─► rolling history / price-OI regimes
 //!             └─► divergences / liquidation clusters
@@ -40,6 +41,7 @@ pub mod agent;
 pub mod arbitrage;
 pub mod backtest;
 pub mod basis;
+pub mod basket_rebalance;
 pub mod certify;
 pub mod chart;
 pub mod cli;
