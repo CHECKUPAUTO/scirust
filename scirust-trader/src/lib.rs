@@ -23,7 +23,8 @@
 //!                                      └─► multi-leg imbalance / recovery plans
 //!  indicators ─► core catalogue + adaptive / OHLC-volatility / flow gaps
 //!  ML data ─► temporal leakage checks ─► linear/tree/forest/boosting/sequence baselines
-//!                  └─► existing deterministic MLP / SciRust RL components
+//!                  ├─► existing deterministic MLP
+//!                  └─► SciRust RL Env ─► train / frozen holdout separation
 //!  derivatives ─► funding / basis / OI / liquidations ─► strategy / scanner
 //!             ├─► rolling history / price-OI regimes
 //!             └─► divergences / liquidation clusters
@@ -84,6 +85,7 @@ pub mod proof;
 pub mod reconciliation;
 pub mod regime;
 pub mod risk;
+pub mod rl_market;
 pub mod robustness;
 pub mod runtime_replay;
 pub mod scanner;
